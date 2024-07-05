@@ -24,7 +24,13 @@ impl Display for Func {
             Self::Sec => write!(f, "sec"),
             Self::Csc => write!(f, "csc"),
             Self::Cot => write!(f, "cot"),
-            Self::Log(base) => write!(f, "log_{base}"),
+            Self::Log(n) => if n.is_integer() {
+                let str = n.to_string();
+                let sliced = &str[..str.len() - 1];
+                write!(f, "log_{sliced}")
+            } else {
+                write!(f, "log_{n}")
+            },
             Self::Ln => write!(f, "ln"),
         }
     }

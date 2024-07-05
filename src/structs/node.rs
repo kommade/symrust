@@ -109,8 +109,8 @@ impl Display for Node {
                                 format!("{left} ^ {right}")
                             }
                             Op::Add | Op::Sub => {
-                                if left.starts_with('(') && left.ends_with(')') {
-                                    left = left[1..left.len() - 1].to_string();
+                                if let Some(stripped) = left.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+                                    left = stripped.to_string();
                                 }
                                 if left == "0" && *op == Op::Sub {
                                     if op_node.right.borrow().is_operator() {
@@ -119,8 +119,8 @@ impl Display for Node {
                                         format!("-{right}")
                                     }
                                 } else {
-                                    if right.starts_with('(') && right.ends_with(')') {
-                                        right = right[1..right.len() - 1].to_string();
+                                    if let Some(stripped) = right.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+                                        right = stripped.to_string();
                                     }
                                     format!("({left} {op} {right})")
                                 }
@@ -128,18 +128,18 @@ impl Display for Node {
                             Op::ImplicitMul => {
                                 format!("{left} {right}")
                             }
+                            Op::Div if op_node.right.borrow().is_op_node() => {
+                                if let Some(stripped) = right.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+                                    right = stripped.to_string();
+                                }
+                                format!("{left} / ({right})")
+                            }
                             _ => {
                                 format!("{left} {op} {right}")
                             }
                         }
                     }
-                    Token::Function(func) => {
-                        if let Func::Log(base) = func {
-                            format!("{op}_{base}({right})")
-                        } else {
-                            format!("{op}({right})")
-                        }
-                    },
+                    Token::Function(_) => format!("{op}({right})"),
                     _ => format!("{left}{op}{right}")
                 };
                 if unnecessary_brackets(&result) {
@@ -317,11 +317,11 @@ impl Node {
     pub(crate) const fn is_empty(&self) -> bool {
         matches!(&self.value, NodeValue::Empty)
     }
-    pub(crate) const fn is_unsimplifiable_fn(&self) -> bool {
+    pub(crate) const fn is_log(&self) -> bool {
         match &self.value {
             NodeValue::Operator(op_node) => {
                 if let Token::Function(func) = &op_node.token {
-                    !matches!(func, Func::Log(_))
+                    matches!(func, Func::Log(_))
                 } else {
                     false
                 }
@@ -329,7 +329,18 @@ impl Node {
             _ => false,
         }
     }
-    
+    pub(crate) const fn is_fn(&self) -> bool {
+        match &self.value {
+            NodeValue::Operator(op_node) => {
+                if let Token::Function(_) = &op_node.token {
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
     pub(crate) fn is_one(&self) -> bool {
         match &self.value {
             NodeValue::Operand(token) => match token {
@@ -775,7 +786,24 @@ impl NodeRcFunctions for Rc<RefCell<Node>> {
     fn simplify(self) -> Self {
         let node = self.borrow();
         match node {
-            t if t.is_empty() || t.is_operand() || t.is_unsimplifiable_fn() => self.clone(),
+            t if t.is_log() => {
+                let op_node = match &t.value {
+                    NodeValue::Operator(op_node) => op_node,
+                    _ => unreachable!()
+                };
+                let arg = op_node.right.clone().simplify();
+                let base = match &op_node.token {
+                    Token::Function(Func::Log(base)) => base.clone(),
+                    _ => unreachable!("{}", t)
+                };
+                if let NodeValue::Operator(inner_op_node) = &arg.borrow().value {
+                    if let Token::Operator(Op::Pow) = inner_op_node.token {
+                        return inner_op_node.right.clone().mul(Node::from_function(Func::Log(base), inner_op_node.left.clone()))
+                    }
+                }
+                return Node::from_function(Func::Log(base), arg);
+            },
+            t if t.is_empty() || t.is_operand() || t.is_fn() => self.clone(),
             t if t.is_op_node() => {
                 let op_node = match &t.value {
                     NodeValue::Operator(op_node) => op_node,

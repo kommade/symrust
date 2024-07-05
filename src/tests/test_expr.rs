@@ -4,8 +4,8 @@ use crate::structs::expr::Expr;
 
 #[test]
 fn create_expr() {
-    let expr = create_expr!("2x^2 + 2*x + 2");
-    assert_eq!(expr.to_string(), "2 x ^ 2 + 2 x + 2");
+    let expr = create_expr!("log_2(x)");
+    assert_eq!(expr.to_string(), "log_2(x)");
 }
 
 #[test]

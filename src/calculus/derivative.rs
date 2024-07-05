@@ -116,7 +116,6 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
         println!("- Applying chain rule to: {borrowed}");
         if let NodeValue::Operator(op_node) = &borrowed.value {
             if let Token::Function(f) = &op_node.token {
-                let empty = Node::empty();
                 let result = match f {
                     Func::Sin => {
                         let arg = op_node.right.clone();
