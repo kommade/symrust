@@ -12,6 +12,12 @@ fn create_expr() {
 }
 
 #[test]
+fn fail_unexpected_end() {
+    let expr = Expr::new("2 *".to_string(), None);
+    assert!(expr.is_err());
+}
+
+#[test]
 fn fail_mismatched_parentheses() {
     let expr = Expr::new("2 * (x + 2".to_string(), None);
     assert!(expr.is_err());
@@ -31,7 +37,7 @@ fn fail_division_by_zero() {
 
 #[test]
 fn fail_invalid_expression() {
-    let expr = Expr::new("2x +".to_string(), None);
+    let expr = Expr::new("+ 2x".to_string(), None);
     assert!(expr.is_err());
 }
 

@@ -8,6 +8,7 @@ use crate::parse::{lexer::Lexer, parser::Parser};
 
 use super::node::{MulType, NodeRcFunctions, NodeRcOperations};
 
+/// A struct representing a mathematical expression.
 #[derive(Clone, Debug)]
 pub struct Expr {
     pub(crate) tree: Rc<RefCell<Node>>,
@@ -26,6 +27,8 @@ impl Display for Expr {
 }
 
 impl Expr {
+    /// Create a new expression from a string. Takes an optional second argument for independent variable.
+    /// Prefer using the macro [`create_expr!`][crate::create_expr] for a more concise syntax.
     pub fn new(str: String, indp_var: Option<char>) -> Result<Self, Box<dyn Error>> {
         let mut lexer = Lexer::new(str, indp_var);
         let lexed = lexer.lex()?;
@@ -36,21 +39,42 @@ impl Expr {
     pub(crate) fn from_node(node: Rc<RefCell<Node>>) -> Self {
         Self { tree: node }
     }
-    pub fn is_zero(&self) -> bool {
+    /// Returns true if the expression is zero, false otherwise.
+    /// # Examples
+    /// ```
+    /// use rust_calculus::{create_expr, structs::expr::Expr};
+    /// let expr = create_expr!("0");
+    /// assert!(expr.is_zero());
+    /// let expr = create_expr!("2x");
+    /// assert!(!expr.is_zero());
+    /// ```
+    #[must_use] pub fn is_zero(&self) -> bool {
         self.tree.borrow().is_zero()
     }
-    pub fn parse(input: String, indp: Option<char>) -> Result<Self, Box<dyn Error>> {
+    pub(crate) fn parse(input: String, indp: Option<char>) -> Result<Self, Box<dyn Error>> {
         let mut lexer = Lexer::new(input, indp);
         let lexed = lexer.lex()?;
         let mut parser = Parser::new(lexed);
         let tree = parser.parse()?;
         Ok(Self { tree })
     }
-    pub fn simplify(&self) -> Self {
+    /// Attempt to simplify the expression. May not always simplify the expression to the simplest form.
+    /// # Examples
+    /// ```
+    /// use rust_calculus::{create_expr, structs::expr::Expr};
+    /// let expr = create_expr!("2x^2 + 0");
+    /// assert_eq!(expr.simplify().to_string(), "2 x ^ 2");
+    /// let expr = create_expr!("2x^2 * 0");
+    /// assert!(expr.simplify().is_zero());
+    /// let expr = create_expr!("2x^2 / 1");
+    /// assert_eq!(expr.simplify().to_string(), "2 x ^ 2");
+    /// ```
+    #[must_use] pub fn simplify(&self) -> Self {
         let node = self.tree.clone().simplify();
         Self { tree: node }
     }
-    pub fn to_latex(&self) -> String {
+    /// Returns the LaTeX representation of the expression.
+    #[must_use] pub fn to_latex(&self) -> String {
         self.tree.borrow().to_latex()
     }
 }

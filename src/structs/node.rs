@@ -247,7 +247,6 @@ impl Node {
         Rc::new(RefCell::new(self))
     }
     /// Creates a new node from a operand token.
-    /// It is recommended to use `from_number` or `from_constant` instead.
     pub(crate) fn operand(token: Token) -> Self {
         let (has_indp, has_const, has_func) = match token {
             Token::Indp(_)=> (true, false, false),

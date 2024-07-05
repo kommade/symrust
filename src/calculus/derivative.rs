@@ -16,6 +16,15 @@ trait DerivativeInternal {
 }
 
 impl Derivative for Expr {
+    /// Find the derivative of the expression. Attempts to simplify the expression before and after finding the derivative, and prints the steps.
+    /// # Examples
+    /// ```
+    /// use rust_calculus::{create_expr, structs::expr::Expr, calculus::derivative::Derivative};
+    /// let expr = create_expr!("2x^2");
+    /// let derivative = expr.derive();
+    /// assert_eq!(derivative.to_string(), "4 x");
+    /// ```
+    /// The function will never panic or return an error as all valid mathematical expressions should have a derivative.
     fn derive(self) -> Self {
         println!("Input: {self}");
         let simplified = self.simplify();

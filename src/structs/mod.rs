@@ -1,2 +1,2 @@
-pub(crate) mod expr;
+pub mod expr;
 pub(crate) mod node;

@@ -1,1 +1,1 @@
-pub(crate) mod derivative;
+pub mod derivative;

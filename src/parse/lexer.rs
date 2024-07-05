@@ -183,8 +183,10 @@ impl Error for LexError {
 
 impl Display for LexError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        #[allow(deprecated)]
-        self.description().fmt(f)
+        match self {
+            Self::UnexpectedEOF(pos) => write!(f, "Unexpected end of input string at position {pos}"),
+            Self::ParseError(msg) => write!(f, "{msg}"),
+        }
     }
 }
 
@@ -213,14 +215,14 @@ impl Lexer {
             self.pos += 1;
             Ok(c)
         } else {
-            Err(LexError::UnexpectedEOF(self.input.clone()))
+            Err(LexError::UnexpectedEOF(self.pos.to_string()))
         }
     }
 
     #[allow(clippy::too_many_lines)]
     fn next(&mut self) -> Result<Token, LexError> {
         if self.pos > self.size {
-            return Err(LexError::UnexpectedEOF(self.input.clone()));
+            return Err(LexError::UnexpectedEOF(self.pos.to_string()));
         }
         let c = self.unwrap_next()?;
         match c {
