@@ -50,6 +50,9 @@ impl Expr {
         let node = self.tree.clone().simplify();
         Self { tree: node }
     }
+    pub fn to_latex(&self) -> String {
+        self.tree.borrow().to_latex()
+    }
 }
 
 impl Add for Expr {

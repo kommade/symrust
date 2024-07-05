@@ -2,6 +2,7 @@ pub mod structs;
 pub mod calculus;
 mod parse;
 mod utils;
+#[cfg(test)]
 mod tests;
 
 /// Macro to create an expression from a string

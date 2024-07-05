@@ -86,6 +86,92 @@ impl Node {
     pub fn one() -> Rc<RefCell<Self>> {
         unsafe { ONE.clone() }
     }
+    pub(crate) fn to_latex(&self) -> String {
+        match &self.value {
+            NodeValue::Operand(token) => match token {
+                Token::Number(num) => format!("{num}"),
+                Token::Float(num) => if num.is_zero() {
+                    "0".to_string()
+                } else if num.is_integer() {
+                    let str = num.to_string();
+                    #[allow(clippy::unwrap_used)]
+                    let sliced = str.strip_suffix('.').unwrap();
+                    sliced.to_string()
+                } else {
+                    format!("{num}")
+                },
+                Token::Constant(constant) => match constant {
+                    Const::Pi => String::from(r"\pi"),
+                    Const::E => String::from(r"e"),
+                },
+                Token::Var(var) => format!("{var}"),
+                Token::Indp(indp) => format!("{indp}"),
+                _ => panic!("Invalid token for operand: {token}"),
+            },
+            NodeValue::Operator(op_node) => {
+                let mut left_str = op_node.left.borrow().to_latex();
+                let mut right_str = op_node.right.borrow().to_latex();
+                let op_str = format!("{}", op_node.token);
+                let mut result = match &op_node.token {
+                    Token::Operator(op) => {
+                        match op {
+                            Op::Pow => {
+                                format!("{{{left_str}}}^{{{right_str}}}")
+                            }
+                            Op::Add | Op::Sub => {
+                                if let Some(stripped) = left_str.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+                                    left_str = stripped.to_string();
+                                }
+                                if left_str == "0" && *op == Op::Sub {
+                                    if op_node.right.borrow().is_operator() {
+                                        format!("-({right_str})")
+                                    } else {
+                                        format!("-{right_str}")
+                                    }
+                                } else {
+                                    if let Some(stripped) = right_str.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+                                        right_str = stripped.to_string();
+                                    }
+                                    format!("({left_str} {op} {right_str})")
+                                }
+                            }
+                            Op::ImplicitMul => {
+                                format!("{left_str} {right_str}")
+                            }
+                            Op::Mul => {
+                                format!(r"{left_str} \times {right_str}")
+                            }
+                            Op::Div => {
+                                format!(r"\frac{{{left_str}}}{{{right_str}}}")
+                            }
+                        }
+                    }
+                    Token::Function(func) => match func {
+                        Func::Log(base) => {
+                            if base.is_integer() {
+                                let str = base.to_string();
+                                #[allow(clippy::unwrap_used)]
+                                let sliced = str.strip_suffix('.').unwrap();
+                                format!(r"\log_{{{sliced}}}({right_str})")
+                            } else {
+                                format!(r"\log_{{{base}}}({right_str})")
+                            }
+                        },
+                        _ => format!(r"\{op_str}({right_str})"),
+                    },
+                    _ => unreachable!()
+                };
+                if unnecessary_brackets(&result) {
+                    if let Some(stripped) = result.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+                        result = stripped.to_string();
+                    }
+                }
+                result
+            },
+            NodeValue::Empty => String::new(),
+        }
+    
+    }
 }
 
 impl Display for Node {
@@ -93,57 +179,61 @@ impl Display for Node {
         match self.value {
             NodeValue::Operand(ref token) => write!(f, "{token}"),
             NodeValue::Operator(ref op_node) => {
-                let mut left = format!("{}", op_node.left.borrow());
-                let mut right = format!("{}", op_node.right.borrow());
-                let op = format!("{}", op_node.token);
+                let left = op_node.left.borrow();
+                let right = op_node.right.borrow();
+                let mut left_str = format!("{left}");
+                let mut right_str = format!("{right}");
+                let op_str = format!("{}", op_node.token);
                 let mut result = match &op_node.token {
                     Token::Operator(op) => {
                         match op {
                             Op::Pow => {
-                                if op_node.left.borrow().is_operator() {
-                                    left = format!("({left})");
+                                if left.is_operator() {
+                                    left_str = format!("({left_str})");
                                 }
-                                if op_node.right.borrow().is_operator() {
-                                    right = format!("({right})");
+                                if right.is_operator() {
+                                    right_str = format!("({right_str})");
                                 }
-                                format!("{left} ^ {right}")
+                                format!("{left_str} ^ {right_str}")
                             }
                             Op::Add | Op::Sub => {
-                                if let Some(stripped) = left.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
-                                    left = stripped.to_string();
+                                if let Some(stripped) = left_str.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+                                    left_str = stripped.to_string();
                                 }
-                                if left == "0" && *op == Op::Sub {
-                                    if op_node.right.borrow().is_operator() {
-                                        format!("-({right})")
+                                if left_str == "0" && *op == Op::Sub {
+                                    if right.is_operator() {
+                                        format!("-({right_str})")
                                     } else {
-                                        format!("-{right}")
+                                        format!("-{right_str}")
                                     }
                                 } else {
-                                    if let Some(stripped) = right.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
-                                        right = stripped.to_string();
+                                    if let Some(stripped) = right_str.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+                                        right_str = stripped.to_string();
                                     }
-                                    format!("({left} {op} {right})")
+                                    format!("({left_str} {op} {right_str})")
                                 }
                             }
                             Op::ImplicitMul => {
-                                format!("{left} {right}")
+                                format!("{left_str} {right_str}")
                             }
-                            Op::Div if op_node.right.borrow().is_op_node() => {
-                                if let Some(stripped) = right.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
-                                    right = stripped.to_string();
+                            Op::Div if right.is_op_node() && !right.is_fn() => {
+                                if let Some(stripped) = right_str.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+                                    right_str = stripped.to_string();
                                 }
-                                format!("{left} / ({right})")
+                                format!("{left_str} / ({right_str})")
                             }
                             _ => {
-                                format!("{left} {op} {right}")
+                                format!("{left_str} {op} {right_str}")
                             }
                         }
                     }
-                    Token::Function(_) => format!("{op}({right})"),
-                    _ => format!("{left}{op}{right}")
+                    Token::Function(_) => format!("{op_str}({right_str})"),
+                    _ => format!("{left_str}{op_str}{right_str}")
                 };
                 if unnecessary_brackets(&result) {
-                    result = result[1..result.len() - 1].to_string();
+                    if let Some(stripped) = result.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+                        result = stripped.to_string();
+                    }
                 }
                 write!(f, "{result}")
             },
@@ -302,11 +392,7 @@ impl Node {
     }
     pub(crate) const fn is_operator(&self) -> bool {
         if let NodeValue::Operator(op_node) = &self.value {
-            if let Token::Operator(_) = &op_node.token {
-                true
-            } else {
-                false
-            }
+            matches!(op_node.token, Token::Operator(_))
         } else {
             false
         }
@@ -332,11 +418,7 @@ impl Node {
     pub(crate) const fn is_fn(&self) -> bool {
         match &self.value {
             NodeValue::Operator(op_node) => {
-                if let Token::Function(_) = &op_node.token {
-                    true
-                } else {
-                    false
-                }
+                matches!(op_node.token, Token::Function(_))
             }
             _ => false,
         }
@@ -370,8 +452,12 @@ impl Node {
             },
             NodeValue::Operator(op_node) => {
                 if let Token::Operator(op) = &op_node.token {
-                    if *op == Op::Sub && op_node.left.borrow().is_zero() {
-                        return true;
+                    let left = op_node.left.borrow();
+                    let right = op_node.right.borrow();
+                    return match op {
+                        Op::Sub => left.is_zero(),
+                        Op::Div | Op::ImplicitMul | Op::Mul => left.is_neg() ^ right.is_neg(),
+                        _ => false,
                     }
                 }
                 false
@@ -420,7 +506,7 @@ impl Node {
     } 
 }
 
-pub(crate) struct SplitNode {
+pub struct SplitNode {
     pub constant: Rc<RefCell<Node>>,
     pub dependant: Rc<RefCell<Node>>,
     has_divisor: u64
@@ -460,7 +546,6 @@ pub trait NodeRcFunctions {
     fn linearize(self) -> SplitNode;
     fn remove_constants(self) -> Float;
     fn simplify(self) -> Self;
-    fn combine_like_terms(self) -> Self;
 }
 
 impl NodeRcOperations<Self> for Rc<RefCell<Node>> {
@@ -797,11 +882,11 @@ impl NodeRcFunctions for Rc<RefCell<Node>> {
                     _ => unreachable!("{}", t)
                 };
                 if let NodeValue::Operator(inner_op_node) = &arg.borrow().value {
-                    if let Token::Operator(Op::Pow) = inner_op_node.token {
+                    if matches!(inner_op_node.token, Token::Operator(Op::Pow)) {
                         return inner_op_node.right.clone().mul(Node::from_function(Func::Log(base), inner_op_node.left.clone()))
                     }
                 }
-                return Node::from_function(Func::Log(base), arg);
+                Node::from_function(Func::Log(base), arg)
             },
             t if t.is_empty() || t.is_operand() || t.is_fn() => self.clone(),
             t if t.is_op_node() => {
@@ -905,14 +990,5 @@ impl NodeRcFunctions for Rc<RefCell<Node>> {
             },
             _ => unreachable!()
         } 
-    }
-    fn combine_like_terms(self) -> Self {
-        let node = self.borrow_mut();
-        let left = node.get_left();
-        let right = node.get_right();
-        // traverse both sides at the same time, stopping when the operator changes or we reach an operand
-        // but we need to start from the bottom
-        // might not be possible
-        todo!()
     }
 }

@@ -49,11 +49,11 @@ static RANDOM_FLOATS: [f64; 20] = [
 
 #[test]
 fn try_is_integer() {
-    for i in RANDOM_INTEGERS.iter() {
+    for i in &RANDOM_INTEGERS {
         let float = Float::from_i64(FP128, *i);
         assert!(float.is_integer());
     }
-    for f in RANDOM_FLOATS.iter() {
+    for f in &RANDOM_FLOATS {
         let float = Float::from_f64(*f);
         assert!(!float.is_integer());
     }
@@ -87,11 +87,11 @@ fn try_gcd() {
 fn try_is_one() {
     let one = Float::from_i64(FP128, 1);
     assert!(one.is_one());
-    for i in RANDOM_INTEGERS.iter() {
+    for i in &RANDOM_INTEGERS {
         let float = Float::from_i64(FP128, *i);
         assert!(!float.is_one());
     }
-    for f in RANDOM_FLOATS.iter() {
+    for f in &RANDOM_FLOATS {
         let float = Float::from_f64(*f);
         assert!(!float.is_one());
     }

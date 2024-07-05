@@ -26,7 +26,8 @@ impl Display for Func {
             Self::Cot => write!(f, "cot"),
             Self::Log(n) => if n.is_integer() {
                 let str = n.to_string();
-                let sliced = &str[..str.len() - 1];
+                #[allow(clippy::unwrap_used)]
+                let sliced = str.strip_suffix('.').unwrap();
                 write!(f, "log_{sliced}")
             } else {
                 write!(f, "log_{n}")
@@ -127,7 +128,8 @@ impl Display for Token {
                     write!(f, "0")
                 } else if n.is_integer() {
                     let str = n.to_string();
-                    let sliced = &str[..str.len() - 1];
+                    #[allow(clippy::unwrap_used)]
+                    let sliced = str.strip_suffix('.').unwrap();
                     write!(f, "{sliced}")
                 } else {
                     write!(f, "{n}")

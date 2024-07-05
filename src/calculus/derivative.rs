@@ -70,6 +70,7 @@ impl Derivative for Rc<RefCell<Node>> {
             println!("{split}");
             let constant_str = split.constant.borrow().to_string();
             // most scuffed way to get the constant value
+            #[allow(clippy::unwrap_used)]
             let k = split.constant.borrow().evaluate().unwrap().to_i64();
             let result = split.dependant.derive().distribute_constant(k, &MulType::OpMul);
             println!("- Remultiply by {constant_str} to get {}", result.borrow());
@@ -80,7 +81,7 @@ impl Derivative for Rc<RefCell<Node>> {
                 NodeValue::Operator(op_node) => match op_node.token {
                     Token::Operator(Op::Add) => op_node.left.clone().derive().add(op_node.right.clone().derive()),
                     Token::Operator(Op::Sub) => op_node.left.clone().derive().sub(op_node.right.clone().derive()),
-                    Token::Operator(Op::Mul) | Token::Operator(Op::ImplicitMul) => {
+                    Token::Operator(Op::Mul | Op::ImplicitMul) => {
                         drop(borrowed);
                         self.product_rule()
                     },
@@ -123,15 +124,15 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                             Func::Cos, 
                             arg.clone()
                         );
-                        f_prime.impl_mul(arg.derive())
+                        arg.derive().impl_mul(f_prime)
                     }
                     Func::Cos => {
                         let arg = op_node.right.clone();
                         let f_prime = Node::from_function(
                             Func::Sin, 
                             arg.clone()
-                        ).negate();
-                        f_prime.impl_mul(arg.derive())
+                        );
+                        arg.derive().negate().impl_mul(f_prime)
                     }
                     Func::Tan => {
                         let arg = op_node.right.clone();
@@ -139,7 +140,7 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                             Func::Sec, 
                             arg.clone()
                         ).pow(2);
-                        f_prime.impl_mul(arg.derive())
+                        arg.derive().impl_mul(f_prime)
                     }
                     Func::Csc => {
                         let arg = op_node.right.clone();
@@ -151,8 +152,8 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                                 Func::Cot, 
                             arg.clone()
                             )
-                        ).negate();
-                        f_prime.impl_mul(arg.derive())
+                        );
+                        arg.derive().negate().impl_mul(f_prime)
                     }
                     Func::Sec => {
                         let arg = op_node.right.clone();
@@ -163,16 +164,15 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                             Func::Tan, 
                             arg.clone()
                         ));
-                        f_prime.impl_mul(arg.derive())
+                        arg.derive().impl_mul(f_prime)
                     }
                     Func::Cot => {
                         let arg = op_node.right.clone();
                         let f_prime = Node::from_function(
                             Func::Csc, 
                             arg.clone()
-                        ).pow(2)
-                        .negate();
-                        f_prime.impl_mul(arg.derive())
+                        ).pow(2);
+                        arg.derive().negate().impl_mul(f_prime)
                     }
                     Func::Ln => {
                         let arg = op_node.right.clone();

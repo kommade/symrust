@@ -1,11 +1,14 @@
 use crate::create_expr;
 use crate::structs::expr::Expr;
+use super::EXAMPLE_FUNCTIONS;
 
 
 #[test]
 fn create_expr() {
-    let expr = create_expr!("log_2(x)");
-    assert_eq!(expr.to_string(), "log_2(x)");
+    for example in &EXAMPLE_FUNCTIONS {
+        let expr = create_expr!(example.input);
+        assert_eq!(expr.to_latex(), example.latex);
+    }
 }
 
 #[test]

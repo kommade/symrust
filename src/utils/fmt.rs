@@ -14,7 +14,6 @@ pub fn unnecessary_brackets(result: &str) -> bool {
                 return true;
             }
         }
-        
     }
     false
 }

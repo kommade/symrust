@@ -26,8 +26,8 @@ impl Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MismatchedParentheses => write!(f, "Mismatched parentheses"),
-            Self::InvalidExpression(pos) => write!(f, "Invalid expression at position {}", pos),
-            Self::DivisionByZero(pos) => write!(f, "Division by zero at position {}", pos)
+            Self::InvalidExpression(pos) => write!(f, "Invalid expression at position {pos}"),
+            Self::DivisionByZero(pos) => write!(f, "Division by zero at position {pos}")
         }
     }
 }
@@ -101,6 +101,7 @@ impl Parser {
             }
         };
         let mut tree = Vec::with_capacity(output.len());
+        #[allow(clippy::needless_range_loop)]
         for i in 0..output.len() {
             let token = output[i];
             match token {
