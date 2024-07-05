@@ -10,21 +10,21 @@ pub enum MulType {
     OpDiv,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct OpNode {
     pub token: Token,
     pub left: Rc<RefCell<Node>>,
     pub right: Rc<RefCell<Node>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum NodeValue {
     Operand(Token),
     Operator(OpNode),
     Empty
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Node {
     pub(crate) value: NodeValue,
     pub(crate) has_indp: bool,
@@ -100,23 +100,33 @@ impl Display for Node {
                     Token::Operator(op) => {
                         match op {
                             Op::Pow => {
-                                if op_node.left.borrow().is_op_node() {
+                                if op_node.left.borrow().is_operator() {
                                     left = format!("({left})");
                                 }
-                                if op_node.right.borrow().is_op_node() {
+                                if op_node.right.borrow().is_operator() {
                                     right = format!("({right})");
                                 }
                                 format!("{left} ^ {right}")
                             }
                             Op::Add | Op::Sub => {
                                 if left.starts_with('(') && left.ends_with(')') {
-                                    
                                     left = left[1..left.len() - 1].to_string();
                                 }
-                                if right.starts_with('(') && right.ends_with(')') {
-                                    right = right[1..right.len() - 1].to_string();
+                                if left == "0" && *op == Op::Sub {
+                                    if op_node.right.borrow().is_operator() {
+                                        format!("-({right})")
+                                    } else {
+                                        format!("-{right}")
+                                    }
+                                } else {
+                                    if right.starts_with('(') && right.ends_with(')') {
+                                        right = right[1..right.len() - 1].to_string();
+                                    }
+                                    format!("({left} {op} {right})")
                                 }
-                                format!("({left} {op} {right})")
+                            }
+                            Op::ImplicitMul => {
+                                format!("{left} {right}")
                             }
                             _ => {
                                 format!("{left} {op} {right}")
@@ -202,19 +212,20 @@ impl Node {
             drop(left_borrow);
             left
         } else if op == Op::Sub && left_borrow.is_zero() {
-            let neg_one = Self::from_float(Float::one(FP128, true).neg()).wrap();
             match &right_borrow.value {
                 NodeValue::Operand(token) => match token {
                     Token::Number(num) => Self::operand(Token::Number(-num)).wrap(),
                     Token::Float(num) => Self::operand(Token::Float(num.neg())).wrap(),
                     _ => {
+                        drop(left_borrow);
                         drop(right_borrow);
-                        Self::from_operation(Op::Mul, neg_one, right)
+                        Self::operator(Token::from_op(op), left, right).wrap()
                     },
                 },
                 _ => {
+                    drop(left_borrow);
                     drop(right_borrow);
-                    Self::from_operation(Op::Mul, neg_one, right)
+                    Self::operator(Token::from_op(op), left, right).wrap()
                 },
             }
         } else if right_borrow.is_zero() && left_borrow.is_zero() {
@@ -289,6 +300,17 @@ impl Node {
     pub(crate) const fn is_op_node(&self) -> bool {
         matches!(&self.value, NodeValue::Operator(_))
     }
+    pub(crate) const fn is_operator(&self) -> bool {
+        if let NodeValue::Operator(op_node) = &self.value {
+            if let Token::Operator(_) = &op_node.token {
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
     pub(crate) const fn is_operand(&self) -> bool {
         matches!(&self.value, NodeValue::Operand(_))
     }
@@ -322,7 +344,7 @@ impl Node {
         match &self.value {
             NodeValue::Operand(token) => match token {
                 Token::Number(num) => *num == 0,
-                Token::Float(num) => *num == Float::zero(FP128, false),
+                Token::Float(num) => num.is_zero(),
                 _ => false,
             },
             _ => false,
@@ -334,6 +356,14 @@ impl Node {
                 Token::Number(num) => *num < 0,
                 Token::Float(num) => num.get_sign(),
                 _ => false,
+            },
+            NodeValue::Operator(op_node) => {
+                if let Token::Operator(op) = &op_node.token {
+                    if *op == Op::Sub && op_node.left.borrow().is_zero() {
+                        return true;
+                    }
+                }
+                false
             },
             _ => false,
         }
@@ -403,13 +433,17 @@ impl Display for SplitNode {
 // The difference between the functions implemented here and the ones in impl Node is that these functions are not meant to create new Nodes or consume Nodes into other values.
 // They are meant to be used in the context of operations between Nodes, and they return a (reference to a) new Node that is the result of the operation, 
 // where the new Node is likely to contain (a reference to) the original Node
-pub trait NodeRcOperations {
-    type Output;
-    fn add(self, other: Self) -> Self;
-    fn sub(self, other: Self) -> Self;
-    fn mul(self, other: Self) -> Self;
-    fn div(self, other: Self) -> Self;
-    fn pow(self, other: Self) -> Self;
+pub trait NodeRcOperations<T> {
+    fn add(self, other: T) -> Self;
+    fn sub(self, other: T) -> Self;
+    fn mul(self, other: T) -> Self;
+    fn impl_mul(self, other: T) -> Self;
+    fn div(self, other: T) -> Self;
+    fn pow(self, other: T) -> Self;
+    
+}
+
+pub trait NodeRcFunctions {
     fn negate(self) -> Self;
     fn distribute_constant(self, k: i64, mul_type: &MulType) -> Self;
     fn linearize(self) -> SplitNode;
@@ -418,8 +452,7 @@ pub trait NodeRcOperations {
     fn combine_like_terms(self) -> Self;
 }
 
-impl NodeRcOperations for Rc<RefCell<Node>> {
-    type Output = Self;
+impl NodeRcOperations<Self> for Rc<RefCell<Node>> {
     fn add(self, other: Self) -> Self {
         Node::from_operation(Op::Add, self, other)
     }
@@ -429,22 +462,82 @@ impl NodeRcOperations for Rc<RefCell<Node>> {
     fn mul(self, other: Self) -> Self {
         Node::from_operation(Op::Mul, self, other)
     }
+    fn impl_mul(self, other: Self) -> Self {
+        Node::from_operation(Op::ImplicitMul, self, other)
+    }
     fn div(self, other: Self) -> Self {
         Node::from_operation(Op::Div, self, other)
     }
     fn pow(self, other: Self) -> Self {
         Node::from_operation(Op::Pow, self, other)
     }
+}
+
+impl NodeRcOperations<i64> for Rc<RefCell<Node>> {
+    fn add(self, other: i64) -> Self {
+        if other == 0 {
+            self
+        } else if other == 1 {
+            self.add(Node::one())
+        } else {
+            self.add(Node::from_number(other).wrap())
+        }
+    }
+    fn sub(self, other: i64) -> Self {
+        if other == 0 {
+            self
+        } else if other == 1 {
+            self.sub(Node::one())
+        } else {
+            self.sub(Node::from_number(other).wrap())
+        }
+    }
+    fn mul(self, other: i64) -> Self {
+        if other == 0 {
+            Node::zero()
+        } else if other == 1 {
+            self
+        } else {
+            Node::from_number(other).wrap().mul(self)
+        }
+    }
+    fn impl_mul(self, other: i64) -> Self {
+        if other == 0 {
+            Node::zero()
+        } else if other == 1 {
+            self
+        } else {
+            Node::from_number(other).wrap().impl_mul(self)
+        }
+    }
+    fn div(self, other: i64) -> Self {
+        if other == 0 {
+            panic!("Division by zero");
+        }
+        else if other == 1 {
+            self
+        } else {
+            Node::from_number(other).wrap().div(self)
+        }
+    }
+    fn pow(self, other: i64) -> Self {
+        if other == 0 {
+            Node::one()
+        } else if other == 1 {
+            self
+        } else {
+            self.pow(Node::from_number(other).wrap())
+        }
+    }
+}
+
+impl NodeRcFunctions for Rc<RefCell<Node>> {
     fn negate(self) -> Self {
         match &self.borrow().value {
             NodeValue::Operand(token) => match token {
                 Token::Number(num) => Node::from_number(-*num).wrap(),
                 Token::Float(num) => Node::from_float(num.neg()).wrap(),
-                _ => Node::from_operation(
-                    Op::Sub, 
-                    Node::zero(), 
-                    self.clone()
-                ),
+                _ => Node::zero().sub(self.clone()),
             },
             NodeValue::Operator(op_node) => {
                 match &op_node.token {
@@ -456,48 +549,24 @@ impl NodeRcOperations for Rc<RefCell<Node>> {
                                 if left.borrow().is_zero() {
                                     op_node.right.clone()
                                 } else {
-                                    Node::from_operation(
-                                        Op::Sub,
-                                        op_node.right.clone(),
-                                        op_node.left.clone(),
-                                    )
+                                    right.sub(left)
                                 }
                             }
                             Op::Add => {
-                                Node::from_operation(
-                                    Op::Sub,
-                                    Self::negate(left),
-                                    Self::negate(right),
-                                )
+                                left.negate().sub(right)
                             }
                             Op::Mul | Op::ImplicitMul => {
-                                Node::from_operation(
-                                    Op::Mul,
-                                    Self::negate(left),
-                                    right,
-                                )
+                                left.negate().impl_mul(right)
                             }
                             Op::Div => {
-                                Node::from_operation(
-                                    Op::Div,
-                                    Self::negate(left),
-                                    right,
-                                )
+                                left.negate().div(right)
                             }
                             Op::Pow => {
-                                Node::from_operation(
-                                    Op::Sub,
-                                    Node::zero(),
-                                    self.clone(),
-                                )
+                                Node::zero().sub(self.clone())
                             }
                         }
                     },
-                    _ => Node::from_operation(
-                        Op::Sub,
-                        Node::zero(),
-                        self.clone(),
-                    )
+                    _ => Node::zero().sub(self.clone())
                 }
             },
             _ => self.clone(),
@@ -505,7 +574,7 @@ impl NodeRcOperations for Rc<RefCell<Node>> {
     }
     fn distribute_constant(self, k: i64, mul_type: &MulType) -> Self {
         let operator = match mul_type {
-            MulType::OpMul => Op::Mul,
+            MulType::OpMul => Op::ImplicitMul,
             MulType::OpDiv => Op::Div,
         };
         if k == 0 {
@@ -522,36 +591,16 @@ impl NodeRcOperations for Rc<RefCell<Node>> {
                         let right = self.borrow().get_right();
                         match op {
                             Op::Mul | Op::ImplicitMul | Op::Div => {
-                               if left.borrow().is_operand() || !left.borrow().has_indp {
-                                    let new_left = Self::distribute_constant(
-                                        left, 
-                                        k, 
-                                        mul_type
-                                    );
+                               if !right.borrow().has_indp {
                                     Node::from_operation(
                                         op.clone(), 
-                                        new_left, 
-                                        right
-                                    )
-                               } else if right.borrow().is_operand() || !right.borrow().has_indp {
-                                    let new_right = Self::distribute_constant(
-                                        right, 
-                                        k, 
-                                        mul_type
-                                    );
-                                    Node::from_operation(
-                                        op.clone(), 
-                                        left, 
-                                        new_right
+                                        right.distribute_constant(k, mul_type),
+                                        left
                                     )
                                } else {
                                     Node::from_operation(
                                         op.clone(), 
-                                        Self::distribute_constant(
-                                            left, 
-                                            k, 
-                                            mul_type
-                                        ), 
+                                        left.distribute_constant(k, mul_type),
                                         right
                                     )
                                 }
@@ -559,23 +608,15 @@ impl NodeRcOperations for Rc<RefCell<Node>> {
                             Op::Add | Op::Sub => {
                                 Node::from_operation(
                                     op.clone(), 
-                                    Self::distribute_constant(
-                                        left, 
-                                        k, 
-                                        mul_type
-                                    ), 
-                                    Self::distribute_constant(
-                                        right, 
-                                        k, 
-                                        mul_type
-                                    )
+                                    left.distribute_constant(k, mul_type),
+                                    right.distribute_constant(k, mul_type)
                                 )
                             }
                             _ => {
                                 Node::from_operation(
                                     operator, 
-                                    self.clone(), 
-                                    constant
+                                    constant,
+                                    self.clone()
                                 )
                             }
                         }
@@ -583,8 +624,8 @@ impl NodeRcOperations for Rc<RefCell<Node>> {
                     _ => {
                         Node::from_operation(
                             operator, 
-                            self.clone(), 
-                            constant
+                            constant,
+                            self.clone()
                         )
                     },
                 }
@@ -641,6 +682,7 @@ impl NodeRcOperations for Rc<RefCell<Node>> {
                     // is only called on the constant part of a linearized expression
                     // and the only operators that can be present are Mul and Div
                 },
+                Token::Function(_) => Float::one(FP128, true),
                 _ => unreachable!(),
             },
             _ => Float::zero(FP128, false),
@@ -710,6 +752,13 @@ impl NodeRcOperations for Rc<RefCell<Node>> {
                             }
                         }
                     },
+                    Token::Function(_) => {
+                        if node.has_indp {
+                            SplitNode { constant: Node::one(), dependant: self.clone(), has_divisor: 0 } 
+                        } else {
+                            SplitNode { constant: self.clone(), dependant: Node::one(), has_divisor: 0 }
+                        }
+                    }
                     _ => SplitNode { constant: self.clone(), dependant: Node::one(), has_divisor: 0 }
                 }
             }
@@ -738,41 +787,17 @@ impl NodeRcOperations for Rc<RefCell<Node>> {
                 let right_borrow = right.borrow();
                 match (left_borrow.is_empty(), right_borrow.is_empty()) {
                     (false, false) => {
-                        if !left_borrow.has_indp && !right_borrow.has_indp {
-                            let result = self.borrow().evaluate_to_node().wrap();
-                            return result
-                        }
                         if let Token::Operator(op) = op_node.token.clone() {
-                            if op.is_mul() || op == Op::Div {
-                                if left_borrow.is_op_node() || right_borrow.is_op_node() {
-                                    let split = Node::from_operation(op, left.clone(), right.clone()).linearize();
-                                    return split.join()
-                                } else if left_borrow.has_indp || right_borrow.has_indp {
-                                    // trying to implement adding like terms is a bit too much for now
-                                    return Node::from_operation(
-                                        op,
-                                        left.clone(),
-                                        right.clone()
-                                    )
-                                } else {
-                                    drop(left_borrow);
-                                    drop(right_borrow);
-                                    return match op {
-                                        Op::Mul | Op::ImplicitMul => left.mul(right),
-                                        Op::Div => left.div(right),
-                                        _ => unreachable!(),
-                                    }
-                                }
-                            }
-                            if op == Op::Div && right_borrow.is_one() {
+                            if !left_borrow.has_const && !left_borrow.has_indp && !right_borrow.has_const && !right_borrow.has_indp {
                                 drop(left_borrow);
-                                return left
-                            }
-                            if op == Op::Pow && right_borrow.is_one() {
-                                drop(left_borrow);
-                                return left
+                                drop(right_borrow);
+                                let result = Node::from_operation(op, left, right).borrow().evaluate_to_node().wrap();
+                                return result
                             }
                             if op.is_mul() {
+                                if left_borrow.is_zero() || right_borrow.is_zero() {
+                                    return Node::zero()
+                                }
                                 if left_borrow.is_one() {
                                     drop(right_borrow);
                                     return right
@@ -782,6 +807,17 @@ impl NodeRcOperations for Rc<RefCell<Node>> {
                                     return left
                                 }
                             
+                            }
+                            if op == Op::Div && right_borrow.is_one() {
+                                drop(left_borrow);
+                                return left
+                            }
+                            if op == Op::Pow && right_borrow.is_one() {
+                                drop(left_borrow);
+                                return left
+                            }
+                            if op == Op::Pow && right_borrow.is_zero() {
+                                return Node::one()
                             }
                             if right_borrow.is_neg() {
                                 let right_neg = op_node.right.clone().negate();
@@ -813,6 +849,7 @@ impl NodeRcOperations for Rc<RefCell<Node>> {
                                 }
                             }
                             if op == Op::Sub || op == Op::Add || op == Op::Mul {
+                                // shift constant terms to the right for better readability
                                 if !left_borrow.has_indp && right_borrow.has_indp {
                                     drop(left_borrow);
                                     drop(right_borrow);
@@ -842,7 +879,7 @@ impl NodeRcOperations for Rc<RefCell<Node>> {
         } 
     }
     fn combine_like_terms(self) -> Self {
-        let mut node = self.borrow_mut();
+        let node = self.borrow_mut();
         let left = node.get_left();
         let right = node.get_right();
         // traverse both sides at the same time, stopping when the operator changes or we reach an operand

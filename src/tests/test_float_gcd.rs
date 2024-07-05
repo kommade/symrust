@@ -1,3 +1,6 @@
+use arpfloat::{FP128, Float};
+use crate::utils::float_gcd::FloatGCD;
+
 static RANDOM_INTEGERS: [i64; 20] = [
     -2_472_871_614_674_160_760,
     5_521_018_729_607_591_024,
@@ -46,9 +49,6 @@ static RANDOM_FLOATS: [f64; 20] = [
 
 #[test]
 fn try_is_integer() {
-    use arpfloat::{FP128, Float};
-    use crate::utils::float_gcd::FloatGCD;
-
     for i in RANDOM_INTEGERS.iter() {
         let float = Float::from_i64(FP128, *i);
         assert!(float.is_integer());
@@ -61,9 +61,6 @@ fn try_is_integer() {
 
 #[test]
 fn try_gcd() {
-    use arpfloat::{FP128, Float};
-    use crate::utils::float_gcd::FloatGCD;
-
     let gcd_euclid = |a, b| {
         let mut a = a;
         let mut b = b;
@@ -83,5 +80,19 @@ fn try_gcd() {
         assert_eq!(gcd, real_gcd.unsigned_abs());
         assert_eq!(a_div.abs(), (i[0] / real_gcd).abs());
         assert_eq!(b_div.abs(), (i[1] / real_gcd).abs());
+    }
+}
+
+#[test]
+fn try_is_one() {
+    let one = Float::from_i64(FP128, 1);
+    assert!(one.is_one());
+    for i in RANDOM_INTEGERS.iter() {
+        let float = Float::from_i64(FP128, *i);
+        assert!(!float.is_one());
+    }
+    for f in RANDOM_FLOATS.iter() {
+        let float = Float::from_f64(*f);
+        assert!(!float.is_one());
     }
 }

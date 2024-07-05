@@ -3,12 +3,16 @@ use std::ops::Div;
 use arpfloat::Float;
 
 pub trait FloatGCD {
+    fn is_one(&self) -> bool;
     fn is_integer(&self) -> bool;
     fn gcd(&self, other: &Self) -> (u64, i64, i64);
 }
 
 impl FloatGCD for Float {
-    // Method to check if the Float can be represented as an integer
+    fn is_one(&self) -> bool {
+        !self.get_mantissa().is_zero() && self.get_exp() == 0
+    }
+    /// Method to check if the Float can be represented as an integer
     fn is_integer(&self) -> bool {
         if !self.is_normal() {
             return false;

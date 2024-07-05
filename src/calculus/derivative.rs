@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{parse::lexer::{Const, Func, Op, Token}, structs::{expr::Expr, node::{MulType, Node, NodeRcOperations, NodeValue}}};
+use crate::{parse::lexer::{Const, Func, Op, Token}, structs::{expr::Expr, node::{MulType, Node, NodeRcFunctions, NodeRcOperations, NodeValue}}, utils::float_gcd::FloatGCD};
 
 #[allow(private_bounds)]
 pub trait Derivative: DerivativeInternal {
@@ -21,8 +21,10 @@ impl Derivative for Expr {
         let simplified = self.simplify();
         println!("Attempted to simplify: {simplified}");
         let result = Self::from_node(simplified.tree.derive());
-        println!("Final result: {result}");
-        result
+        println!("Result: {result}");
+        let simplified_result = result.simplify();
+        println!("Final result: {simplified_result}");
+        simplified_result
     }   
 }
 
@@ -76,17 +78,9 @@ impl Derivative for Rc<RefCell<Node>> {
             let borrowed = self.borrow();
             let result = match &borrowed.value {
                 NodeValue::Operator(op_node) => match op_node.token {
-                    Token::Operator(Op::Add) => Node::from_operation(
-                        Op::Add, 
-                        op_node.left.clone().derive(), 
-                        op_node.right.clone().derive()
-                    ),
-                    Token::Operator(Op::Sub) => Node::from_operation(
-                        Op::Sub, 
-                        op_node.left.clone().derive(), 
-                        op_node.right.clone().derive()
-                    ),
-                    Token::Operator(Op::Mul) => {
+                    Token::Operator(Op::Add) => op_node.left.clone().derive().add(op_node.right.clone().derive()),
+                    Token::Operator(Op::Sub) => op_node.left.clone().derive().sub(op_node.right.clone().derive()),
+                    Token::Operator(Op::Mul) | Token::Operator(Op::ImplicitMul) => {
                         drop(borrowed);
                         self.product_rule()
                     },
@@ -126,133 +120,72 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                 let result = match f {
                     Func::Sin => {
                         let arg = op_node.right.clone();
-                        let f_prime = Node::operator(
-                            Token::Function(Func::Cos), 
-                            empty, 
+                        let f_prime = Node::from_function(
+                            Func::Cos, 
                             arg.clone()
-                        ).wrap();
-                        Node::from_operation(
-                            Op::Mul, 
-                            f_prime, 
-                            arg.derive()
-                        )
+                        );
+                        f_prime.impl_mul(arg.derive())
                     }
                     Func::Cos => {
                         let arg = op_node.right.clone();
-                        let f_prime = Node::operator(
-                            Token::Function(Func::Sin), 
-                            empty, 
+                        let f_prime = Node::from_function(
+                            Func::Sin, 
                             arg.clone()
-                        ).wrap();
-                        Node::from_operation(
-                            Op::Mul, 
-                            f_prime, 
-                            arg.derive()
-                        ).negate()
+                        ).negate();
+                        f_prime.impl_mul(arg.derive())
                     }
                     Func::Tan => {
                         let arg = op_node.right.clone();
-                        let f_prime = Node::operator(
-                            Token::Function(Func::Sec), 
-                            empty.clone(), 
+                        let f_prime = Node::from_function(
+                            Func::Sec, 
                             arg.clone()
-                        ).wrap();
-                        Node::from_operation(
-                            Op::Mul, 
-                            f_prime, 
-                            Node::from_operation(
-                                Op::Pow, 
-                                Node::operator(
-                                    Token::Function(Func::Sec), 
-                                    empty, 
-                                    arg
-                                ).wrap(), 
-                                Node::from_number(2).wrap()
-                            )
-                        )
+                        ).pow(2);
+                        f_prime.impl_mul(arg.derive())
                     }
                     Func::Csc => {
                         let arg = op_node.right.clone();
-                        let f_prime = Node::operator(
-                            Token::Function(Func::Csc), 
-                            empty.clone(), 
+                        let f_prime = Node::from_function(
+                            Func::Csc, 
                             arg.clone()
-                        ).wrap();
-                        Node::from_operation(
-                            Op::Mul, 
-                            f_prime.clone(), 
-                            Node::from_operation(
-                                Op::Mul, 
-                                f_prime, 
-                                Node::operator(
-                                    Token::Function(Func::Cot), 
-                                    empty, 
-                                    arg
-                                ).wrap()
-                            ).negate()
-                        )
+                        ).impl_mul(
+                            Node::from_function(
+                                Func::Cot, 
+                            arg.clone()
+                            )
+                        ).negate();
+                        f_prime.impl_mul(arg.derive())
                     }
                     Func::Sec => {
                         let arg = op_node.right.clone();
-                        let f_prime = Node::operator(
-                            Token::Function(Func::Sec), 
-                            empty.clone(), 
+                        let f_prime = Node::from_function(
+                            Func::Sec, 
                             arg.clone()
-                        ).wrap();
-                        Node::from_operation(
-                            Op::Mul, 
-                            f_prime.clone(), 
-                            Node::from_operation(
-                                Op::Mul, 
-                                f_prime, 
-                                Node::operator(
-                                    Token::Function(Func::Tan), 
-                                    empty, 
-                                    arg
-                                ).wrap()
-                            )
-                        )
+                        ).impl_mul(Node::from_function(
+                            Func::Tan, 
+                            arg.clone()
+                        ));
+                        f_prime.impl_mul(arg.derive())
                     }
                     Func::Cot => {
                         let arg = op_node.right.clone();
-                        let f_prime = Node::operator(
-                            Token::Function(Func::Csc), 
-                            empty.clone(), 
+                        let f_prime = Node::from_function(
+                            Func::Csc, 
                             arg.clone()
-                        ).wrap();
-                        Node::from_operation(
-                            Op::Mul, 
-                            f_prime.negate(), 
-                            Node::from_operation(
-                                Op::Pow, 
-                                Node::operator(
-                                    Token::Function(Func::Csc), 
-                                    empty, 
-                                    arg
-                                ).wrap(), 
-                                Node::from_number(2).wrap()
-                            )
-                        )
+                        ).pow(2)
+                        .negate();
+                        f_prime.impl_mul(arg.derive())
                     }
                     Func::Ln => {
                         let arg = op_node.right.clone();
-                        Node::from_operation(
-                            Op::Div, 
-                            Node::from_number(1).wrap(), 
-                            arg
-                        )
+                        arg.clone().derive().div(arg)
                     }
                     Func::Log(base) => {
                         let arg = op_node.right.clone();
-                        Node::from_operation(
-                            Op::Div, 
-                            Node::from_number(1).wrap(), 
-                            Node::from_operation(
-                                Op::Mul, 
-                                Node::from_float(base.log()).wrap(), 
-                                arg
-                            )
-                        )
+                        let ln_base = Node::from_function(
+                            Func::Ln, 
+                            Node::from_float(base.clone()).wrap()
+                        );
+                        arg.clone().derive().div(arg.impl_mul(ln_base))
                     }
                 };
                 return result;
@@ -268,19 +201,14 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                 let left = op_node.left.clone();
                 let right = op_node.right.clone();
                 assert!(!right.borrow().has_indp || left.borrow().has_indp, "power_rule cannot be used for this node, try exp_rule");
-                let new_exp = Node::from_operation(
-                    Op::Sub, 
-                    right.clone(), 
-                    Node::one()
-                )
-                .borrow()
-                .evaluate();
+                let new_exp = right.clone().sub(Node::one()).borrow().evaluate();
                 let result = match new_exp {
                     None => panic!("evaluating the new exponent failed"),
+                    Some(exp) if exp.get_sign() => panic!("new exponent is negative"),
                     Some(exp) if exp.is_zero() => Node::one(),
-                    Some(exp) if exp.to_i64() == 1 => Node::from_operation(Op::Mul, right, left),
+                    Some(exp) if exp.is_one() => right.impl_mul(left),
                     Some(exp) => Node::from_operation(
-                        Op::Mul, 
+                        Op::ImplicitMul, 
                         right, 
                         Node::from_operation(
                             Op::Pow, 
@@ -306,7 +234,7 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                 let result = match &base.borrow().value {
                     NodeValue::Operand(Token::Constant(Const::E)) => {
                         Node::from_operation(
-                            Op::Mul, 
+                            Op::ImplicitMul, 
                             self.clone(), 
                             exp.derive()
                         )
@@ -316,13 +244,13 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                             Op::Pow, 
                             Node::from_constant(Const::E).wrap(), 
                             Node::from_operation(
-                                Op::Mul, 
+                                Op::ImplicitMul, 
                                 Node::from_function(Func::Ln, base.clone()),
                                 exp
                             )
                         );
                         Node::from_operation(
-                            Op::Mul, 
+                            Op::ImplicitMul, 
                             self.clone(), 
                             base_as_e.derive()
                         )
@@ -344,12 +272,12 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                 let result = Node::from_operation(
                     Op::Add, 
                     Node::from_operation(
-                        Op::Mul, 
+                        Op::ImplicitMul, 
                         left.clone(), 
                         right.clone().derive()
                     ), 
                     Node::from_operation(
-                        Op::Mul, 
+                        Op::ImplicitMul, 
                         left.derive(), 
                         right
                     )
@@ -372,12 +300,12 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                     Node::from_operation(
                         Op::Sub, 
                         Node::from_operation(
-                            Op::Mul, 
+                            Op::ImplicitMul, 
                             left.clone(), 
                             right.clone().derive()
                         ), 
                         Node::from_operation(
-                            Op::Mul, 
+                            Op::ImplicitMul, 
                             left.derive(), 
                             right.clone()
                         )

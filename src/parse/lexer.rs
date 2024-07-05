@@ -63,9 +63,9 @@ impl Display for Op {
         match self {
             Self::Add => write!(f, "+"),
             Self::Sub => write!(f, "-"),
-            Self::ImplicitMul => write!(f, "*"),
-            Self::Mul => write!(f, "×"),
-            Self::Div => write!(f, "÷"),
+            Self::ImplicitMul => write!(f, ""),
+            Self::Mul => write!(f, "*"),
+            Self::Div => write!(f, "/"),
             Self::Pow => write!(f, "^"),
         }
     }
@@ -117,7 +117,9 @@ impl Display for Token {
             Self::Constant(c) => write!(f, "{c}"),
             Self::Number(n) => write!(f, "{n}"),
             Self::Float(n) => {
-                if n.is_integer() {
+                if n.is_zero() {
+                    write!(f, "0")
+                } else if n.is_integer() {
                     let str = n.to_string();
                     let sliced = &str[..str.len() - 1];
                     write!(f, "{sliced}")
@@ -152,7 +154,7 @@ impl Token {
         Self::Var(c)
     }
     pub const fn is_implicitly_mul(&self) -> bool {
-        matches!(self, Self::Var(_) | Self::Constant(_) | Self::Number(_) | Self::RPar | Self::Indp(_) | Self::Function(_) | Self::LPar | Self::RPar)
+        matches!(self, Self::Var(_) | Self::Constant(_) | Self::Number(_) | Self::RPar | Self::Indp(_) | Self::Function(_) | Self::LPar)
     }
 }
 
@@ -299,7 +301,8 @@ impl Lexer {
                                     }
                                 }
                                 match base_str.parse::<f64>() {
-                                    Ok(n) => base = n,
+                                    Ok(n) if n != 0.0 && n != 1.0 => base = n,
+                                    Ok(_) => return Err(LexError::ParseError(format!("Invalid log base {} at pos {}", base_str, self.pos))),
                                     Err(e) => return Err(LexError::ParseError(format!("Error parsing log base {} at pos {}: {}", base_str, self.pos, e))),
                                 };
                             }
@@ -331,20 +334,22 @@ impl Lexer {
         while self.pos < self.size {
             tokens.push(self.next()?);
         }
-        dbg!(&tokens.iter().map(|t| t.to_string()).collect::<Vec<String>>());
         let mut i = 0;
         while i < tokens.len() {
             let token = &tokens[i];
             match token {
+                Token::RPar => {}
                 token if token.is_implicitly_mul() => {
                     if i > 0 {
-                        if let Token::Function(_) = tokens[i - 1] {
-                            continue;
+                        match tokens[i - 1] {
+                            Token::Function(_) | Token::LPar => {},
+                            _ if tokens[i - 1].is_implicitly_mul() => {
+                                tokens.insert(i, Token::from_op(Op::ImplicitMul));
+                                i += 1;
+                            },
+                            _ => {},
                         }
-                        if tokens[i - 1].is_implicitly_mul() {
-                            tokens.insert(i, Token::from_op(Op::ImplicitMul));
-                            i += 1;
-                        }
+                        
                     }
                 }
                 Token::Operator(Op::Mul) => {
@@ -353,7 +358,6 @@ impl Lexer {
                         let next = &tokens[i + 1];
                         if prev.is_implicitly_mul() && next.is_implicitly_mul() {
                             tokens[i] = Token::from_op(Op::ImplicitMul);
-                            continue;
                         }
                     }
                 }

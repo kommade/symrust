@@ -4,11 +4,11 @@ use std::fmt::Display;
 use std::{error::Error, rc::Rc};
 
 use crate::structs::node::Node;
-use crate::parse::{lexer::{Lexer}, parser::Parser};
+use crate::parse::{lexer::Lexer, parser::Parser};
 
-use super::node::{MulType, NodeRcOperations};
+use super::node::{MulType, NodeRcFunctions, NodeRcOperations};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Expr {
     pub(crate) tree: Rc<RefCell<Node>>,
 }
@@ -36,8 +36,8 @@ impl Expr {
     pub(crate) fn from_node(node: Rc<RefCell<Node>>) -> Self {
         Self { tree: node }
     }
-    pub fn is_empty(&self) -> bool {
-        self.tree.borrow().is_empty()
+    pub fn is_zero(&self) -> bool {
+        self.tree.borrow().is_zero()
     }
     pub fn parse(input: String, indp: Option<char>) -> Result<Self, Box<dyn Error>> {
         let mut lexer = Lexer::new(input, indp);
