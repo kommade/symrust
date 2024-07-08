@@ -9,9 +9,15 @@ use crate::parse::{lexer::Lexer, parser::Parser};
 use super::node::{MulType, NodeRcFunctions, NodeRcOperations};
 
 /// A struct representing a mathematical expression.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Expr {
     pub(crate) tree: Rc<RefCell<Node>>,
+}
+
+impl Clone for Expr {
+    fn clone(&self) -> Self {
+        Self { tree: self.tree.clone() }
+    }
 }
 
 impl Default for Expr {
