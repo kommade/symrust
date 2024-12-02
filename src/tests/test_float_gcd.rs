@@ -49,6 +49,7 @@ static RANDOM_FLOATS: [f64; 20] = [
 
 #[test]
 fn try_is_integer() {
+    super::setup();
     for i in &RANDOM_INTEGERS {
         let float = Float::from_i64(FP128, *i);
         assert!(float.is_integer());
@@ -61,6 +62,7 @@ fn try_is_integer() {
 
 #[test]
 fn try_gcd() {
+    super::setup();
     let gcd_euclid = |a, b| {
         let mut a = a;
         let mut b = b;
@@ -85,6 +87,7 @@ fn try_gcd() {
 
 #[test]
 fn try_is_one() {
+    super::setup();
     let one = Float::from_i64(FP128, 1);
     assert!(one.is_one());
     for i in &RANDOM_INTEGERS {

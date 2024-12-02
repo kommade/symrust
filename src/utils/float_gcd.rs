@@ -12,7 +12,6 @@ impl FloatGCD for Float {
     fn is_one(&self) -> bool {
         !self.get_mantissa().is_zero() && self.get_exp() == 0
     }
-    /// Method to check if the Float can be represented as an integer
     fn is_integer(&self) -> bool {
         if !self.is_normal() {
             return false;

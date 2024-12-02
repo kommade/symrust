@@ -2,6 +2,18 @@ mod test_derivative;
 mod test_expr;
 mod test_float_gcd;
 
+static INIT: std::sync::Once = std::sync::Once::new();
+
+fn setup() {
+    INIT.call_once(|| {
+        color_eyre::install().expect("Failed to install color_eyre");
+        let subscriber = crate::get_subscriber();
+
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("Failed to set subscriber");
+    });
+}
+
 struct Example {
     pub input: &'static str,
     pub latex: &'static str,

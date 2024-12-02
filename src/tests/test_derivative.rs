@@ -4,10 +4,12 @@ use super::EXAMPLE_FUNCTIONS;
 
 #[test]
 fn try_derivative() {
+    super::setup();
     for example in &EXAMPLE_FUNCTIONS {
         let expr = create_expr!(example.input);
-        let derivative = expr.derive();
+        let derivative = expr.get_derivative();
+        tracing::info!("------------------------------------------------------------------------");
         assert_eq!(derivative.to_string(), example.derivative);
-        assert_eq!(derivative.to_latex(), example.output_latex);
+        assert_eq!(derivative.to_latex().unwrap(), example.output_latex);
     }
 }

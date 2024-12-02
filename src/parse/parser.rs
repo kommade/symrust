@@ -1,6 +1,6 @@
-use std::{cell::RefCell, error::Error, fmt::{Display}, rc::Rc};
+use std::{error::Error, fmt::Display};
 
-use crate::structs::node::Node;
+use crate::structs::node::{Node, NodeRef};
 
 use super::lexer::{Op, Token};
 
@@ -43,7 +43,7 @@ impl Parser {
         }
     }
 
-    pub(crate) fn parse(&mut self) -> Result<Rc<RefCell<Node>>, ParseError> {
+    pub(crate) fn parse(&mut self) -> Result<NodeRef, ParseError> {
         let mut output = Vec::with_capacity(self.tokens.len());
         let mut stack = Vec::with_capacity(self.tokens.len());
         let tokens = &mut self.tokens;
@@ -60,8 +60,7 @@ impl Parser {
                 Token::Operator(ref op) => {
                     while let Some(Token::Operator(top_op)) = stack.last() {
                         if top_op.precedence() > op.precedence() || (top_op.precedence() == op.precedence() && *op != Op::Pow) {
-                            #[allow(clippy::unwrap_used)]
-                            output.push(stack.pop().unwrap());
+                                                        output.push(stack.pop().unwrap());
                         } else {
                             break;
                         }
@@ -77,8 +76,7 @@ impl Parser {
                             if stack.is_empty() {
                                 return Err(ParseError::MismatchedParentheses);
                             }
-                            #[allow(clippy::unwrap_used)]
-                            output.push(stack.pop().unwrap());
+                                                        output.push(stack.pop().unwrap());
                         } else {
                             break
                         }
@@ -88,8 +86,7 @@ impl Parser {
                     }
                     stack.pop();
                     if let Some(Token::Function(_)) = stack.last() {
-                        #[allow(clippy::unwrap_used)]
-                        output.push(stack.pop().unwrap());
+                                                output.push(stack.pop().unwrap());
                     }
                 },
             }  
@@ -108,11 +105,14 @@ impl Parser {
                 },
                 Token::Operator(op) => {
                     if tree.len() < 2 {
+                        if *op == Op::Sub {
+                            let right = tree.pop().unwrap();
+                            tree.push(crate::structs::node::NodeRcFunctions::negate(right));
+                            continue;
+                        }
                         return Err(ParseError::InvalidExpression(format!("Operator {op} has less than 2 operands")));
                     }
-                    #[allow(clippy::unwrap_used)]
                     let right = tree.pop().unwrap();
-                    #[allow(clippy::unwrap_used)]
                     let left = tree.pop().unwrap();
                     if *op == Op::Div && right.borrow().is_zero() {
                         return Err(ParseError::DivisionByZero);
@@ -123,14 +123,12 @@ impl Parser {
                     if tree.is_empty() {
                         return Err(ParseError::InvalidExpression(format!("Function {func} has no operands")));
                     }
-                    #[allow(clippy::unwrap_used)]
-                    let right = tree.pop().unwrap();
+                                        let right = tree.pop().unwrap();
                     tree.push(Node::from_function(func.clone(), right));
                 },
                 _ => unreachable!(),
             }
         };
-        #[allow(clippy::unwrap_used)]
-        Ok(tree.pop().unwrap())
+                Ok(tree.pop().unwrap())
     }
 }

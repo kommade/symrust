@@ -26,8 +26,7 @@ impl Display for Func {
             Self::Cot => write!(f, "cot"),
             Self::Log(n) => if n.is_integer() {
                 let str = n.to_string();
-                #[allow(clippy::unwrap_used)]
-                let sliced = str.strip_suffix('.').unwrap();
+                                let sliced = str.strip_suffix('.').unwrap();
                 write!(f, "log_{sliced}")
             } else {
                 write!(f, "log_{n}")
@@ -49,9 +48,6 @@ pub enum Op {
 }
 
 impl Op {
-    const fn is_implicit(&self) -> bool {
-        matches!(self, Self::ImplicitMul)
-    }
     pub const fn is_mul(&self) -> bool {
         matches!(self, Self::Mul | Self::ImplicitMul)
     }
@@ -128,8 +124,7 @@ impl Display for Token {
                     write!(f, "0")
                 } else if n.is_integer() {
                     let str = n.to_string();
-                    #[allow(clippy::unwrap_used)]
-                    let sliced = str.strip_suffix('.').unwrap();
+                                        let sliced = str.strip_suffix('.').unwrap();
                     write!(f, "{sliced}")
                 } else {
                     write!(f, "{n}")
@@ -210,8 +205,7 @@ impl Lexer {
 
     fn unwrap_next(&mut self) -> Result<char, LexError> {
         if self.pos < self.size {
-            #[allow(clippy::unwrap_used)]
-            let c = self.input.as_bytes()[self.pos] as char;
+                        let c = self.input.as_bytes()[self.pos] as char;
             self.pos += 1;
             Ok(c)
         } else {

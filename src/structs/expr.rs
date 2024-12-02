@@ -1,17 +1,18 @@
-use std::cell::RefCell;
 use std::ops::{Add, Div, Mul, Sub};
 use std::fmt::Display;
-use std::{error::Error, rc::Rc};
+use std::error::Error;
+
+use tracing::debug;
 
 use crate::structs::node::Node;
 use crate::parse::{lexer::Lexer, parser::Parser};
 
-use super::node::{MulType, NodeRcFunctions, NodeRcOperations};
+use super::node::{MulType, NodeError, NodeRcFunctions, NodeRcOperations, NodeRef};
 
 /// A struct representing a mathematical expression.
 #[derive(Debug)]
 pub struct Expr {
-    pub(crate) tree: Rc<RefCell<Node>>,
+    pub(crate) tree: NodeRef,
 }
 
 impl Clone for Expr {
@@ -34,6 +35,7 @@ impl Display for Expr {
 
 impl Expr {
     /// Create a new expression from a string. Takes an optional second argument for independent variable.
+    /// `None` can be passed as the second argument to use the default independent variable `x`.
     /// Prefer using the macro [`create_expr!`][crate::create_expr] for a more concise syntax.
     pub fn new(str: String, indp_var: Option<char>) -> Result<Self, Box<dyn Error>> {
         let mut lexer = Lexer::new(str, indp_var);
@@ -42,7 +44,7 @@ impl Expr {
         let tree = parser.parse()?;
         Ok(Self { tree })
     }
-    pub(crate) fn from_node(node: Rc<RefCell<Node>>) -> Self {
+    pub(crate) fn from_node(node: NodeRef) -> Self {
         Self { tree: node }
     }
     /// Returns true if the expression is zero, false otherwise.
@@ -75,12 +77,15 @@ impl Expr {
     /// let expr = create_expr!("2x^2 / 1");
     /// assert_eq!(expr.simplify().to_string(), "2 x ^ 2");
     /// ```
+    #[tracing::instrument(skip(self), parent = None, name = "(step) simplify", fields(result))]
     #[must_use] pub fn simplify(&self) -> Self {
-        let node = self.tree.clone().simplify();
-        Self { tree: node }
+        let tree = self.tree.clone().simplify();
+        tracing::Span::current().record("result", tree.borrow().to_string());
+        debug!("");
+        Self { tree }
     }
     /// Returns the LaTeX representation of the expression.
-    #[must_use] pub fn to_latex(&self) -> String {
+    #[must_use] pub fn to_latex(&self) -> Result<String, NodeError> {
         self.tree.borrow().to_latex()
     }
 }
@@ -89,8 +94,8 @@ impl Add for Expr {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
-        let sum = self.tree.add(other.tree);
-        Self { tree: sum }
+        let tree = self.tree.add(other.tree);
+        Self { tree }
     }
 }
 
@@ -98,8 +103,8 @@ impl Sub for Expr {
     type Output = Self;
 
     fn sub(self, other: Self) -> Self {
-        let diff = self.tree.sub(other.tree);
-        Self { tree: diff }
+        let tree = self.tree.sub(other.tree);
+        Self { tree }
     }
 }
 
@@ -107,8 +112,8 @@ impl Mul for Expr {
     type Output = Self;
 
     fn mul(self, other: Self) -> Self {
-        let prod = self.tree.mul(other.tree);
-        Self { tree: prod }
+        let tree = self.tree.mul(other.tree);
+        Self { tree }
     }
 }
 
@@ -117,7 +122,7 @@ impl Mul<i64> for Expr {
 
     fn mul(self, other: i64) -> Self {
         Self::from_node(
-            self.tree.distribute_constant(other, &MulType::OpMul)
+            self.tree.distribute_constant(other, MulType::OpMul)
         )
     }
 }
@@ -126,8 +131,8 @@ impl Div for Expr {
     type Output = Self;
 
     fn div(self, other: Self) -> Self {
-        let quot = self.tree.div(other.tree);
-        Self { tree: quot }
+        let tree = self.tree.div(other.tree);
+        Self { tree }
     }
 }
 
@@ -136,14 +141,14 @@ impl Div<i64> for Expr {
 
     fn div(self, other: i64) -> Self {
         Self::from_node(
-            self.tree.distribute_constant(other, &MulType::OpDiv)
+            self.tree.distribute_constant(other, MulType::OpDiv)
         )
     }
 }
 
 impl Expr {
     fn pow(self, other: Self) -> Self {
-        let pow = self.tree.pow(other.tree);
-        Self { tree: pow }
+        let tree = self.tree.pow(other.tree);
+        Self { tree }
     }
 }

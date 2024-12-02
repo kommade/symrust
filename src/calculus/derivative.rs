@@ -1,13 +1,15 @@
-use std::{cell::RefCell, rc::Rc};
 
-use crate::{parse::lexer::{Const, Func, Op, Token}, structs::{expr::Expr, node::{MulType, Node, NodeRcFunctions, NodeRcOperations, NodeValue}}, utils::float_gcd::FloatGCD};
+use tracing::{debug, info};
+
+use crate::{parse::lexer::{Const, Func, Op, Token}, structs::{expr::Expr, node::{MulType, Node, NodeRcFunctions, NodeRcOperations, NodeRef, NodeValue}}, utils::float_gcd::FloatGCD};
 
 #[allow(private_bounds)]
-pub trait Derivative: DerivativeInternal {
-    fn derive(self) -> Self;
+pub trait Derivative {
+    fn get_derivative(self) -> Self;
 }
 
 trait DerivativeInternal {
+    fn get_derivative(self) -> Self;
     fn chain_rule(self) -> Self;
     fn power_rule(self) -> Self;
     fn exp_rule(self) -> Self;
@@ -25,105 +27,78 @@ impl Derivative for Expr {
     /// assert_eq!(derivative.to_string(), "4 x");
     /// ```
     /// The function will never panic or return an error as all valid mathematical expressions should have a derivative.
-    fn derive(self) -> Self {
-        println!("Input: {self}");
+    #[tracing::instrument(skip(self), parent = None, name = "(main) get_derivative", fields(result))]
+    fn get_derivative(self) -> Self {
+        info!("Finding derivative of {self}");
         let simplified = self.simplify();
-        println!("Attempted to simplify: {simplified}");
-        let result = Self::from_node(simplified.tree.derive());
-        println!("Result: {result}");
+        let result = Self::from_node(simplified.tree.get_derivative());
         let simplified_result = result.simplify();
-        println!("Final result: {simplified_result}");
+        tracing::Span::current().record("result", simplified_result.to_string());
+        info!("Calculation complete");
         simplified_result
     }   
 }
 
-impl DerivativeInternal for Expr {
-    // empty functions to keep rust happy
-    fn chain_rule(self) -> Self {
-        unimplemented!()
-    }
-    fn power_rule(self) -> Self {
-        unimplemented!()
-    }
-    fn exp_rule(self) -> Self {
-        unimplemented!()
-    }
-    fn product_rule(self) -> Self {
-        unimplemented!()
-    }
-    fn quotient_rule(self) -> Self {
-        unimplemented!()
-    }
-}
-
-impl Derivative for Rc<RefCell<Node>> {
-    fn derive(self) -> Self {
+impl DerivativeInternal for NodeRef {
+    #[tracing::instrument(skip(self), parent = None, name = "(step) get_derivative", fields(result))]
+    fn get_derivative(self) -> Self {
         let borrowed = self.borrow();
-        let self_str = borrowed.to_string();
-        println!("Finding derivative of: {borrowed}");
-        match borrowed.value {
+        let borrow_str = borrowed.to_string();
+        let result = match borrowed.value {
             _ if !borrowed.has_indp => {
-                println!("- Derivative of {self_str} is 0");
-                return Node::zero();
+                Node::zero()
             },
             NodeValue::Operand(Token::Indp(_)) => {
-                println!("- Derivative of {self_str} is 1");
-                return Node::one();
+                Node::one()
             },
-            _ => ()
+            _ => {
+                drop(borrowed);
+                let split = self.clone().linearize(true);
+                if !split.constant.borrow().is_one() {
+                    let k = split.get_constant();
+                    let result = split.dependant.get_derivative().distribute_constant(k, MulType::OpMul);
+                    debug!("Remultiply by {}", split.constant.borrow().to_string());
+                    result
+                } else {
+                    let borrowed = self.borrow();
+                    match &borrowed.value {
+                        NodeValue::Operator(op_node) => match op_node.token {
+                            Token::Operator(Op::Add) => op_node.left.clone().get_derivative().add(op_node.right.clone().get_derivative()),
+                            Token::Operator(Op::Sub) => op_node.left.clone().get_derivative().sub(op_node.right.clone().get_derivative()),
+                            Token::Operator(Op::Mul | Op::ImplicitMul) => {
+                                drop(borrowed);
+                                return self.product_rule()
+                            },
+                            Token::Operator(Op::Div) => {
+                                drop(borrowed);
+                                return self.quotient_rule()
+                            },
+                            #[allow(clippy::branches_sharing_code)] // clippy is having a stroke here
+                            Token::Operator(Op::Pow) => if op_node.right.borrow().has_indp {
+                                drop(borrowed);
+                                return self.exp_rule()
+                            } else {
+                                drop(borrowed);
+                                return self.power_rule()
+                            },
+                            Token::Function(_) => {
+                                drop(borrowed);
+                                return self.chain_rule()
+                            },
+                            _ => unreachable!()
+                        },
+                        _ => unreachable!()
+                    }
+                }
+            }
         };
-        drop(borrowed);
-        let split = self.clone().linearize();
-        if !split.constant.borrow().is_one() {
-            println!("- Applying linearity");
-            println!("{split}");
-            let constant_str = split.constant.borrow().to_string();
-            // most scuffed way to get the constant value
-            #[allow(clippy::unwrap_used)]
-            let k = split.constant.borrow().evaluate().unwrap().to_i64();
-            let result = split.dependant.derive().distribute_constant(k, &MulType::OpMul);
-            println!("- Remultiply by {constant_str} to get {}", result.borrow());
-            result
-        } else {
-            let borrowed = self.borrow();
-            let result = match &borrowed.value {
-                NodeValue::Operator(op_node) => match op_node.token {
-                    Token::Operator(Op::Add) => op_node.left.clone().derive().add(op_node.right.clone().derive()),
-                    Token::Operator(Op::Sub) => op_node.left.clone().derive().sub(op_node.right.clone().derive()),
-                    Token::Operator(Op::Mul | Op::ImplicitMul) => {
-                        drop(borrowed);
-                        self.product_rule()
-                    },
-                    Token::Operator(Op::Div) => {
-                        drop(borrowed);
-                        self.quotient_rule()
-                    },
-                    #[allow(clippy::branches_sharing_code)] // clippy is having a stroke here
-                    Token::Operator(Op::Pow) => if op_node.right.borrow().has_indp {
-                        drop(borrowed);
-                        self.exp_rule()
-                    } else {
-                        drop(borrowed);
-                        self.power_rule()
-                    },
-                    Token::Function(_) => {
-                        drop(borrowed);
-                        self.chain_rule()
-                    },
-                    _ => unreachable!()
-                },
-                _ => unreachable!()
-            };
-            println!("- Derivative of {} is {}", self_str, result.borrow());
-            result
-        }
+        tracing::Span::current().record("result", result.borrow().to_string());
+        debug!("{borrow_str}");
+        result
     }
-}
-
-impl DerivativeInternal for Rc<RefCell<Node>> {
+    #[tracing::instrument(skip(self), parent = None, name = "(step) chain_rule", fields(result))]
     fn chain_rule(self) -> Self {
         let borrowed = self.borrow();
-        println!("- Applying chain rule to: {borrowed}");
         if let NodeValue::Operator(op_node) = &borrowed.value {
             if let Token::Function(f) = &op_node.token {
                 let result = match f {
@@ -133,7 +108,7 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                             Func::Cos, 
                             arg.clone()
                         );
-                        arg.derive().impl_mul(f_prime)
+                        arg.get_derivative().impl_mul(f_prime)
                     }
                     Func::Cos => {
                         let arg = op_node.right.clone();
@@ -141,7 +116,7 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                             Func::Sin, 
                             arg.clone()
                         );
-                        arg.derive().negate().impl_mul(f_prime)
+                        arg.get_derivative().negate().impl_mul(f_prime)
                     }
                     Func::Tan => {
                         let arg = op_node.right.clone();
@@ -149,7 +124,7 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                             Func::Sec, 
                             arg.clone()
                         ).pow(2);
-                        arg.derive().impl_mul(f_prime)
+                        arg.get_derivative().impl_mul(f_prime)
                     }
                     Func::Csc => {
                         let arg = op_node.right.clone();
@@ -162,7 +137,7 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                             arg.clone()
                             )
                         );
-                        arg.derive().negate().impl_mul(f_prime)
+                        arg.get_derivative().negate().impl_mul(f_prime)
                     }
                     Func::Sec => {
                         let arg = op_node.right.clone();
@@ -173,7 +148,7 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                             Func::Tan, 
                             arg.clone()
                         ));
-                        arg.derive().impl_mul(f_prime)
+                        arg.get_derivative().impl_mul(f_prime)
                     }
                     Func::Cot => {
                         let arg = op_node.right.clone();
@@ -181,11 +156,11 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                             Func::Csc, 
                             arg.clone()
                         ).pow(2);
-                        arg.derive().negate().impl_mul(f_prime)
+                        arg.get_derivative().negate().impl_mul(f_prime)
                     }
                     Func::Ln => {
                         let arg = op_node.right.clone();
-                        arg.clone().derive().div(arg)
+                        arg.clone().get_derivative().div(arg)
                     }
                     Func::Log(base) => {
                         let arg = op_node.right.clone();
@@ -193,17 +168,19 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                             Func::Ln, 
                             Node::from_float(base.clone()).wrap()
                         );
-                        arg.clone().derive().div(arg.impl_mul(ln_base))
+                        arg.clone().get_derivative().div(arg.impl_mul(ln_base))
                     }
-                };
+                }.simplify();
+                tracing::Span::current().record("result", result.borrow().to_string());
+                debug!("{borrowed}");
                 return result;
             }
         }
         panic!("fn_rule called on non-function node")
     }
+    #[tracing::instrument(skip(self), parent = None, name = "(step) power_rule", fields(result))]
     fn power_rule(self) -> Self {
         let borrowed = self.borrow();
-        println!("- Applying power rule to: {borrowed}");
         if let NodeValue::Operator(op_node) = &borrowed.value {
             if matches!(op_node.token, Token::Operator(Op::Pow)) {
                 let left = op_node.left.clone();
@@ -225,15 +202,16 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                         )
                     )
                 };
+                tracing::Span::current().record("result", result.borrow().to_string());
+                debug!("{borrowed}");
                 return result;
             }
         }
         panic!("power_rule called on non-power node")
     }
-    
+    #[tracing::instrument(skip(self), parent = None, name = "(step) exp_rule", fields(result))]
     fn exp_rule(self) -> Self {
         let borrowed = self.borrow();
-        println!("Applying exp rule to: {borrowed}");
         if let NodeValue::Operator(op_node) = &borrowed.value {
             if matches!(op_node.token, Token::Operator(Op::Pow)) {
                 assert!(op_node.right.borrow().has_indp, "exp_rule cannot be used for this node, try pow_rule");
@@ -244,7 +222,7 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                         Node::from_operation(
                             Op::ImplicitMul, 
                             self.clone(), 
-                            exp.derive()
+                            exp.get_derivative()
                         )
                     }
                     _ => {
@@ -260,18 +238,20 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                         Node::from_operation(
                             Op::ImplicitMul, 
                             self.clone(), 
-                            base_as_e.derive()
+                            base_as_e.get_derivative()
                         )
                     }
                 };
+                tracing::Span::current().record("result", result.borrow().to_string());
+                debug!("{borrowed}");
                 return result;
             }
         }
         panic!("exp_rule called on non-exp node")
     }
+    #[tracing::instrument(skip(self), parent = None, name = "(step) product_rule", fields(result))]
     fn product_rule(self) -> Self {
         let borrowed = self.borrow();
-        println!("Applying product rule to: {borrowed}");
         if let NodeValue::Operator(op_node) = &borrowed.value {
             if matches!(op_node.token, Token::Operator(Op::Mul)) {
                 let left = op_node.left.clone();
@@ -282,22 +262,24 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                     Node::from_operation(
                         Op::ImplicitMul, 
                         left.clone(), 
-                        right.clone().derive()
+                        right.clone().get_derivative()
                     ), 
                     Node::from_operation(
                         Op::ImplicitMul, 
-                        left.derive(), 
+                        left.get_derivative(), 
                         right
                     )
                 );
+                tracing::Span::current().record("result", result.borrow().to_string());
+                debug!("{borrowed}");
                 return result;
             }
         }
         panic!("product_rule called on non-product node")
     }
+    #[tracing::instrument(skip(self), parent = None, name = "(step) quotient_rule", fields(result))]
     fn quotient_rule(self) -> Self {
         let borrowed = self.borrow();
-        println!("Applying quotient rule to: {borrowed}");
         if let NodeValue::Operator(op_node) = &borrowed.value {
             if matches!(op_node.token, Token::Operator(Op::Div)) {
                 let left = op_node.left.clone();
@@ -310,11 +292,11 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                         Node::from_operation(
                             Op::ImplicitMul, 
                             left.clone(), 
-                            right.clone().derive()
+                            right.clone().get_derivative()
                         ), 
                         Node::from_operation(
                             Op::ImplicitMul, 
-                            left.derive(), 
+                            left.get_derivative(), 
                             right.clone()
                         )
                     ), 
@@ -324,6 +306,8 @@ impl DerivativeInternal for Rc<RefCell<Node>> {
                         Node::from_number(2).wrap()
                     )
                 );
+                tracing::Span::current().record("result", result.borrow().to_string());
+                debug!("{borrowed}");
                 return result;
             }
         }
