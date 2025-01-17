@@ -1,6 +1,6 @@
 use std::{error::Error, fmt::Display};
 
-use crate::structs::node::{Node, NodeRef};
+use crate::structs::node::{NodeInner, Node};
 
 use super::lexer::{Op, Token};
 
@@ -43,7 +43,7 @@ impl Parser {
         }
     }
 
-    pub(crate) fn parse(&mut self) -> Result<NodeRef, ParseError> {
+    pub(crate) fn parse(&mut self) -> Result<Node, ParseError> {
         let mut output = Vec::with_capacity(self.tokens.len());
         let mut stack = Vec::with_capacity(self.tokens.len());
         let tokens = &mut self.tokens;
@@ -101,30 +101,30 @@ impl Parser {
         for token in output {
             match token {
                 Token::Number(_) | Token::Float(_) | Token::Constant(_) | Token::Var(_) | Token::Indp(_) => {
-                    tree.push(Node::operand(token.clone()).wrap());
+                    tree.push(NodeInner::operand(token.clone()).wrap());
                 },
                 Token::Operator(op) => {
                     if tree.len() < 2 {
                         if *op == Op::Sub {
                             let right = tree.pop().unwrap();
-                            tree.push(crate::structs::node::NodeRcFunctions::negate(right));
+                            tree.push(crate::structs::node::NodeFunctions::negate(right));
                             continue;
                         }
                         return Err(ParseError::InvalidExpression(format!("Operator {op} has less than 2 operands")));
                     }
                     let right = tree.pop().unwrap();
                     let left = tree.pop().unwrap();
-                    if *op == Op::Div && right.borrow().is_zero() {
+                    if *op == Op::Div && right.inner.borrow().is_zero() {
                         return Err(ParseError::DivisionByZero);
                     }
-                    tree.push(Node::from_operation(op.clone(), left, right));
+                    tree.push(NodeInner::from_operation(op.clone(), left, right));
                 },
                 Token::Function(func) => {
                     if tree.is_empty() {
                         return Err(ParseError::InvalidExpression(format!("Function {func} has no operands")));
                     }
                                         let right = tree.pop().unwrap();
-                    tree.push(Node::from_function(func.clone(), right));
+                    tree.push(NodeInner::from_function(func.clone(), right));
                 },
                 _ => unreachable!(),
             }

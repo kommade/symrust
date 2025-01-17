@@ -34,7 +34,6 @@ impl FloatGCD for Float {
         // If the mantissa remains unchanged, it indicates there are no significant bits beyond the exponent's position.
         self.get_mantissa() == shifted_mantissa
     }
-
     fn gcd(&self, other: &Self) -> (u64, i64, i64) {
         if !self.is_integer() || !other.is_integer() {
             return (1, 0, 0)

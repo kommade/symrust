@@ -5,8 +5,6 @@ use once_cell::sync::OnceCell;
 
 use crate::{parse::lexer::{Const, Func, Op, Token}, utils::{float_gcd::FloatGCD, fmt::unnecessary_brackets}};
 
-pub type NodeRef = Rc<RefCell<Node>>;
-
 #[derive(Clone, Copy)]
 pub enum MulType {
     OpMul,
@@ -16,8 +14,8 @@ pub enum MulType {
 #[derive(Clone, Debug)]
 pub struct OpNode {
     pub token: Token,
-    pub left: NodeRef,
-    pub right: NodeRef,
+    pub left: Node,
+    pub right: Node,
 }
 
 #[derive(Clone, Debug)]
@@ -28,16 +26,29 @@ pub enum NodeValue {
 }
 
 #[derive(Clone, Debug)]
-pub struct Node {
+pub struct NodeInner {
     pub(crate) value: NodeValue,
     pub(crate) has_indp: bool,
     pub(crate) has_const: bool,
     pub(crate) has_func: bool,
 }
 
-const EMPTY: OnceCell<NodeRef> = OnceCell::new();
-const ZERO: OnceCell<NodeRef> = OnceCell::new();
-const ONE: OnceCell<NodeRef> = OnceCell::new();
+#[derive(Clone, Debug)]
+pub struct Node {
+    pub(crate) inner: Rc<RefCell<NodeInner>>,
+}
+
+impl Node {
+    fn new(inner: NodeInner) -> Self {
+        Self {
+            inner: Rc::new(RefCell::new(inner)),
+        }
+    }
+}
+
+const EMPTY: OnceCell<Node> = OnceCell::new();
+const ZERO: OnceCell<Node> = OnceCell::new();
+const ONE: OnceCell<Node> = OnceCell::new();
 
 #[derive(Debug)]
 pub enum NodeError {
@@ -54,54 +65,52 @@ impl Display for NodeError {
     }
 }
 
-impl Error for NodeError {
+impl Error for NodeError {}
 
-}
-
-impl Node {
-    pub fn get_left(&self) -> Result<NodeRef, NodeError> {
+impl NodeInner {
+    pub fn get_left(&self) -> Result<Node, NodeError> {
         match &self.value {
             NodeValue::Operator(op_node) => Ok(op_node.left.clone()),
             _ => Err(NodeError::NotOperator),
         }
     }
-    pub fn get_right(&self) -> Result<NodeRef, NodeError> {
+    pub fn get_right(&self) -> Result<Node, NodeError> {
         match &self.value {
             NodeValue::Operator(op_node) => Ok(op_node.right.clone()),
             _ => Err(NodeError::NotOperator),
         }
     }
     /// Return a reference to an empty node.
-    pub fn empty() -> NodeRef {
+    pub fn empty() -> Node {
         EMPTY.get_or_init(|| {
-            Rc::new(RefCell::new(Node {
+            Node::new(NodeInner {
                 value: NodeValue::Empty,
                 has_indp: false,
                 has_const: false,
                 has_func: false,
-            }))
+            })
         }).clone()
     }
     /// Return a reference to a zero node.
-    pub fn zero() -> NodeRef {
+    pub fn zero() -> Node {
         ZERO.get_or_init(|| {
-            Rc::new(RefCell::new(Node {
+            Node::new(NodeInner {
                 value: NodeValue::Operand(Token::Number(0)),
                 has_indp: false,
                 has_const: false,
                 has_func: false,
-            }))
+            })
         }).clone()
     }
     /// Return a reference to a one node.
-    pub fn one() -> NodeRef {
+    pub fn one() -> Node {
         ONE.get_or_init(|| {
-            Rc::new(RefCell::new(Node {
+            Node::new(NodeInner {
                 value: NodeValue::Operand(Token::Number(1)),
                 has_indp: false,
                 has_const: false,
                 has_func: false,
-            }))
+            })
         }).clone()
     }
     pub(crate) fn to_latex(&self) -> Result<String, NodeError> {
@@ -126,8 +135,8 @@ impl Node {
                 _ => Err(NodeError::WrongToken("operand".to_string())),
             },
             NodeValue::Operator(op_node) => {
-                let mut left_str = op_node.left.borrow().to_latex()?;
-                let mut right_str = op_node.right.borrow().to_latex()?;
+                let mut left_str = op_node.left.inner.borrow().to_latex()?;
+                let mut right_str = op_node.right.inner.borrow().to_latex()?;
                 let op_str = format!("{}", op_node.token);
                 let mut result = match &op_node.token {
                     Token::Operator(op) => {
@@ -140,7 +149,7 @@ impl Node {
                                     left_str = stripped.to_string();
                                 }
                                 if left_str == "0" && *op == Op::Sub {
-                                    if op_node.right.borrow().is_operator() {
+                                    if op_node.right.inner.borrow().is_operator() {
                                         Ok(format!("-({right_str})"))
                                     } else {
                                         Ok(format!("-{right_str}"))
@@ -189,13 +198,13 @@ impl Node {
     }
 }
 
-impl Display for Node {
+impl Display for NodeInner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.value {
             NodeValue::Operand(ref token) => write!(f, "{token}"),
             NodeValue::Operator(ref op_node) => {
-                let left = op_node.left.borrow();
-                let right = op_node.right.borrow();
+                let left = op_node.left.inner.borrow();
+                let right = op_node.right.inner.borrow();
                 let mut left_str = format!("{left}");
                 let mut right_str = format!("{right}");
                 let op_str = format!("{}", op_node.token);
@@ -257,9 +266,9 @@ impl Display for Node {
     }
 }
 
-impl Node {
-    pub(crate) fn wrap(self) -> NodeRef {
-        Rc::new(RefCell::new(self))
+impl NodeInner {
+    pub(crate) fn wrap(self) -> Node {
+        Node::new(self)
     }
     /// Creates a new node from a operand token.
     pub(crate) fn operand(token: Token) -> Self {
@@ -277,9 +286,9 @@ impl Node {
         }
     }
     /// Creates a new operator node from a token.
-    pub(crate) fn operator(token: Token, left: NodeRef, right: NodeRef) -> Self {
-        let left_borrow = left.borrow();
-        let right_borrow = right.borrow();
+    pub(crate) fn operator(token: Token, left: Node, right: Node) -> Self {
+        let left_borrow = left.inner.borrow();
+        let right_borrow = right.inner.borrow();
         let has_var = left_borrow.has_indp || right_borrow.has_indp;
         let has_const = left_borrow.has_const || right_borrow.has_const;
         let has_func = left_borrow.has_func || right_borrow.has_func || match token {
@@ -301,55 +310,12 @@ impl Node {
         }
     }
     /// Creates a new node from an operation.
-    /// This function checks the nodes for simplification opportunities.
-    pub(crate) fn from_operation(op: Op, left: NodeRef, right: NodeRef) -> NodeRef {
-        let left_borrow = left.borrow();
-        let right_borrow = right.borrow();
-        if left_borrow.is_empty() || 
-            (op.is_mul() && left_borrow.is_one()) ||
-            (op == Op::Add && left_borrow.is_zero()) {
-            drop(right_borrow);
-            right
-        } else if right_borrow.is_empty() || 
-            (op.is_mul() && right_borrow.is_one()) ||
-            (op == Op::Add && right_borrow.is_zero()) {
-            drop(left_borrow);
-            left
-        } else if op == Op::Sub && left_borrow.is_zero() {
-            match &right_borrow.value {
-                NodeValue::Operand(token) => match token {
-                    Token::Number(num) => Self::operand(Token::Number(-num)).wrap(),
-                    Token::Float(num) => Self::operand(Token::Float(num.neg())).wrap(),
-                    _ => {
-                        drop(left_borrow);
-                        drop(right_borrow);
-                        Self::operator(Token::from_op(op), left, right).wrap()
-                    },
-                },
-                _ => {
-                    drop(left_borrow);
-                    drop(right_borrow);
-                    Self::operator(Token::from_op(op), left, right).wrap()
-                },
-            }
-        } else if right_borrow.is_zero() && left_borrow.is_zero() {
-            Self::operand(Token::Number(0)).wrap()
-        } else if op == Op::Pow && right_borrow.is_zero() {
-            Self::operand(Token::Number(1)).wrap()
-        } else if (op == Op::Pow || op == Op::Div) && right_borrow.is_one() {
-            drop(left_borrow);
-            left
-        } else if op == Op::Div && left_borrow.is_zero() {
-            panic!("Division by zero");
-        } else {
-            drop(left_borrow);
-            drop(right_borrow);
-            Self::operator(Token::Operator(op), left, right).wrap()
-        }
+    pub(crate) fn from_operation(op: Op, left: Node, right: Node) -> Node {
+        Self::operator(Token::Operator(op), left, right).wrap()
     }
     /// Creates a new node from a function.
-    pub(crate) fn from_function(func: Func, node: NodeRef) -> NodeRef {
-        let node_borrow = node.borrow();
+    pub(crate) fn from_function(func: Func, node: Node) -> Node {
+        let node_borrow = node.inner.borrow();
         let has_var = node_borrow.has_indp;
         let has_const = node_borrow.has_const;
         if node_borrow.is_empty() {
@@ -397,20 +363,62 @@ impl Node {
         }
     }
     /// Calling this function trusts that the node can be evaluated to a float.
-    pub(crate) fn evaluate_to_float_node(&self) -> NodeRef {
+    pub(crate) fn evaluate_to_float_node(&self) -> Node {
         self.evaluate().map_or_else(|| unreachable!("cannot be evaluated: {self}"), Self::from_float).wrap()
 
     }
-    pub(crate) fn evaluate_to_int_node(&self) -> NodeRef {
-        Self::from_number(self.evaluate_int()).wrap()
-
+    fn evaluate_constants(op: Op, left: Node, right: Node) -> Node {
+        let left_val = left.inner.borrow().evaluate_int();
+        let right_val = right.inner.borrow().evaluate_int();
+        match op {
+            Op::ImplicitMul | Op::Mul => {
+                if left_val == 0 || right_val == 0 {
+                    return NodeInner::zero();
+                }
+                if left_val == 1 {
+                    return right;
+                }
+                if right_val == 1 {
+                    return left;
+                }
+                NodeInner::from_number(left_val * right_val).wrap()
+            },
+            Op::Div => {
+                if right_val == 0 {
+                    panic!("Division by zero");
+                }
+                if left_val == 0 {
+                    return NodeInner::zero();
+                }
+                if right_val == 1 {
+                    return left;
+                }
+                if left_val % right_val == 0 {
+                    return NodeInner::from_number(left_val / right_val).wrap();
+                }
+                NodeInner::operator(Token::Operator(op), left, right).wrap()
+            }
+            _ => unreachable!("cannot evaluate constants where operator is of type {op}"),
+        }
     }
+
     pub(crate) const fn is_op_node(&self) -> bool {
         matches!(&self.value, NodeValue::Operator(_))
     }
     pub(crate) const fn is_operator(&self) -> bool {
         if let NodeValue::Operator(op_node) = &self.value {
             matches!(op_node.token, Token::Operator(_))
+        } else {
+            false
+        }
+    }
+    pub fn is_operator_type(&self, op: Op) -> bool {
+        if let NodeValue::Operator(op_node) = &self.value {
+            if let Token::Operator(token) = &op_node.token {
+                *token == op
+            } else {
+                false
+            }
         } else {
             false
         }
@@ -480,8 +488,8 @@ impl Node {
             },
             NodeValue::Operator(op_node) => {
                 if let Token::Operator(op) = &op_node.token {
-                    let left = op_node.left.borrow();
-                    let right = op_node.right.borrow();
+                    let left = op_node.left.inner.borrow();
+                    let right = op_node.right.inner.borrow();
                     return match op {
                         Op::Sub => left.is_zero(),
                         Op::Div | Op::ImplicitMul | Op::Mul => left.is_neg() ^ right.is_neg(),
@@ -505,8 +513,8 @@ impl Node {
                     _ => unreachable!(),
                 },
                 NodeValue::Operator(op_node) => {
-                    let left = op_node.left.borrow().evaluate()?;
-                    let right = op_node.right.borrow().evaluate()?;
+                    let left = op_node.left.inner.borrow().evaluate()?;
+                    let right = op_node.right.inner.borrow().evaluate()?;
                     match &op_node.token {
                         Token::Operator(op) => match op {
                             Op::Add => Some(left + right),
@@ -539,12 +547,12 @@ impl Node {
                 _ => unreachable!(),
             },
             NodeValue::Operator(op_node) => {
-                let left = op_node.left.borrow().evaluate_int();
-                let right = op_node.right.borrow().evaluate_int();
+                let left = op_node.left.inner.borrow().evaluate_int();
+                let right = op_node.right.inner.borrow().evaluate_int();
                 match &op_node.token {
                     Token::Operator(op) => match op {
                         Op::Mul | Op::ImplicitMul => left * right,
-                        _ => unreachable!(),
+                        _ => unreachable!("cannot evaluate to integer: {self}"),
                     },
                     _ => unreachable!(),
                 }
@@ -555,33 +563,33 @@ impl Node {
 }
 
 pub struct SplitNode {
-    pub constant: NodeRef,
-    pub dependant: NodeRef,
+    pub constant: Node,
+    pub dependant: Node,
     has_divisor: u64
 }
 
 impl SplitNode {
-    pub fn join(&self) -> NodeRef {
-        Node::from_operation(Op::Mul, self.constant.clone(), self.dependant.clone())
+    pub fn join(&self) -> Node {
+        NodeInner::from_operation(Op::Mul, self.constant.clone(), self.dependant.clone())
     }
     pub fn get_constant(&self) -> i64 {
-        self.constant.borrow().evaluate_int()
+        self.constant.inner.borrow().evaluate_int()
     }
 }
 
 impl Display for SplitNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let constant = self.constant.borrow();
-        let dependant = self.dependant.borrow();
+        let constant = self.constant.inner.borrow();
+        let dependant = self.dependant.inner.borrow();
         let result = format!("constant = {constant} | dependant = {dependant}");
         write!(f, "{result}")
     }
 }
 
 // The difference between the functions implemented here and the ones in impl Node is that these functions are not meant to create new Nodes or consume Nodes into other values.
-// They are meant to be used in the context of operations between Nodes, and they return a (reference to a) new Node that is the result of the operation, 
-// where the new Node is likely to contain (a reference to) the original Node
-pub trait NodeRcOperations<T> {
+// They are meant to be used in the context of operations between Nodes, and they return a new Node that is the result of the operation, 
+// where the new Node is likely to contain the original Node
+pub trait NodeOperations<T> {
     fn add(self, other: T) -> Self;
     fn sub(self, other: T) -> Self;
     fn mul(self, other: T) -> Self;
@@ -591,71 +599,74 @@ pub trait NodeRcOperations<T> {
     
 }
 
-pub trait NodeRcFunctions {
+pub trait NodeFunctions {
     fn negate(self) -> Self;
     fn recip(self) -> Self;
     fn distribute_constant(self, k: i64, mul_type: MulType) -> Self;
-    fn linearize(self, log: bool) -> SplitNode;
+    fn linearise(self, log: bool) -> SplitNode;
     fn remove_constants(self) -> Float;
     fn simplify(self) -> Self;
+    fn is_polynomial(self) -> bool;
+    fn factorise(self) -> Self;
+    //fn substitute(self, var: Self, value: Self) -> Self;
 }
 
-impl NodeRcOperations<Self> for NodeRef {
+impl NodeOperations<Self> for Node {
     fn add(self, other: Self) -> Self {
-        Node::from_operation(Op::Add, self, other)
+        NodeInner::from_operation(Op::Add, self, other)
     }
     fn sub(self, other: Self) -> Self {
-        Node::from_operation(Op::Sub, self, other)
+        NodeInner::from_operation(Op::Sub, self, other)
     }
     fn mul(self, other: Self) -> Self {
-        Node::from_operation(Op::Mul, self, other)
+        NodeInner::from_operation(Op::Mul, self, other)
     }
     fn impl_mul(self, other: Self) -> Self {
-        Node::from_operation(Op::ImplicitMul, self, other)
+        NodeInner::from_operation(Op::ImplicitMul, self, other)
     }
     fn div(self, other: Self) -> Self {
-        Node::from_operation(Op::Div, self, other)
+        NodeInner::from_operation(Op::Div, self, other)
     }
     fn pow(self, other: Self) -> Self {
-        Node::from_operation(Op::Pow, self, other)
+        NodeInner::from_operation(Op::Pow, self, other)
     }
 }
 
-impl NodeRcOperations<i64> for NodeRef {
+impl NodeOperations<i64> for Node {
     fn add(self, other: i64) -> Self {
         if other == 0 {
             self
         } else if other == 1 {
-            self.add(Node::one())
+            self.add(NodeInner::one())
         } else {
-            self.add(Node::from_number(other).wrap())
+            self.add(NodeInner::from_number(other).wrap())
         }
     }
     fn sub(self, other: i64) -> Self {
         if other == 0 {
             self
         } else if other == 1 {
-            self.sub(Node::one())
+            self.sub(NodeInner::one())
         } else {
-            self.sub(Node::from_number(other).wrap())
+            self.sub(NodeInner::from_number(other).wrap())
         }
     }
     fn mul(self, other: i64) -> Self {
         if other == 0 {
-            Node::zero()
+            NodeInner::zero()
         } else if other == 1 {
             self
         } else {
-            Node::from_number(other).wrap().mul(self)
+            NodeInner::from_number(other).wrap().mul(self)
         }
     }
     fn impl_mul(self, other: i64) -> Self {
         if other == 0 {
-            Node::zero()
+            NodeInner::zero()
         } else if other == 1 {
             self
         } else {
-            Node::from_number(other).wrap().impl_mul(self)
+            NodeInner::from_number(other).wrap().impl_mul(self)
         }
     }
     fn div(self, other: i64) -> Self {
@@ -665,27 +676,27 @@ impl NodeRcOperations<i64> for NodeRef {
         else if other == 1 {
             self
         } else {
-            Node::from_number(other).wrap().div(self)
+            NodeInner::from_number(other).wrap().div(self)
         }
     }
     fn pow(self, other: i64) -> Self {
         if other == 0 {
-            Node::one()
+            NodeInner::one()
         } else if other == 1 {
             self
         } else {
-            self.pow(Node::from_number(other).wrap())
+            self.pow(NodeInner::from_number(other).wrap())
         }
     }
 }
 
-impl NodeRcFunctions for NodeRef {
+impl NodeFunctions for Node {
     fn negate(self) -> Self {
-        match &self.borrow().value {
+        match &self.inner.borrow().value {
             NodeValue::Operand(token) => match token {
-                Token::Number(num) => Node::from_number(-*num).wrap(),
-                Token::Float(num) => Node::from_float(num.neg()).wrap(),
-                _ => Node::zero().sub(self.clone()),
+                Token::Number(num) => NodeInner::from_number(-*num).wrap(),
+                Token::Float(num) => NodeInner::from_float(num.neg()).wrap(),
+                _ => NodeInner::zero().sub(self.clone()),
             },
             NodeValue::Operator(op_node) => {
                 match &op_node.token {
@@ -694,7 +705,7 @@ impl NodeRcFunctions for NodeRef {
                         let right = op_node.right.clone();
                         match op {
                             Op::Sub => {
-                                if left.borrow().is_zero() {
+                                if left.inner.borrow().is_zero() {
                                     op_node.right.clone()
                                 } else {
                                     right.sub(left)
@@ -710,22 +721,22 @@ impl NodeRcFunctions for NodeRef {
                                 left.negate().div(right)
                             }
                             Op::Pow => {
-                                Node::zero().sub(self.clone())
+                                NodeInner::zero().sub(self.clone())
                             }
                         }
                     },
-                    _ => Node::zero().sub(self.clone())
+                    _ => NodeInner::zero().sub(self.clone())
                 }
             },
             _ => self.clone(),
         }
     }
     fn recip(self) -> Self {
-        match &self.borrow().value {
+        match &self.inner.borrow().value {
             NodeValue::Operand(token) => match token {
-                Token::Number(num) => Node::from_number(1 / num).wrap(),
-                Token::Float(num) => Node::from_float(Float::one(FP128, true) / num.clone()).wrap(),
-                _ => Node::one().div(self.clone()),
+                Token::Number(num) => NodeInner::from_number(1 / num).wrap(),
+                Token::Float(num) => NodeInner::from_float(Float::one(FP128, true) / num.clone()).wrap(),
+                _ => NodeInner::one().div(self.clone()),
             },
             NodeValue::Operator(op_node) => {
                 match &op_node.token {
@@ -734,18 +745,18 @@ impl NodeRcFunctions for NodeRef {
                         let right = op_node.right.clone();
                         match op {
                             Op::Div => {
-                                Node::from_operation(
+                                NodeInner::from_operation(
                                     Op::Div, 
                                     right.clone(), 
                                     left.clone()
                                 )
                             }
                             _ => {
-                                Node::one().div(self.clone())
+                                NodeInner::one().div(self.clone())
                             }
                         }
                     },
-                    _ => Node::one().div(self.clone())
+                    _ => NodeInner::one().div(self.clone())
                 }
             },
             _ => self.clone(),
@@ -757,27 +768,27 @@ impl NodeRcFunctions for NodeRef {
             MulType::OpDiv => Op::Div,
         };
         if k == 0 {
-            return Node::zero();
+            return NodeInner::zero();
         } else if k == 1 {
             return self;
         }
-        let constant = Node::from_number(k).wrap();
-        match &self.borrow().value {
+        let constant = NodeInner::from_number(k).wrap();
+        match &self.inner.borrow().value {
             NodeValue::Operator(op_node) => {
                 match &op_node.token {
                     Token::Operator(op) => {
-                        let left = self.borrow().get_left().unwrap();
-                        let right = self.borrow().get_right().unwrap();
+                        let left = self.inner.borrow().get_left().unwrap();
+                        let right = self.inner.borrow().get_right().unwrap();
                         match op {
                             Op::Mul | Op::ImplicitMul | Op::Div => {
-                               if !right.borrow().has_indp {
-                                    Node::from_operation(
+                               if !right.inner.borrow().has_indp {
+                                    NodeInner::from_operation(
                                         op.clone(), 
                                         right.distribute_constant(k, mul_type),
                                         left
                                     )
                                } else {
-                                    Node::from_operation(
+                                    NodeInner::from_operation(
                                         op.clone(), 
                                         left.distribute_constant(k, mul_type),
                                         right
@@ -785,14 +796,14 @@ impl NodeRcFunctions for NodeRef {
                                 }
                             }
                             Op::Add | Op::Sub => {
-                                Node::from_operation(
+                                NodeInner::from_operation(
                                     op.clone(), 
                                     left.distribute_constant(k, mul_type),
                                     right.distribute_constant(k, mul_type)
                                 )
                             }
                             _ => {
-                                Node::from_operation(
+                                NodeInner::from_operation(
                                     operator, 
                                     constant,
                                     self.clone()
@@ -801,7 +812,7 @@ impl NodeRcFunctions for NodeRef {
                         }
                     },
                     _ => {
-                        Node::from_operation(
+                        NodeInner::from_operation(
                             operator, 
                             constant,
                             self.clone()
@@ -813,18 +824,18 @@ impl NodeRcFunctions for NodeRef {
                 match op {
                     Token::Number(num) => {
                         match mul_type {
-                            MulType::OpMul => Node::operand(Token::Number(num * k)).wrap(),
-                            MulType::OpDiv => Node::operand(Token::Number(num / k)).wrap(),
+                            MulType::OpMul => NodeInner::operand(Token::Number(num * k)).wrap(),
+                            MulType::OpDiv => NodeInner::operand(Token::Number(num / k)).wrap(),
                         }
                     },
                     Token::Float(num) => {
                         match mul_type {
-                            MulType::OpMul => Node::operand(Token::Float(num.clone() * Float::from_i64(FP128, k))).wrap(),
-                            MulType::OpDiv => Node::operand(Token::Float(num.clone() / Float::from_i64(FP128, k))).wrap(),
+                            MulType::OpMul => NodeInner::operand(Token::Float(num.clone() * Float::from_i64(FP128, k))).wrap(),
+                            MulType::OpDiv => NodeInner::operand(Token::Float(num.clone() / Float::from_i64(FP128, k))).wrap(),
                         }
                     }
                     Token::Indp(_) | Token::Var(_) | Token::Constant(_) => {
-                        Node::from_operation(
+                        NodeInner::from_operation(
                             operator,
                             constant,
                             self.clone(),
@@ -837,7 +848,7 @@ impl NodeRcFunctions for NodeRef {
         }
     }
     fn remove_constants(self) -> Float {
-        match &self.borrow().value {
+        match &self.inner.borrow().value {
             NodeValue::Operand(o) => match o {
                 Token::Constant(_) => Float::one(FP128, true),
                 Token::Number(n) => Float::from_i64(FP128, *n),
@@ -856,49 +867,48 @@ impl NodeRcFunctions for NodeRef {
                         let right = node.right.clone().remove_constants();
                         left / right
                     },
-                    _ => unreachable!("remove_constants called with {}", self.borrow()), 
+                    _ => unreachable!("remove_constants called with {}", self.inner.borrow()), 
                     // this doesn't panic because the function 
                     // is only called on the constant part of a linearized expression
                     // and the only operators that can be present are Mul and Div
                 },
-                Token::Function(_) => self.borrow().evaluate().unwrap(),
+                Token::Function(_) => self.inner.borrow().evaluate().unwrap(),
                 _ => unreachable!(),
             },
             _ => Float::zero(FP128, false),
         }
     }
     #[tracing::instrument(skip_all, parent = None, name = "(step) linearize", fields(result))]
-    fn linearize(self, log: bool) -> SplitNode {
-        let node = self.borrow();
+    fn linearise(self, log: bool) -> SplitNode {
+        let node = self.inner.borrow();
         let result = match &node.value {
             NodeValue::Operator(op_node) => {
                 match op_node.token {
                     Token::Operator(ref op) => match op {
                         Op::ImplicitMul | Op::Div | Op::Mul => { // just split the left and right into constant and variable parts
                             if node.has_indp {
-                                let left = node.get_left().unwrap().linearize(false);
-                                let right = node.get_right().unwrap().linearize(false);
-                                let constant = Node::from_operation(
+                                let left = node.get_left().unwrap().linearise(false);
+                                let right = node.get_right().unwrap().linearise(false);
+                                let constant = NodeInner::evaluate_constants(
                                     op.clone(), 
                                     left.constant, 
                                     right.constant
-                                ) // left constant * right constant
-                                .borrow()
-                                .evaluate_to_int_node();
-                                let dependant = Node::from_operation(
+                                );
+                                let dependant = NodeInner::from_operation(
                                     op.clone(), 
                                     left.dependant, 
                                     right.dependant
-                                ); // left variable * right variable
+                                ).simplify();
                                 SplitNode { constant, dependant, has_divisor: 0 }
                             } else {
-                                SplitNode { constant: self.clone(), dependant: Node::one(), has_divisor: 0 }
+                                drop(node);
+                                SplitNode { constant: self, dependant: NodeInner::one(), has_divisor: 0 }
                             }
                         }
                         Op::Add | Op::Sub => {
                             if node.has_indp {
-                                let left = node.get_left().unwrap().linearize(false);
-                                let right = node.get_right().unwrap().linearize(false);
+                                let left = node.get_left().unwrap().linearise(false);
+                                let right = node.get_right().unwrap().linearise(false);
                                 let (divisor, l_quotient, r_quotient) = left.constant
                                     .remove_constants()
                                     .gcd(
@@ -907,56 +917,70 @@ impl NodeRcFunctions for NodeRef {
                                 if left.has_divisor == u64::MAX || right.has_divisor == u64::MAX || // no common divisor
                                    (left.has_divisor != 0 && right.has_divisor != 0 && left.has_divisor != right.has_divisor) || // different common divisors
                                    (divisor == 1 || ( left.has_divisor != 0 && left.has_divisor != divisor) || (right.has_divisor != 0 && right.has_divisor != divisor)) {
-                                    SplitNode { constant: Node::one(), dependant: self.clone(), has_divisor: u64::MAX } // return the whole expression, no common divisor
+                                    drop(node);
+                                    SplitNode { constant: NodeInner::one(), dependant: self, has_divisor: u64::MAX } // return the whole expression, no common divisor
                                 } else {
                                     // because this is subtraction or addition, we need to divide both sides by the common divisor and recombine
-                                    let constant = Node::from_number(divisor.try_into().unwrap()).wrap();
-                                    let new_left_k = Node::from_number(l_quotient).wrap();
-                                    let new_right_k = Node::from_number(r_quotient).wrap();
-                                    let new_left = Node::from_operation(Op::Mul, new_left_k, left.dependant);
-                                    let new_right = Node::from_operation(Op::Mul, new_right_k, right.dependant);
-                                    let dependant = Node::from_operation(op.clone(), new_left, new_right);
+                                    let constant = NodeInner::from_number(divisor.try_into().unwrap()).wrap();
+                                    let new_left_k = NodeInner::from_number(l_quotient).wrap();
+                                    let new_right_k = NodeInner::from_number(r_quotient).wrap();
+                                    let new_left = NodeInner::from_operation(Op::Mul, new_left_k, left.dependant);
+                                    let new_right = NodeInner::from_operation(Op::Mul, new_right_k, right.dependant);
+                                    let dependant = NodeInner::from_operation(op.clone(), new_left, new_right).simplify();
                                     SplitNode{ constant, dependant, has_divisor: divisor }
                                 }
                             } else {
-                                SplitNode { constant: self.clone(), dependant: Node::one(), has_divisor: 0 }
+                                drop(node);
+                                SplitNode { constant: self, dependant: NodeInner::one(), has_divisor: 0 }
                             }
                         }
                         Op::Pow => {
                             if node.has_indp {
-                                SplitNode { constant: Node::one(), dependant: self.clone(), has_divisor: 0 } 
+                                drop(node);
+                                SplitNode { constant: NodeInner::one(), dependant: self, has_divisor: 0 } 
                             } else {
-                                SplitNode { constant: self.clone(), dependant: Node::one(), has_divisor: 0 }
+                                drop(node);
+                                SplitNode { constant: self, dependant: NodeInner::one(), has_divisor: 0 }
                             }
                         }
                     },
                     Token::Function(_) => {
                         if node.has_indp {
-                            SplitNode { constant: Node::one(), dependant: self.clone(), has_divisor: 0 } 
+                            drop(node);
+                            SplitNode { constant: NodeInner::one(), dependant: self, has_divisor: 0 } 
                         } else {
-                            SplitNode { constant: self.clone(), dependant: Node::one(), has_divisor: 0 }
+                            drop(node);
+                            SplitNode { constant: self, dependant: NodeInner::one(), has_divisor: 0 }
                         }
                     }
-                    _ => SplitNode { constant: self.clone(), dependant: Node::one(), has_divisor: 0 }
+                    _ => {
+                        drop(node);
+                        SplitNode { constant: self, dependant: NodeInner::one(), has_divisor: 0 }
+                    }
                 }
             }
             NodeValue::Operand(_) => {
                 if node.has_indp {
-                    SplitNode { constant: Node::one(), dependant: self.clone(), has_divisor: 0 } 
+                    drop(node);
+                    SplitNode { constant: NodeInner::one(), dependant: self, has_divisor: 0 } 
                 } else {
-                    SplitNode { constant: self.clone(), dependant: Node::one(), has_divisor: 0 }
+                    drop(node);
+                    SplitNode { constant: self, dependant: NodeInner::one(), has_divisor: 0 }
                 }
             }
-            _ => SplitNode { constant: self.clone(), dependant: Node::one(), has_divisor: 0 }
+            _ => {
+                drop(node);
+                SplitNode { constant: self, dependant: NodeInner::one(), has_divisor: 0 }
+            }
         };
-        if log && !result.constant.borrow().is_one() {
+        if log && !result.constant.inner.borrow().is_one() {
             tracing::Span::current().record("result", &format!("{}", result));
             tracing::debug!("");
         }
         result
     }
     fn simplify(self) -> Self {
-        let node = self.borrow();
+        let node = self.inner.borrow();
         match node {
             t if t.is_log() => {
                 let op_node = match &t.value {
@@ -968,14 +992,17 @@ impl NodeRcFunctions for NodeRef {
                     Token::Function(Func::Log(base)) => base.clone(),
                     _ => unreachable!("{}", t)
                 };
-                if let NodeValue::Operator(inner_op_node) = &arg.borrow().value {
+                if let NodeValue::Operator(inner_op_node) = &arg.inner.borrow().value {
                     if matches!(inner_op_node.token, Token::Operator(Op::Pow)) {
-                        return inner_op_node.right.clone().mul(Node::from_function(Func::Log(base), inner_op_node.left.clone()))
+                        return inner_op_node.right.clone().mul(NodeInner::from_function(Func::Log(base), inner_op_node.left.clone()))
                     }
                 }
-                Node::from_function(Func::Log(base), arg)
+                NodeInner::from_function(Func::Log(base), arg)
             },
-            t if t.is_empty() || t.is_operand() || t.is_fn() => self.clone(),
+            t if t.is_empty() || t.is_operand() || t.is_fn() => {
+                drop(t);
+                self
+            },
             t if t.is_op_node() => {
                 let op_node = match &t.value {
                     NodeValue::Operator(op_node) => op_node,
@@ -983,20 +1010,20 @@ impl NodeRcFunctions for NodeRef {
                 };
                 let left = op_node.left.clone().simplify();
                 let right = op_node.right.clone().simplify();
-                let left_borrow = left.borrow();
-                let right_borrow = right.borrow();
+                let left_borrow = left.inner.borrow();
+                let right_borrow = right.inner.borrow();
                 match (left_borrow.is_empty(), right_borrow.is_empty()) {
                     (false, false) => {
                         if let Token::Operator(op) = op_node.token.clone() {
                             if !left_borrow.has_const && !left_borrow.has_indp && !right_borrow.has_const && !right_borrow.has_indp {
                                 drop(left_borrow);
                                 drop(right_borrow);
-                                let result = Node::from_operation(op, left, right).borrow().evaluate_to_float_node();
+                                let result = NodeInner::from_operation(op, left, right).inner.borrow().evaluate_to_float_node();
                                 return result
                             }
                             if op.is_mul() {
                                 if left_borrow.is_zero() || right_borrow.is_zero() {
-                                    return Node::zero()
+                                    return NodeInner::zero()
                                 }
                                 if left_borrow.is_one() {
                                     drop(right_borrow);
@@ -1015,7 +1042,7 @@ impl NodeRcFunctions for NodeRef {
                             }
                             if op == Op::Div {
                                 if left_borrow.is_zero() {
-                                    return Node::zero()
+                                    return NodeInner::zero()
                                 }
                                 if right_borrow.is_one() {
                                     drop(left_borrow);
@@ -1027,7 +1054,7 @@ impl NodeRcFunctions for NodeRef {
                             }
                             if op == Op::Pow {
                                 if right_borrow.is_zero() {
-                                    return Node::one()
+                                    return NodeInner::one()
                                 } else if right_borrow.is_one() {
                                     drop(left_borrow);
                                     return left
@@ -1082,12 +1109,12 @@ impl NodeRcFunctions for NodeRef {
                                 if !left_borrow.has_indp && right_borrow.has_indp {
                                     drop(left_borrow);
                                     drop(right_borrow);
-                                    return Node::from_operation(op, right, left)
+                                    return NodeInner::from_operation(op, right, left)
                                 }
                             }
                             drop(left_borrow);
                             drop(right_borrow);
-                            Node::from_operation(op, left, right)
+                            NodeInner::from_operation(op, left, right)
                         } else {
                             unreachable!()
                         }
@@ -1100,10 +1127,53 @@ impl NodeRcFunctions for NodeRef {
                         drop(left_borrow);
                         left
                     },
-                    (true, true) => self.clone(),
+                    (true, true) => {
+                        NodeInner::empty()
+                    },
                 }
             },
             _ => unreachable!()
         } 
+    }
+    fn is_polynomial(self) -> bool {
+        let node = self.inner.borrow();
+        match &node.value {
+            NodeValue::Operator(op_node) => {
+                let left = op_node.left.clone();
+                let right = op_node.right.clone();
+                match &op_node.token {
+                    Token::Operator(op) => {
+                        if op.is_mul() || op == &Op::Add || op == &Op::Sub {
+                            if left.is_polynomial() && right.is_polynomial() {
+                                return true
+                            }
+                        } else if op == &Op::Pow {
+                            if let Some(power) = right.inner.borrow().evaluate() {
+                                return power.is_integer() && !power.get_sign()
+                            }
+                        }
+                        return false
+                    },
+                    _ => return false,
+                }
+            },
+            NodeValue::Operand(_) => return true,
+            _ => return false,
+        }
+    }
+    fn factorise(self) -> Self {
+        todo!();
+        if self.is_polynomial() {
+        }
+        let node = self.inner.borrow();
+    }
+}
+
+impl PartialEq for NodeInner {
+    fn eq(&self, other: &Self) -> bool {
+        if self.to_latex().unwrap() == other.to_latex().unwrap() {
+            return true
+        }
+        false
     }
 }

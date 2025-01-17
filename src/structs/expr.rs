@@ -4,15 +4,15 @@ use std::error::Error;
 
 use tracing::debug;
 
-use crate::structs::node::Node;
+use crate::structs::node::NodeInner;
 use crate::parse::{lexer::Lexer, parser::Parser};
 
-use super::node::{MulType, NodeError, NodeRcFunctions, NodeRcOperations, NodeRef};
+use super::node::{MulType, Node, NodeError, NodeFunctions, NodeOperations};
 
 /// A struct representing a mathematical expression.
 #[derive(Debug)]
 pub struct Expr {
-    pub(crate) tree: NodeRef,
+    pub(crate) tree: Node,
 }
 
 impl Clone for Expr {
@@ -23,13 +23,13 @@ impl Clone for Expr {
 
 impl Default for Expr {
     fn default() -> Self {
-        Self { tree: Node::empty() }
+        Self { tree: NodeInner::empty() }
     }
 }
 
 impl Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.tree.borrow())
+        write!(f, "{}", self.tree.inner.borrow())
     }
 }
 
@@ -44,7 +44,7 @@ impl Expr {
         let tree = parser.parse()?;
         Ok(Self { tree })
     }
-    pub(crate) fn from_node(node: NodeRef) -> Self {
+    pub(crate) fn from_node(node: Node) -> Self {
         Self { tree: node }
     }
     /// Returns true if the expression is zero, false otherwise.
@@ -57,7 +57,7 @@ impl Expr {
     /// assert!(!expr.is_zero());
     /// ```
     #[must_use] pub fn is_zero(&self) -> bool {
-        self.tree.borrow().is_zero()
+        self.tree.inner.borrow().is_zero()
     }
     pub(crate) fn parse(input: String, indp: Option<char>) -> Result<Self, Box<dyn Error>> {
         let mut lexer = Lexer::new(input, indp);
@@ -78,15 +78,14 @@ impl Expr {
     /// assert_eq!(expr.simplify().to_string(), "2 x ^ 2");
     /// ```
     #[tracing::instrument(skip(self), parent = None, name = "(step) simplify", fields(result))]
-    #[must_use] pub fn simplify(&self) -> Self {
-        let tree = self.tree.clone().simplify();
-        tracing::Span::current().record("result", tree.borrow().to_string());
-        debug!("");
+    #[must_use] pub fn simplify(self) -> Self {
+        let tree = self.tree.simplify();
+        tracing::Span::current().record("result", tree.inner.borrow().to_string());
         Self { tree }
     }
     /// Returns the LaTeX representation of the expression.
     #[must_use] pub fn to_latex(&self) -> Result<String, NodeError> {
-        self.tree.borrow().to_latex()
+        self.tree.inner.borrow().to_latex()
     }
 }
 
