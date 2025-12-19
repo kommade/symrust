@@ -2,7 +2,7 @@ use std::ops::{Add, Div, Mul, Sub};
 use std::fmt::Display;
 use std::error::Error;
 
-use tracing::debug;
+use arpfloat::{FP128, Float};
 
 use crate::structs::node::NodeInner;
 use crate::parse::{lexer::Lexer, parser::Parser};
@@ -51,35 +51,29 @@ impl Expr {
     /// # Examples
     /// ```
     /// use rust_calculus::{create_expr, structs::expr::Expr};
-    /// let expr = create_expr!("0");
+    /// let expr = create_expr!("0").unwrap();
     /// assert!(expr.is_zero());
-    /// let expr = create_expr!("2x");
+    /// let expr = create_expr!("2x").unwrap();
     /// assert!(!expr.is_zero());
     /// ```
     #[must_use] pub fn is_zero(&self) -> bool {
         self.tree.inner.borrow().is_zero()
     }
-    pub(crate) fn parse(input: String, indp: Option<char>) -> Result<Self, Box<dyn Error>> {
-        let mut lexer = Lexer::new(input, indp);
-        let lexed = lexer.lex()?;
-        let mut parser = Parser::new(lexed);
-        let tree = parser.parse()?;
-        Ok(Self { tree })
-    }
     /// Attempt to simplify the expression. May not always simplify the expression to the simplest form.
+    /// Accepts a boolean argument `expand` which, if true, will attempt to expand products during simplification.
     /// # Examples
     /// ```
     /// use rust_calculus::{create_expr, structs::expr::Expr};
-    /// let expr = create_expr!("2x^2 + 0");
-    /// assert_eq!(expr.simplify().to_string(), "2 x ^ 2");
-    /// let expr = create_expr!("2x^2 * 0");
-    /// assert!(expr.simplify().is_zero());
-    /// let expr = create_expr!("2x^2 / 1");
-    /// assert_eq!(expr.simplify().to_string(), "2 x ^ 2");
+    /// let expr = create_expr!("2x^2 + 0").unwrap();
+    /// assert_eq!(expr.simplify(true).to_string(), "2 x ^ 2");
+    /// let expr = create_expr!("2x^2 * 0").unwrap();
+    /// assert!(expr.simplify(true).is_zero());
+    /// let expr = create_expr!("2x^2 / 1").unwrap();
+    /// assert_eq!(expr.simplify(true).to_string(), "2 x ^ 2");
     /// ```
     #[tracing::instrument(skip(self), parent = None, name = "(step) simplify", fields(result))]
-    #[must_use] pub fn simplify(self) -> Self {
-        let tree = self.tree.simplify();
+    #[must_use] pub fn simplify(self, expand: bool) -> Self {
+        let tree = self.tree.simplify(expand);
         tracing::Span::current().record("result", tree.inner.borrow().to_string());
         Self { tree }
     }
@@ -121,7 +115,7 @@ impl Mul<i64> for Expr {
 
     fn mul(self, other: i64) -> Self {
         Self::from_node(
-            self.tree.distribute_constant(other, MulType::OpMul)
+            self.tree.distribute_constant(Float::from_i64(FP128, other), MulType::OpMul)
         )
     }
 }
@@ -140,7 +134,7 @@ impl Div<i64> for Expr {
 
     fn div(self, other: i64) -> Self {
         Self::from_node(
-            self.tree.distribute_constant(other, MulType::OpDiv)
+            self.tree.distribute_constant(Float::from_i64(FP128, other), MulType::OpDiv)
         )
     }
 }

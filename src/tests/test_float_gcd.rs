@@ -1,5 +1,5 @@
 use arpfloat::{FP128, Float};
-use crate::utils::float_gcd::FloatGCD;
+use crate::utils::float_math::FloatMath;
 
 static RANDOM_INTEGERS: [i64; 20] = [
     -2_472_871_614_674_160_760,
@@ -95,7 +95,7 @@ fn try_is_one() {
         assert!(!float.is_one());
     }
     for f in &RANDOM_FLOATS {
-        let float = Float::from_f64(*f);
+        let float = Float::from_f64(*f).cast(FP128);
         assert!(!float.is_one());
     }
 }

@@ -1,17 +1,20 @@
 use std::ops::Div;
 
-use arpfloat::Float;
+use arpfloat::{FP128, Float};
 
-pub trait FloatGCD {
+static EPSILON: std::sync::LazyLock<Float> = std::sync::LazyLock::new(|| Float::from_f64(1e-10).cast(FP128));
+static ONE: std::sync::LazyLock<Float> = std::sync::LazyLock::new(|| Float::one(FP128, false));
+
+pub trait FloatMath {
+    fn float_equal(&self, other: &Float) -> bool;
     fn is_one(&self) -> bool;
+    fn is_neg_one(&self) -> bool;
     fn is_integer(&self) -> bool;
     fn gcd(&self, other: &Self) -> (u64, i64, i64);
+    fn float_div(&self, div: &Float) -> Option<Float>;
 }
 
-impl FloatGCD for Float {
-    fn is_one(&self) -> bool {
-        !self.get_mantissa().is_zero() && self.get_exp() == 0
-    }
+impl FloatMath for Float {
     fn is_integer(&self) -> bool {
         if !self.is_normal() {
             return false;
@@ -47,5 +50,25 @@ impl FloatGCD for Float {
         }
         let gcd = a;
         (gcd.unsigned_abs(), self.to_i64().div(gcd), other.to_i64().div(gcd))
+    }
+    fn float_equal(&self, other: &Float) -> bool {
+        (self - other).abs() <= *EPSILON
+    }
+
+    fn is_one(&self) -> bool {
+        self.float_equal(&*ONE)
+    }
+
+    fn is_neg_one(&self) -> bool {
+        self.float_equal(&ONE.neg())
+    }
+
+    fn float_div(&self, div: &Float) -> Option<Float> {
+        if !self.is_integer() || !div.is_integer() || div.is_zero() {
+            return None;
+        }
+        let dividend = self.to_i64();
+        let divisor = div.to_i64();
+        Some(Float::from_i64(self.get_semantics(), dividend % divisor))
     }
 }

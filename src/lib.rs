@@ -11,7 +11,7 @@ mod tests;
 /// # Examples
 /// ```
 /// use rust_calculus::{create_expr, structs::expr::Expr};
-/// let expr = create_expr!("2x^2");
+/// let expr = create_expr!("2x^2").unwrap();
 /// assert_eq!(expr.to_string(), "2 x ^ 2");
 /// ```
 /// Returns an error if the expression is invalid.

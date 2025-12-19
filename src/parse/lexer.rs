@@ -1,7 +1,7 @@
 use std::{error::Error, fmt::Display};
 use arpfloat::{Float, FP128};
 
-use crate::utils::float_gcd::FloatGCD;
+use crate::utils::float_math::FloatMath;
 
 #[derive(Debug, Clone)]
 pub enum Func {
@@ -205,7 +205,7 @@ impl Lexer {
 
     fn unwrap_next(&mut self) -> Result<char, LexError> {
         if self.pos < self.size {
-                        let c = self.input.as_bytes()[self.pos] as char;
+            let c = self.input.as_bytes()[self.pos] as char;
             self.pos += 1;
             Ok(c)
         } else {

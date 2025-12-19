@@ -9,25 +9,19 @@ pub enum ParseError {
     MismatchedParentheses, 
     InvalidExpression(String),
     DivisionByZero,
+    Empty
 }
 
-impl Error for ParseError {
-    fn description(&self) -> &str {
-        match self {
-            Self::MismatchedParentheses => "Mismatched parentheses",
-            Self::InvalidExpression(_) => "Invalid expression",
-            Self::DivisionByZero => "Division by zero",
-        }
-    }
+impl Error for ParseError {}
 
-}
 
 impl Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MismatchedParentheses => write!(f, "Mismatched parentheses"),
             Self::InvalidExpression(str) => write!(f, "{str}"),
-            Self::DivisionByZero => write!(f, "Division by zero")
+            Self::DivisionByZero => write!(f, "Division by zero"),
+            Self::Empty => write!(f, "Empty expression"),
         }
     }
 }
@@ -47,6 +41,9 @@ impl Parser {
         let mut output = Vec::with_capacity(self.tokens.len());
         let mut stack = Vec::with_capacity(self.tokens.len());
         let tokens = &mut self.tokens;
+        if tokens.is_empty() {
+            return Err(ParseError::Empty);
+        }
         for token in tokens.iter() {
             match token {
                 Token::Number(_) | Token::Float(_) | Token::Constant(_) | Token::Var(_) | Token::Indp(_) => {
@@ -129,6 +126,6 @@ impl Parser {
                 _ => unreachable!(),
             }
         };
-                Ok(tree.pop().unwrap())
+        Ok(tree.pop().unwrap())
     }
 }

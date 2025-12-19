@@ -59,31 +59,39 @@ fn expr_implicit_mul() {
 fn expr_simplify() {
     super::setup();
     let expr = create_expr!("2x^2 + 0").unwrap();
-    assert_eq!(expr.simplify().to_string(), "2 x ^ 2");
+    assert_eq!(expr.simplify(true).to_string(), "2 x ^ 2");
     let expr = create_expr!("2x^2 * 0").unwrap();
-    assert!(expr.simplify().is_zero());
+    assert!(expr.simplify(true).is_zero());
     let expr = create_expr!("2x^2 / 1").unwrap();
-    assert_eq!(expr.simplify().to_string(), "2 x ^ 2");
+    assert_eq!(expr.simplify(true).to_string(), "2 x ^ 2");
     let expr = create_expr!("x ^ 1").unwrap();
-    assert_eq!(expr.simplify().to_string(), "x");
+    assert_eq!(expr.simplify(true).to_string(), "x");
     let expr = create_expr!("x ^ 0").unwrap();
-    assert_eq!(expr.simplify().to_string(), "1");
+    assert_eq!(expr.simplify(true).to_string(), "1");
     let expr = create_expr!("x - (0 - 1)").unwrap();
-    assert_eq!(expr.simplify().to_string(), "x + 1");
+    assert_eq!(expr.simplify(true).to_string(), "x + 1");
     let expr = create_expr!("x + (0 + 1)").unwrap();
-    assert_eq!(expr.simplify().to_string(), "x + 1");
+    assert_eq!(expr.simplify(true).to_string(), "x + 1");
     let expr = create_expr!("x + 0").unwrap();
-    assert_eq!(expr.simplify().to_string(), "x");
+    assert_eq!(expr.simplify(true).to_string(), "x");
     let expr = create_expr!("0 + x").unwrap();
-    assert_eq!(expr.simplify().to_string(), "x");
+    assert_eq!(expr.simplify(true).to_string(), "x");
     let expr = create_expr!("0 - x").unwrap();
-    assert_eq!(expr.simplify().to_string(), "-x");
+    assert_eq!(expr.simplify(true).to_string(), "-x");
     let expr = create_expr!("0 - (x + 1)").unwrap();
-    assert_eq!(expr.simplify().to_string(), "-x - 1");
+    assert_eq!(expr.simplify(true).to_string(), "-x - 1");
     let expr = create_expr!("0 - (x - 1)").unwrap();
-    assert_eq!(expr.simplify().to_string(), "1 - x");
+    assert_eq!(expr.simplify(true).to_string(), "1 - x");
     let expr = create_expr!("x - 0").unwrap();
-    assert_eq!(expr.simplify().to_string(), "x");
+    assert_eq!(expr.simplify(true).to_string(), "x");
+    let expr = create_expr!("x x x x x").unwrap();
+    assert_eq!(expr.simplify(true).to_string(), "x ^ 5");
+    let expr = create_expr!("2 / x^3").unwrap();
+    assert_eq!(expr.simplify(true).to_string(), "2 / x ^ 3");
+    let expr = create_expr!("6 / (3x^2)").unwrap();
+    assert_eq!(expr.simplify(true).to_string(), "2 / x ^ 2");
+    let expr = create_expr!("5 ln(2) (1 / x)").unwrap();
+    assert_eq!(expr.simplify(true).to_string(), "5 ln(2) / x");
 }
 
 #[test]

@@ -1,7 +1,7 @@
 
 use tracing::{debug, info};
 
-use crate::{parse::lexer::{Const, Func, Op, Token}, structs::{expr::Expr, node::{MulType, NodeInner, NodeFunctions, NodeOperations, Node, NodeValue}}, utils::float_gcd::FloatGCD};
+use crate::{parse::lexer::{Const, Func, Op, Token}, structs::{expr::Expr, node::{MulType, NodeInner, NodeFunctions, NodeOperations, Node, NodeValue}}, utils::float_math::FloatMath};
 
 pub trait Derivative {
     fn get_derivative(self) -> Self;
@@ -21,17 +21,19 @@ impl Derivative for Expr {
     /// # Examples
     /// ```
     /// use rust_calculus::{create_expr, structs::expr::Expr, calculus::derivative::Derivative};
-    /// let expr = create_expr!("2x^2");
-    /// let derivative = expr.derive();
+    /// let expr = create_expr!("2x^2").unwrap();
+    /// let derivative = expr.get_derivative();
     /// assert_eq!(derivative.to_string(), "4 x");
     /// ```
-    /// The function will never panic or return an error as all valid mathematical expressions should have a derivative.
+    /// The function will never panic or return an error as all valid continuous mathematical functions should have a derivative.
     #[tracing::instrument(skip(self), parent = None, name = "(main) get_derivative", fields(result))]
     fn get_derivative(self) -> Self {
         info!("Finding derivative of {self}");
-        let simplified = self.simplify();
-        let result = Self::from_node(simplified.tree.get_derivative());
-        let simplified_result = result.simplify();
+        let simplified = self.simplify(false);
+        let derivative_tree = simplified.tree.get_derivative();
+        let expanded = Self::from_node(derivative_tree).simplify(true);
+        let factored_tree = expanded.tree.factorise();
+        let simplified_result = Self::from_node(factored_tree).simplify(false);
         tracing::Span::current().record("result", simplified_result.to_string());
         info!("Calculation complete");
         simplified_result
@@ -53,10 +55,9 @@ impl DerivativeInternal for Node {
             _ => {
                 drop(borrowed);
                 let split = self.clone().linearise(true);
-                println!("{split}");
                 if !split.constant.inner.borrow().is_one() {
                     let k = split.get_constant();
-                    let result = split.dependant.get_derivative().distribute_constant(k, MulType::OpMul);
+                    let result = split.dependent.get_derivative().distribute_constant(k, MulType::OpMul);
                     debug!("Remultiply by {}", split.constant.inner.borrow().to_string());
                     result
                 } else {
@@ -168,9 +169,13 @@ impl DerivativeInternal for Node {
                             Func::Ln, 
                             NodeInner::from_float(base.clone()).wrap()
                         );
-                        arg.clone().get_derivative().div(arg.impl_mul(ln_base))
+                        if !arg.inner.borrow().has_indp {
+                            arg.clone().get_derivative().div(arg.impl_mul(ln_base))
+                        } else {
+                            arg.clone().get_derivative().div(ln_base.impl_mul(arg))
+                        }
                     }
-                }.simplify();
+                }.simplify(false);
                 tracing::Span::current().record("result", result.inner.borrow().to_string());
                 debug!("{borrowed}");
                 return result;
@@ -226,19 +231,15 @@ impl DerivativeInternal for Node {
                         )
                     }
                     _ => {
-                        let base_as_e = NodeInner::from_operation(
-                            Op::Pow, 
-                            NodeInner::from_constant(Const::E).wrap(), 
-                            NodeInner::from_operation(
-                                Op::ImplicitMul, 
-                                NodeInner::from_function(Func::Ln, base.clone()),
-                                exp
-                            )
+                        let power_as_e = NodeInner::from_operation(
+                            Op::ImplicitMul, 
+                            NodeInner::from_function(Func::Ln, base.clone()),
+                            exp
                         );
                         NodeInner::from_operation(
                             Op::ImplicitMul, 
                             self.clone(), 
-                            base_as_e.get_derivative()
+                            power_as_e.get_derivative()
                         )
                     }
                 };
@@ -253,7 +254,7 @@ impl DerivativeInternal for Node {
     fn product_rule(self) -> Self {
         let borrowed = self.inner.borrow();
         if let NodeValue::Operator(op_node) = &borrowed.value {
-            if matches!(op_node.token, Token::Operator(Op::Mul)) {
+            if matches!(op_node.token, Token::Operator(Op::Mul | Op::ImplicitMul)) {
                 let left = op_node.left.clone();
                 let right = op_node.right.clone();
                 assert!((left.inner.borrow().has_indp && right.inner.borrow().has_indp), "product_rule cannot be used for this node : {}, try applying linearity", borrowed);
@@ -291,13 +292,13 @@ impl DerivativeInternal for Node {
                         Op::Sub, 
                         NodeInner::from_operation(
                             Op::ImplicitMul, 
-                            left.clone(), 
-                            right.clone().get_derivative()
+                            left.clone().get_derivative(), 
+                            right.clone()
                         ), 
                         NodeInner::from_operation(
                             Op::ImplicitMul, 
-                            left.get_derivative(), 
-                            right.clone()
+                            left, 
+                            right.clone().get_derivative()
                         )
                     ), 
                     NodeInner::from_operation(

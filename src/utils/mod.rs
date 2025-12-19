@@ -1,2 +1,2 @@
-pub mod float_gcd;
+pub mod float_math;
 pub mod fmt;
