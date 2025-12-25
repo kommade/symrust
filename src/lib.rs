@@ -1,11 +1,11 @@
 use tracing::Subscriber;
 
-pub mod structs;
 pub mod calculus;
 mod parse;
-mod utils;
+pub mod structs;
 #[cfg(test)]
 mod tests;
+mod utils;
 
 /// Create an [`Expr`][crate::structs::expr::Expr] from a string. Takes an optional second argument for independent variable.
 /// # Examples
@@ -18,7 +18,7 @@ mod tests;
 /// ```
 /// use rust_calculus::{create_expr, structs::expr::Expr};
 /// let expr = create_expr!("2x^2 +");
-/// assert!(expr.is_err());
+/// debug_assert!(expr.is_err());
 /// ```
 
 #[macro_export]

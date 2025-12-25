@@ -9,8 +9,7 @@ fn setup() {
         color_eyre::install().expect("Failed to install color_eyre");
         let subscriber = crate::get_subscriber();
 
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("Failed to set subscriber");
+        tracing::subscriber::set_global_default(subscriber).expect("Failed to set subscriber");
     });
 }
 
@@ -135,5 +134,5 @@ static EXAMPLE_FUNCTIONS: [Example; 19] = [
         latex: "x \\ln(x)",
         derivative: "ln(x) + 1",
         output_latex: "\\ln(x) + 1",
-    }
+    },
 ];

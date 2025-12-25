@@ -1,8 +1,7 @@
+use super::EXAMPLE_FUNCTIONS;
 use crate::create_expr;
 use crate::structs::expr::Expr;
 use crate::structs::node::NodeFunctions;
-use super::EXAMPLE_FUNCTIONS;
-
 
 #[test]
 fn create_expr() {
@@ -97,5 +96,5 @@ fn expr_simplify() {
 #[test]
 fn expr_linearise() {
     let expr = create_expr!("-2 * sin(x) / cos(x)").unwrap();
-    println!("{}", expr.tree.linearise(false).to_string());
+    println!("{}", expr.tree.apply_linearity(false).to_string());
 }

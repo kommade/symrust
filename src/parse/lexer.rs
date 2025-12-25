@@ -1,5 +1,5 @@
+use arpfloat::{FP128, Float};
 use std::{error::Error, fmt::Display};
-use arpfloat::{Float, FP128};
 
 use crate::utils::float_math::FloatMath;
 
@@ -24,17 +24,18 @@ impl Display for Func {
             Self::Sec => write!(f, "sec"),
             Self::Csc => write!(f, "csc"),
             Self::Cot => write!(f, "cot"),
-            Self::Log(n) => if n.is_integer() {
-                let str = n.to_string();
-                                let sliced = str.strip_suffix('.').unwrap();
-                write!(f, "log_{sliced}")
-            } else {
-                write!(f, "log_{n}")
-            },
+            Self::Log(n) => {
+                if n.is_integer() {
+                    let str = n.to_string();
+                    let sliced = str.strip_suffix('.').unwrap();
+                    write!(f, "log_{sliced}")
+                } else {
+                    write!(f, "log_{n}")
+                }
+            }
             Self::Ln => write!(f, "ln"),
         }
     }
-
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -72,7 +73,6 @@ impl Display for Op {
             Self::Pow => write!(f, "^"),
         }
     }
-
 }
 
 #[derive(Debug, Clone)]
@@ -124,12 +124,12 @@ impl Display for Token {
                     write!(f, "0")
                 } else if n.is_integer() {
                     let str = n.to_string();
-                                        let sliced = str.strip_suffix('.').unwrap();
+                    let sliced = str.strip_suffix('.').unwrap();
                     write!(f, "{sliced}")
                 } else {
                     write!(f, "{n}")
                 }
-            },
+            }
             Self::Indp(c) | Self::Var(c) => write!(f, "{c}"),
             Self::LPar => write!(f, "("),
             Self::RPar => write!(f, ")"),
@@ -157,7 +157,16 @@ impl Token {
         Self::Var(c)
     }
     pub const fn is_implicitly_mul(&self) -> bool {
-        matches!(self, Self::Var(_) | Self::Constant(_) | Self::Number(_) | Self::RPar | Self::Indp(_) | Self::Function(_) | Self::LPar)
+        matches!(
+            self,
+            Self::Var(_)
+                | Self::Constant(_)
+                | Self::Number(_)
+                | Self::RPar
+                | Self::Indp(_)
+                | Self::Function(_)
+                | Self::LPar
+        )
     }
 }
 
@@ -179,7 +188,9 @@ impl Error for LexError {
 impl Display for LexError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::UnexpectedEOF(pos) => write!(f, "Unexpected end of input string at position {pos}"),
+            Self::UnexpectedEOF(pos) => {
+                write!(f, "Unexpected end of input string at position {pos}")
+            }
             Self::ParseError(msg) => write!(f, "{msg}"),
         }
     }
@@ -228,7 +239,10 @@ impl Lexer {
                         num.push(c);
                     } else if c == '.' {
                         if is_float {
-                            return Err(LexError::ParseError(format!("Unexpected character {} at pos {}", c, self.pos)));
+                            return Err(LexError::ParseError(format!(
+                                "Unexpected character {} at pos {}",
+                                c, self.pos
+                            )));
                         }
                         num.push(c);
                         is_float = true;
@@ -240,28 +254,35 @@ impl Lexer {
                 if is_float {
                     Ok(Token::from_float(match num.parse::<f64>() {
                         Ok(n) => Float::from_f64(n).cast(FP128),
-                        Err(e) => return Err(LexError::ParseError(format!("Error parsing Float {} at pos {}: {}", num, self.pos, e))),
+                        Err(e) => {
+                            return Err(LexError::ParseError(format!(
+                                "Error parsing Float {} at pos {}: {}",
+                                num, self.pos, e
+                            )));
+                        }
                     }))
                 } else {
                     match num.parse() {
                         Ok(n) => Ok(Token::from_num(n)),
-                        Err(_) => {
-                            Err(LexError::ParseError(format!("Error parsing number {} at pos {}", num, self.pos)))
-                        }
+                        Err(_) => Err(LexError::ParseError(format!(
+                            "Error parsing number {} at pos {}",
+                            num, self.pos
+                        ))),
                     }
                 }
-            },
-            c if c.is_ascii_punctuation() => {
-                match c {
-                    '(' => Ok(Token::LPar),
-                    ')' => Ok(Token::RPar),
-                    '+' => Ok(Token::from_op(Op::Add)),
-                    '-' => Ok(Token::from_op(Op::Sub)),
-                    '*' | '×' => Ok(Token::from_op(Op::Mul)),
-                    '/' | '÷' => Ok(Token::from_op(Op::Div)),
-                    '^' => Ok(Token::from_op(Op::Pow)),
-                    _ => Err(LexError::ParseError(format!("Unexpected character {} at pos {}", c, self.pos))),
-                }
+            }
+            c if c.is_ascii_punctuation() => match c {
+                '(' => Ok(Token::LPar),
+                ')' => Ok(Token::RPar),
+                '+' => Ok(Token::from_op(Op::Add)),
+                '-' => Ok(Token::from_op(Op::Sub)),
+                '*' | '×' => Ok(Token::from_op(Op::Mul)),
+                '/' | '÷' => Ok(Token::from_op(Op::Div)),
+                '^' => Ok(Token::from_op(Op::Pow)),
+                _ => Err(LexError::ParseError(format!(
+                    "Unexpected character {} at pos {}",
+                    c, self.pos
+                ))),
             },
             c if c == self.indp => Ok(Token::Indp(c)),
             c if c.is_ascii_alphabetic() => {
@@ -270,7 +291,7 @@ impl Lexer {
                         'e' => Const::E,
                         'π' => Const::Pi,
                         _ => unreachable!(),
-                    }))
+                    }));
                 };
                 let mut value = c.to_string();
                 while let Ok(c) = self.unwrap_next() {
@@ -283,7 +304,7 @@ impl Lexer {
                         self.pos -= 1;
                         break;
                     }
-                };
+                }
                 match value.as_str() {
                     "sin" => Ok(Token::from_func(Func::Sin)),
                     "cos" => Ok(Token::from_func(Func::Cos)),
@@ -306,13 +327,25 @@ impl Lexer {
                                 }
                                 match base_str.parse::<f64>() {
                                     Ok(n) if n != 0.0 && n != 1.0 => base = n,
-                                    Ok(_) => return Err(LexError::ParseError(format!("Invalid log base {} at pos {}", base_str, self.pos))),
-                                    Err(e) => return Err(LexError::ParseError(format!("Error parsing log base {} at pos {}: {}", base_str, self.pos, e))),
+                                    Ok(_) => {
+                                        return Err(LexError::ParseError(format!(
+                                            "Invalid log base {} at pos {}",
+                                            base_str, self.pos
+                                        )));
+                                    }
+                                    Err(e) => {
+                                        return Err(LexError::ParseError(format!(
+                                            "Error parsing log base {} at pos {}: {}",
+                                            base_str, self.pos, e
+                                        )));
+                                    }
                                 };
                             }
                         }
-                        Ok(Token::from_func(Func::Log(Float::from_f64(base).cast(FP128))))
-                    },
+                        Ok(Token::from_func(Func::Log(
+                            Float::from_f64(base).cast(FP128),
+                        )))
+                    }
                     "ln" => Ok(Token::from_func(Func::Ln)),
                     _ => {
                         // we can only return tokens one at a time so
@@ -322,14 +355,17 @@ impl Lexer {
                             Some(c) => {
                                 self.pos -= value.len() - 1;
                                 Ok(Token::from_var(c))
-                            },
+                            }
                             None => unreachable!(),
                         }
-                    },
+                    }
                 }
-            },
+            }
             c if c.is_whitespace() => self.next(),
-            _ => Err(LexError::ParseError(format!("Unexpected character {} at pos {}", c, self.pos))),
+            _ => Err(LexError::ParseError(format!(
+                "Unexpected character {} at pos {}",
+                c, self.pos
+            ))),
         }
     }
 
@@ -346,14 +382,13 @@ impl Lexer {
                 token if token.is_implicitly_mul() => {
                     if i > 0 {
                         match tokens[i - 1] {
-                            Token::Function(_) | Token::LPar => {},
+                            Token::Function(_) | Token::LPar => {}
                             _ if tokens[i - 1].is_implicitly_mul() => {
                                 tokens.insert(i, Token::from_op(Op::ImplicitMul));
                                 i += 1;
-                            },
-                            _ => {},
+                            }
+                            _ => {}
                         }
-                        
                     }
                 }
                 Token::Operator(Op::Mul) => {

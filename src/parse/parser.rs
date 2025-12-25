@@ -1,19 +1,18 @@
 use std::{error::Error, fmt::Display};
 
-use crate::structs::node::{NodeInner, Node};
+use crate::structs::node::{Node, NodeInner};
 
 use super::lexer::{Op, Token};
 
 #[derive(Debug)]
 pub enum ParseError {
-    MismatchedParentheses, 
+    MismatchedParentheses,
     InvalidExpression(String),
     DivisionByZero,
-    Empty
+    Empty,
 }
 
 impl Error for ParseError {}
-
 
 impl Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -32,9 +31,7 @@ pub struct Parser {
 
 impl Parser {
     pub(crate) fn new(tokens: Vec<Token>) -> Self {
-        Self {
-            tokens,
-        }
+        Self { tokens }
     }
 
     pub(crate) fn parse(&mut self) -> Result<Node, ParseError> {
@@ -46,36 +43,42 @@ impl Parser {
         }
         for token in tokens.iter() {
             match token {
-                Token::Number(_) | Token::Float(_) | Token::Constant(_) | Token::Var(_) | Token::Indp(_) => {
+                Token::Number(_)
+                | Token::Float(_)
+                | Token::Constant(_)
+                | Token::Var(_)
+                | Token::Indp(_) => {
                     output.push(token);
                     continue;
-                },
+                }
                 Token::Function(_) => {
                     stack.push(token);
                     continue;
-                },
-                Token::Operator(ref op) => {
+                }
+                Token::Operator(op) => {
                     while let Some(Token::Operator(top_op)) = stack.last() {
-                        if top_op.precedence() > op.precedence() || (top_op.precedence() == op.precedence() && *op != Op::Pow) {
-                                                        output.push(stack.pop().unwrap());
+                        if top_op.precedence() > op.precedence()
+                            || (top_op.precedence() == op.precedence() && *op != Op::Pow)
+                        {
+                            output.push(stack.pop().unwrap());
                         } else {
                             break;
                         }
                     }
                     stack.push(token);
-                },
+                }
                 Token::LPar => {
                     stack.push(token);
-                },
+                }
                 Token::RPar => {
                     while let Some(top) = stack.last() {
                         if !matches!(top, Token::LPar) {
                             if stack.is_empty() {
                                 return Err(ParseError::MismatchedParentheses);
                             }
-                                                        output.push(stack.pop().unwrap());
+                            output.push(stack.pop().unwrap());
                         } else {
-                            break
+                            break;
                         }
                     }
                     if stack.is_empty() {
@@ -83,23 +86,27 @@ impl Parser {
                     }
                     stack.pop();
                     if let Some(Token::Function(_)) = stack.last() {
-                                                output.push(stack.pop().unwrap());
+                        output.push(stack.pop().unwrap());
                     }
-                },
-            }  
-        };
+                }
+            }
+        }
         while let Some(token) = stack.pop() {
             match token {
                 Token::LPar | Token::RPar => return Err(ParseError::MismatchedParentheses),
                 _ => output.push(token),
             }
-        };
+        }
         let mut tree = Vec::with_capacity(output.len());
         for token in output {
             match token {
-                Token::Number(_) | Token::Float(_) | Token::Constant(_) | Token::Var(_) | Token::Indp(_) => {
+                Token::Number(_)
+                | Token::Float(_)
+                | Token::Constant(_)
+                | Token::Var(_)
+                | Token::Indp(_) => {
                     tree.push(NodeInner::operand(token.clone()).wrap());
-                },
+                }
                 Token::Operator(op) => {
                     if tree.len() < 2 {
                         if *op == Op::Sub {
@@ -107,7 +114,9 @@ impl Parser {
                             tree.push(crate::structs::node::NodeFunctions::negate(right));
                             continue;
                         }
-                        return Err(ParseError::InvalidExpression(format!("Operator {op} has less than 2 operands")));
+                        return Err(ParseError::InvalidExpression(format!(
+                            "Operator {op} has less than 2 operands"
+                        )));
                     }
                     let right = tree.pop().unwrap();
                     let left = tree.pop().unwrap();
@@ -115,17 +124,19 @@ impl Parser {
                         return Err(ParseError::DivisionByZero);
                     }
                     tree.push(NodeInner::from_operation(op.clone(), left, right));
-                },
+                }
                 Token::Function(func) => {
                     if tree.is_empty() {
-                        return Err(ParseError::InvalidExpression(format!("Function {func} has no operands")));
+                        return Err(ParseError::InvalidExpression(format!(
+                            "Function {func} has no operands"
+                        )));
                     }
-                                        let right = tree.pop().unwrap();
+                    let right = tree.pop().unwrap();
                     tree.push(NodeInner::from_function(func.clone(), right));
-                },
+                }
                 _ => unreachable!(),
             }
-        };
+        }
         Ok(tree.pop().unwrap())
     }
 }

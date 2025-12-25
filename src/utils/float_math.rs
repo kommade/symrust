@@ -2,7 +2,8 @@ use std::ops::Div;
 
 use arpfloat::{FP128, Float};
 
-static EPSILON: std::sync::LazyLock<Float> = std::sync::LazyLock::new(|| Float::from_f64(1e-10).cast(FP128));
+static EPSILON: std::sync::LazyLock<Float> =
+    std::sync::LazyLock::new(|| Float::from_f64(1e-10).cast(FP128));
 static ONE: std::sync::LazyLock<Float> = std::sync::LazyLock::new(|| Float::one(FP128, false));
 
 pub trait FloatMath {
@@ -27,7 +28,7 @@ impl FloatMath for Float {
         // Calculate the number of bits to shift based on the exponent and the precision.
         let shift_amount = self.get_semantics().get_exponent_len();
         let mut shifted_mantissa = self.get_mantissa();
-        
+
         // Shift the mantissa right by the calculated amount.
         shifted_mantissa.shift_right(shift_amount);
 
@@ -39,7 +40,7 @@ impl FloatMath for Float {
     }
     fn gcd(&self, other: &Self) -> (u64, i64, i64) {
         if !self.is_integer() || !other.is_integer() {
-            return (1, 0, 0)
+            return (1, 0, 0);
         }
         let mut a = self.to_i64();
         let mut b = other.to_i64();
@@ -49,7 +50,11 @@ impl FloatMath for Float {
             a = t;
         }
         let gcd = a;
-        (gcd.unsigned_abs(), self.to_i64().div(gcd), other.to_i64().div(gcd))
+        (
+            gcd.unsigned_abs(),
+            self.to_i64().div(gcd),
+            other.to_i64().div(gcd),
+        )
     }
     fn float_equal(&self, other: &Float) -> bool {
         (self - other).abs() <= *EPSILON

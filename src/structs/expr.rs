@@ -1,11 +1,11 @@
-use std::ops::{Add, Div, Mul, Sub};
-use std::fmt::Display;
 use std::error::Error;
+use std::fmt::Display;
+use std::ops::{Add, Div, Mul, Sub};
 
 use arpfloat::{FP128, Float};
 
-use crate::structs::node::NodeInner;
 use crate::parse::{lexer::Lexer, parser::Parser};
+use crate::structs::node::NodeInner;
 
 use super::node::{MulType, Node, NodeError, NodeFunctions, NodeOperations};
 
@@ -17,13 +17,17 @@ pub struct Expr {
 
 impl Clone for Expr {
     fn clone(&self) -> Self {
-        Self { tree: self.tree.clone() }
+        Self {
+            tree: self.tree.clone(),
+        }
     }
 }
 
 impl Default for Expr {
     fn default() -> Self {
-        Self { tree: NodeInner::empty() }
+        Self {
+            tree: NodeInner::empty(),
+        }
     }
 }
 
@@ -56,7 +60,8 @@ impl Expr {
     /// let expr = create_expr!("2x").unwrap();
     /// assert!(!expr.is_zero());
     /// ```
-    #[must_use] pub fn is_zero(&self) -> bool {
+    #[must_use]
+    pub fn is_zero(&self) -> bool {
         self.tree.inner.borrow().is_zero()
     }
     /// Attempt to simplify the expression. May not always simplify the expression to the simplest form.
@@ -72,13 +77,15 @@ impl Expr {
     /// assert_eq!(expr.simplify(true).to_string(), "2 x ^ 2");
     /// ```
     #[tracing::instrument(skip(self), parent = None, name = "(step) simplify", fields(result))]
-    #[must_use] pub fn simplify(self, expand: bool) -> Self {
-        let tree = self.tree.simplify(expand);
+    #[must_use]
+    pub fn simplify(self, expand: bool) -> Self {
+        let tree = self.tree.simplify(expand, true);
         tracing::Span::current().record("result", tree.inner.borrow().to_string());
         Self { tree }
     }
     /// Returns the LaTeX representation of the expression.
-    #[must_use] pub fn to_latex(&self) -> Result<String, NodeError> {
+    #[must_use]
+    pub fn to_latex(&self) -> Result<String, NodeError> {
         self.tree.inner.borrow().to_latex()
     }
 }
@@ -115,7 +122,8 @@ impl Mul<i64> for Expr {
 
     fn mul(self, other: i64) -> Self {
         Self::from_node(
-            self.tree.distribute_constant(Float::from_i64(FP128, other), MulType::OpMul)
+            self.tree
+                .distribute_constant(Float::from_i64(FP128, other), MulType::OpMul),
         )
     }
 }
@@ -134,7 +142,8 @@ impl Div<i64> for Expr {
 
     fn div(self, other: i64) -> Self {
         Self::from_node(
-            self.tree.distribute_constant(Float::from_i64(FP128, other), MulType::OpDiv)
+            self.tree
+                .distribute_constant(Float::from_i64(FP128, other), MulType::OpDiv),
         )
     }
 }

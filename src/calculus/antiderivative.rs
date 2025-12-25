@@ -1,6 +1,3 @@
-
-
-
 pub trait Antiderivative {
     fn get_antiderivative(&self) -> Self;
 }
@@ -13,5 +10,4 @@ trait AntiderivativeInternal {
     fn u_substitution(&self) -> Self;
     fn integration_by_parts(&self) -> Self;
     fn partial_fraction(&self) -> Self;
-    
 }
