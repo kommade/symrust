@@ -372,7 +372,7 @@ impl Integrator {
                 info!(
                     "Pulling the constant {} out of {}",
                     describe_number(&value),
-                    describe(node)
+                    describe_signed(node)
                 );
                 let integral = self.integrate(&dependent)?;
                 let scaled = helpers::scale(integral.clone(), value);
@@ -439,7 +439,7 @@ impl Integrator {
         }
         info!(
             "No technique applies to {}, so it has no elementary antiderivative that this crate can find",
-            describe(node)
+            describe_signed(node)
         );
         Err(IntegrationError::Unsupported(describe(node)))
     }
@@ -986,7 +986,23 @@ impl Integrator {
             let Some(du) = helpers::differentiate(&candidate) else {
                 continue;
             };
-            let inner_integrand = helpers::mul(v.clone(), du);
+            let du = helpers::simplify_deep(&du);
+            // Show the assembled formula before solving the remaining integral
+            // so the log follows the rule step by step.
+            let uv = helpers::mul(candidate.clone(), v.clone());
+            let inner_integrand = helpers::mul(v.clone(), du.clone());
+            let du_text = if helpers::is_one(&du) {
+                String::from("dx")
+            } else {
+                format!("{} dx", describe_signed(&du))
+            };
+            info!(
+                "With v = {} and du = {}, result is {} - ∫{} dx",
+                describe_signed(&v),
+                du_text,
+                describe_signed(&uv),
+                describe_signed(&inner_integrand)
+            );
             self.parts_depth += 1;
             let inner_result = self.integrate(&inner_integrand);
             self.parts_depth -= 1;
@@ -1161,9 +1177,9 @@ fn describe(node: &Node) -> String {
 /// (the span's `result` field follows it), `debug` when it did not apply.
 fn log_technique_outcome(node: &Node, found: bool) {
     if found {
-        info!("{}", describe(node));
+        info!("{}", describe_signed(node));
     } else {
-        debug!("{}", describe(node));
+        debug!("{}", describe_signed(node));
     }
 }
 
@@ -1173,17 +1189,23 @@ fn log_technique_outcome(node: &Node, found: bool) {
 /// debug level.
 fn record_option(result: Option<&Node>) -> bool {
     let text = match result {
-        Some(node) => {
-            if tracing::Span::current().is_disabled() {
-                describe(node)
-            } else {
-                describe(&helpers::simplify_deep(node))
-            }
-        }
+        Some(node) => describe_signed(node),
         None => String::from("no result"),
     };
     tracing::Span::current().record("result", text);
     result.is_some()
+}
+
+/// Describe an expression with a leading minus sign pulled out, so that
+/// `(-x) cos(x)` is reported as `-x cos(x)`.
+fn describe_signed(node: &Node) -> String {
+    let simplified = helpers::simplify_deep(node);
+    if simplified.inner.borrow().is_neg() {
+        let magnitude = helpers::simplify_deep(&simplified.negate());
+        format!("-{}", describe(&magnitude))
+    } else {
+        describe(&simplified)
+    }
 }
 
 /// Format a constant for the logs, preferring exact fractions over the long
