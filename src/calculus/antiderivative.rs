@@ -258,6 +258,7 @@ impl Integrator {
         Ok(helpers::simplify_deep(&result))
     }
 
+    #[tracing::instrument(skip_all, parent = None, name = "(step) integrate")]
     pub(super) fn integrate(&mut self, node: &Node) -> Result<Node, IntegrationError> {
         self.tick()?;
         let simplified = node.clone().simplify(false, true);
@@ -310,6 +311,13 @@ impl Integrator {
                     let rewritten = helpers::negate(helpers::function(Func::Ln, denominator));
                     return self.integrate(&rewritten);
                 }
+            }
+        }
+        // `-u` integrates to the negation of the integral of `u`.
+        if let Shape::Operator(Token::Operator(Op::Sub), left, right) = helpers::shape(node) {
+            if helpers::is_zero(&left) {
+                let integral = self.integrate(&right)?;
+                return Ok(integral.negate());
             }
         }
         // Integrate sums term by term.
@@ -447,7 +455,7 @@ impl Integrator {
     fn find_standard_rule(&self, node: &Node) -> Option<Node> {
         match helpers::shape(node) {
             Shape::Operand(Token::Indp(_)) => {
-                debug!(
+                info!(
                     "Applying the power rule to {} with exponent 1, raising it to 2",
                     describe(node)
                 );
@@ -499,7 +507,7 @@ impl Integrator {
                     }
                 }
                 let (slope, _) = helpers::linear_coefficients(&arg)?;
-                debug!(
+                info!(
                     "Using the standard antiderivative of {}({})",
                     func,
                     describe(&arg)
@@ -519,10 +527,9 @@ impl Integrator {
                 return None;
             }
             let (slope, _) = helpers::linear_coefficients(&exponent)?;
-            debug!(
-                "Applying the exponential rule to {}^{}",
-                describe(&base),
-                describe(&exponent)
+            info!(
+                "Applying the exponential rule to {}",
+                describe(&helpers::pow(base.clone(), exponent.clone()))
             );
             let is_e = constant.float_equal(&Float::e(FP128));
             let current = helpers::pow(base, exponent);
@@ -530,21 +537,23 @@ impl Integrator {
                 if slope.is_one() {
                     return Some(current);
                 }
-                return Some(helpers::div(current, helpers::float(slope)));
+                return Some(helpers::divide_by(current, slope));
             }
             let logarithm = helpers::function(Func::Ln, helpers::float(constant));
-            let denominator = if slope.is_one() {
-                logarithm
-            } else {
-                helpers::mul(helpers::float(slope), logarithm)
-            };
-            return Some(helpers::div(current, denominator));
+            if slope.is_one() {
+                return Some(helpers::div(current, logarithm));
+            }
+            let negative = slope.get_sign();
+            let magnitude = if negative { slope.neg() } else { slope };
+            let denominator = helpers::mul(helpers::float(magnitude), logarithm);
+            let numerator = if negative { current.negate() } else { current };
+            return Some(helpers::div(numerator, denominator));
         }
         let exponent_value = helpers::constant_value(&exponent)?;
         // Powers of a linear expression.
         let (slope, _) = helpers::linear_coefficients(&base)?;
         if exponent_value.is_neg_one() {
-            debug!(
+            info!(
                 "Applying the power rule with exponent -1 to {}",
                 describe(&base)
             );
@@ -554,7 +563,7 @@ impl Integrator {
         if new_exponent.is_zero() {
             return None;
         }
-        debug!(
+        info!(
             "Applying the power rule to {}^{}, raising the exponent to {}",
             describe(&base),
             describe(&helpers::float(exponent_value)),
@@ -956,8 +965,10 @@ impl Integrator {
                 .map(|(_, factor)| factor.clone())
                 .collect();
             let rest = helpers::product_of(&rest);
-            debug!(
-                "Considering integration by parts with u = {} and dv = {} dx",
+            // Announce the rule before doing any of its sub-integrations so the
+            // log reads top down.
+            info!(
+                "Using integration by parts with u = {} and dv = {} dx",
                 describe(&candidate),
                 describe(&rest)
             );
@@ -981,11 +992,6 @@ impl Integrator {
             self.parts_depth -= 1;
             match inner_result {
                 Ok(inner) => {
-                    info!(
-                        "Using integration by parts with u = {} and dv = {} dx",
-                        describe(&candidate),
-                        describe(&rest)
-                    );
                     return Ok(Some(helpers::subtract(helpers::mul(candidate, v), inner)));
                 }
                 Err(IntegrationError::Timeout) => return Err(IntegrationError::Timeout),
@@ -1171,7 +1177,7 @@ fn record_option(result: Option<&Node>) -> bool {
             if tracing::Span::current().is_disabled() {
                 describe(node)
             } else {
-                describe(&node.clone().simplify(false, true))
+                describe(&helpers::simplify_deep(node))
             }
         }
         None => String::from("no result"),

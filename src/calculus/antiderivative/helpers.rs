@@ -405,8 +405,13 @@ fn collect_terms(node: &Node, negated: bool, terms: &mut Vec<(bool, Node)>, dept
             return;
         }
         if let Shape::Operator(Token::Operator(Op::Sub), left, right) = shape(node) {
-            collect_terms(&left, negated, terms, depth + 1);
-            collect_terms(&right, !negated, terms, depth + 1);
+            if is_zero(&left) {
+                // `0 - u` is a single negated term, not a sum of two terms.
+                collect_terms(&right, !negated, terms, depth + 1);
+            } else {
+                collect_terms(&left, negated, terms, depth + 1);
+                collect_terms(&right, !negated, terms, depth + 1);
+            }
             return;
         }
     }

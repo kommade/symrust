@@ -584,11 +584,19 @@ impl RationalFunction {
     pub(super) fn integrate(&self, variable: &Node) -> Option<Node> {
         let result = self.integrate_rational(variable);
         super::record_option(result.as_ref());
-        info!(
-            "({}) / ({})",
-            describe_polynomial(&self.numer),
-            describe_polynomial(&self.denom)
-        );
+        let numer = describe_polynomial(&self.numer);
+        let denom = describe_polynomial(&self.denom);
+        let numer = if numer.contains(' ') {
+            format!("({numer})")
+        } else {
+            numer
+        };
+        let denom = if denom.contains(' ') {
+            format!("({denom})")
+        } else {
+            denom
+        };
+        info!("{numer} / {denom}");
         result
     }
 
