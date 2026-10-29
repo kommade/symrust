@@ -249,6 +249,10 @@ impl NodeInner {
                                 format!(r"\log_{{{base}}}({right_str})")
                             }
                         }
+                        Func::Asin => format!(r"\arcsin({right_str})"),
+                        Func::Acos => format!(r"\arccos({right_str})"),
+                        Func::Atan => format!(r"\arctan({right_str})"),
+                        Func::Sqrt => format!(r"\sqrt{{{right_str}}}"),
                         _ => format!(r"\{op_str}({right_str})"),
                     },
                     _ => return Err(NodeError::WrongToken("operator".to_string())),
@@ -697,7 +701,8 @@ impl NodeInner {
                     let right_const = NodeInner::is_constant_node(&right);
                     return match (left_const, right_const) {
                         (true, true) => Some((
-                            NodeInner::from_operation(Op::ImplicitMul, left, right).simplify(false, true),
+                            NodeInner::from_operation(Op::ImplicitMul, left, right)
+                                .simplify(false, true),
                             NodeInner::one(),
                         )),
                         (true, false) => Some((left, right)),
@@ -756,7 +761,8 @@ impl NodeInner {
                 NodeInner::from_operation(Op::Add, left.exponent.clone(), right.exponent.clone());
             let pow = NodeInner::from_operation(Op::Pow, left.base.clone(), new_exponent);
             return Some(
-                NodeInner::from_operation(Op::ImplicitMul, new_coeff, pow).simplify(false, combine_fns),
+                NodeInner::from_operation(Op::ImplicitMul, new_coeff, pow)
+                    .simplify(false, combine_fns),
             );
         }
         if NodeInner::nodes_equal(&left.exponent, &right.exponent) {
@@ -765,11 +771,13 @@ impl NodeInner {
                 right.coefficient.clone(),
                 &mul_op,
             );
-            let base = NodeInner::from_operation(Op::ImplicitMul, left.base.clone(), right.base.clone())
-                .simplify(false, combine_fns);
+            let base =
+                NodeInner::from_operation(Op::ImplicitMul, left.base.clone(), right.base.clone())
+                    .simplify(false, combine_fns);
             let pow = NodeInner::from_operation(Op::Pow, base, left.exponent.clone());
             return Some(
-                NodeInner::from_operation(Op::ImplicitMul, new_coeff, pow).simplify(false, combine_fns),
+                NodeInner::from_operation(Op::ImplicitMul, new_coeff, pow)
+                    .simplify(false, combine_fns),
             );
         }
         None
@@ -817,7 +825,6 @@ impl NodeInner {
         let left_components = NodeInner::extract_pow_components(left, combine_fns);
         let right_components = NodeInner::extract_pow_components(right, combine_fns);
         if let (Some(left_comp), Some(right_comp)) = (&left_components, &right_components) {
-            println!("{} || {}", left_comp, right_comp);
             if NodeInner::nodes_equal(&left_comp.base, &right_comp.base) {
                 let new_coeff = NodeInner::combine_coefficients(
                     left_comp.coefficient.clone(),
@@ -832,7 +839,11 @@ impl NodeInner {
                 );
                 let new_pow =
                     NodeInner::from_operation(Op::Pow, left_comp.base.clone(), new_exponent);
-                return Some(NodeInner::from_operation(Op::ImplicitMul, new_coeff, new_pow));
+                return Some(NodeInner::from_operation(
+                    Op::ImplicitMul,
+                    new_coeff,
+                    new_pow,
+                ));
             }
 
             if NodeInner::nodes_equal(&left_comp.exponent, &right_comp.exponent) {
@@ -841,7 +852,11 @@ impl NodeInner {
                     right_comp.coefficient.clone(),
                     op,
                 );
-                let base_op = if *op == Op::Div { Op::Div } else { Op::ImplicitMul };
+                let base_op = if *op == Op::Div {
+                    Op::Div
+                } else {
+                    Op::ImplicitMul
+                };
                 let new_base = NodeInner::from_operation(
                     base_op,
                     left_comp.base.clone(),
@@ -851,7 +866,11 @@ impl NodeInner {
                 let new_pow =
                     NodeInner::from_operation(Op::Pow, new_base, left_comp.exponent.clone())
                         .simplify(false, false);
-                return Some(NodeInner::from_operation(Op::ImplicitMul, new_coeff, new_pow));
+                return Some(NodeInner::from_operation(
+                    Op::ImplicitMul,
+                    new_coeff,
+                    new_pow,
+                ));
             }
         }
 
@@ -864,8 +883,9 @@ impl NodeInner {
                 if !NodeInner::is_constant_node(&numerator) {
                     return None;
                 }
-                let new_numerator = NodeInner::from_operation(Op::ImplicitMul, other.clone(), numerator)
-                    .simplify(false, false);
+                let new_numerator =
+                    NodeInner::from_operation(Op::ImplicitMul, other.clone(), numerator)
+                        .simplify(false, false);
                 Some(
                     NodeInner::from_operation(Op::Div, new_numerator, denominator)
                         .simplify(false, false),
@@ -1162,26 +1182,21 @@ impl NodeInner {
                     _ => unreachable!(),
                 },
                 NodeValue::Operator(op_node) => {
-                    let left = op_node.left.inner.borrow().evaluate()?;
-                    let right = op_node.right.inner.borrow().evaluate()?;
                     match &op_node.token {
-                        Token::Operator(op) => match op {
-                            Op::Add => Some(left + right),
-                            Op::Sub => Some(left - right),
-                            Op::Mul | Op::ImplicitMul => Some(left * right),
-                            Op::Div => Some(left / right),
-                            Op::Pow => Some(left.pow(&right)),
-                        },
-                        Token::Function(func) => match func {
-                            Func::Sin => Some(left.sin()),
-                            Func::Cos => Some(left.cos()),
-                            Func::Tan => Some(left.tan()),
-                            Func::Sec => Some(Float::one(FP128, true) / left.cos()),
-                            Func::Csc => Some(Float::one(FP128, true) / left.sin()),
-                            Func::Cot => Some(Float::one(FP128, true) / left.tan()),
-                            Func::Ln => Some(left.log()),
-                            Func::Log(base) => Some(left.log() / base.log()),
-                        },
+                        Token::Operator(op) => {
+                            let left = op_node.left.inner.borrow().evaluate()?;
+                            let right = op_node.right.inner.borrow().evaluate()?;
+                            match op {
+                                Op::Add => Some(left + right),
+                                Op::Sub => Some(left - right),
+                                Op::Mul | Op::ImplicitMul => Some(left * right),
+                                Op::Div => Some(left / right),
+                                Op::Pow => Some(left.pow(&right)),
+                            }
+                        }
+                        // Function values are not folded back into floats: the
+                        // simplifier keeps them symbolic (for example `ln(2)`).
+                        Token::Function(_) => None,
                         _ => unreachable!(),
                     }
                 }
@@ -1199,7 +1214,11 @@ pub struct SplitNode {
 
 impl SplitNode {
     pub fn join(&self) -> Node {
-        NodeInner::from_operation(Op::ImplicitMul, self.constant.clone(), self.dependent.clone())
+        NodeInner::from_operation(
+            Op::ImplicitMul,
+            self.constant.clone(),
+            self.dependent.clone(),
+        )
     }
     pub fn get_constant(&self) -> Float {
         // The caller must ensure that the constant can be evaluated to a float
@@ -1258,7 +1277,7 @@ where
     fn simplify(self, expand: bool, combine_fns: bool) -> Self;
     fn is_polynomial(self) -> bool;
     fn factorise(self) -> Self;
-    //fn substitute(self, var: Self, value: Self) -> Self;
+    //fn substitute(self, value: Float) -> Float;
 }
 
 impl NodeOperations<Self> for Node {
@@ -1394,10 +1413,6 @@ impl NodeFunctions<Float> for Node {
         }
     }
     fn distribute_constant(self, k: Float, mul_type: MulType) -> Self {
-        let operator = match mul_type {
-            MulType::OpMul => Op::ImplicitMul,
-            MulType::OpDiv => Op::Div,
-        };
         if k.is_zero() {
             return NodeInner::zero();
         } else if k.is_one() {
@@ -1410,7 +1425,7 @@ impl NodeFunctions<Float> for Node {
                     let left = self.inner.borrow().get_left().unwrap();
                     let right = self.inner.borrow().get_right().unwrap();
                     match op {
-                        Op::Mul | Op::ImplicitMul | Op::Div => {
+                        Op::Mul | Op::ImplicitMul => {
                             if !right.inner.borrow().has_indp {
                                 NodeInner::from_operation(
                                     op.clone(),
@@ -1425,15 +1440,39 @@ impl NodeFunctions<Float> for Node {
                                 )
                             }
                         }
+                        Op::Div => match mul_type {
+                            MulType::OpMul => NodeInner::from_operation(
+                                Op::Div,
+                                left.distribute_constant(k, MulType::OpMul),
+                                right,
+                            ),
+                            MulType::OpDiv => NodeInner::from_operation(
+                                Op::Div,
+                                left,
+                                right.distribute_constant(k, MulType::OpMul),
+                            ),
+                        },
                         Op::Add | Op::Sub => NodeInner::from_operation(
                             op.clone(),
                             left.distribute_constant(k.clone(), mul_type),
                             right.distribute_constant(k.clone(), mul_type),
                         ),
-                        _ => NodeInner::from_operation(operator, constant, self.clone()),
+                        _ => match mul_type {
+                            MulType::OpMul => {
+                                NodeInner::from_operation(Op::ImplicitMul, constant, self.clone())
+                            }
+                            MulType::OpDiv => {
+                                NodeInner::from_operation(Op::Div, self.clone(), constant)
+                            }
+                        },
                     }
                 }
-                _ => NodeInner::from_operation(operator, constant, self.clone()),
+                _ => match mul_type {
+                    MulType::OpMul => {
+                        NodeInner::from_operation(Op::ImplicitMul, constant, self.clone())
+                    }
+                    MulType::OpDiv => NodeInner::from_operation(Op::Div, self.clone(), constant),
+                },
             },
             NodeValue::Operand(op) => match op {
                 Token::Number(num) => match mul_type {
@@ -1450,9 +1489,12 @@ impl NodeFunctions<Float> for Node {
                     MulType::OpMul => NodeInner::operand(Token::Float(num.clone() * k)).wrap(),
                     MulType::OpDiv => NodeInner::operand(Token::Float(num.clone() / k)).wrap(),
                 },
-                Token::Indp(_) | Token::Var(_) | Token::Constant(_) => {
-                    NodeInner::from_operation(operator, constant, self.clone())
-                }
+                Token::Indp(_) | Token::Var(_) | Token::Constant(_) => match mul_type {
+                    MulType::OpMul => {
+                        NodeInner::from_operation(Op::ImplicitMul, constant, self.clone())
+                    }
+                    MulType::OpDiv => NodeInner::from_operation(Op::Div, self.clone(), constant),
+                },
                 _ => unreachable!(),
             },
             _ => self.clone(),
@@ -1614,40 +1656,48 @@ impl NodeFunctions<Float> for Node {
         NodeInner::from_operation(operator, self, other)
     }
     fn remove_constants(self) -> Float {
-        match &self.inner.borrow().value {
-            NodeValue::Operand(o) => match o {
+        // Work on an owned copy so the borrow is not held while recursing.
+        let value = self.inner.borrow().value.clone();
+        match value {
+            NodeValue::Operand(token) => match token {
                 Token::Constant(_) => Float::one(FP128, true),
-                Token::Number(n) => Float::from_i64(FP128, *n),
-                Token::Float(f) => f.clone(),
+                Token::Number(value) => Float::from_i64(FP128, value),
+                Token::Float(value) => value,
+                Token::Indp(_) | Token::Var(_) => Float::one(FP128, true),
                 _ => unreachable!(),
             },
-            NodeValue::Operator(node) => match &node.token {
-                Token::Operator(op) => match op {
-                    Op::Mul => {
-                        let left = node.left.clone().remove_constants();
-                        let right = node.right.clone().remove_constants();
-                        left * right
+            NodeValue::Operator(node) => match node.token {
+                Token::Operator(op) => {
+                    let left = node.left.remove_constants();
+                    let right = node.right.remove_constants();
+                    match op {
+                        Op::Mul | Op::ImplicitMul => left * right,
+                        Op::Div => left / right,
+                        Op::Add => left + right,
+                        Op::Sub => left - right,
+                        Op::Pow => left.pow(&right),
                     }
-                    Op::Div => {
-                        let left = node.left.clone().remove_constants();
-                        let right = node.right.clone().remove_constants();
-                        left / right
+                }
+                Token::Function(func) => {
+                    let argument = node.right.remove_constants();
+                    match func {
+                        Func::Sin => argument.sin(),
+                        Func::Cos => argument.cos(),
+                        Func::Tan => argument.tan(),
+                        Func::Sec => Float::one(FP128, false) / argument.cos(),
+                        Func::Csc => Float::one(FP128, false) / argument.sin(),
+                        Func::Cot => Float::one(FP128, false) / argument.tan(),
+                        Func::Asin => argument.asin(),
+                        Func::Acos => argument.acos(),
+                        Func::Atan => argument.atan(),
+                        Func::Sqrt => argument.sqrt(),
+                        Func::Ln => argument.log(),
+                        Func::Log(base) => argument.log() / base.log(),
                     }
-                    _ => unreachable!("remove_constants called with {}", self.inner.borrow()),
-                    // this doesn't panic because the function
-                    // is only called on the constant part of a linearized expression
-                    // and the only operators that can be present are Mul and Div
-                },
-                Token::Function(_) => {
-                    let borrow = self.inner.borrow();
-                    borrow.evaluate().expect(&format!(
-                        "Caller must gurantee that {} can be evaluated to a constant",
-                        borrow
-                    ))
                 }
                 _ => unreachable!(),
             },
-            _ => Float::zero(FP128, false),
+            NodeValue::Empty => Float::zero(FP128, false),
         }
     }
     #[tracing::instrument(skip_all, parent = None, name = "(step) linearize", fields(result))]
@@ -2008,9 +2058,11 @@ impl NodeFunctions<Float> for Node {
                                     return left.add(right_neg);
                                 }
                                 if !left_borrow.has_indp && right_borrow.has_indp {
+                                    // Keep the constant first: reordering a
+                                    // subtraction would flip its sign.
                                     drop(left_borrow);
                                     drop(right_borrow);
-                                    return right.sub(left).simplify(expand, combine_fns);
+                                    return NodeInner::from_operation(Op::Sub, left, right);
                                 }
                             }
                             if op.is_mul() || op == Op::Div {

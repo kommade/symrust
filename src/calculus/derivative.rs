@@ -1,4 +1,4 @@
-use tracing::{debug, info};
+use tracing::info;
 
 use crate::{
     parse::lexer::{Const, Func, Op, Token},
@@ -152,6 +152,30 @@ impl DerivativeInternal for Node {
                         let arg = op_node.right.clone();
                         let f_prime = NodeInner::from_function(Func::Csc, arg.clone()).pow(2);
                         arg.get_derivative().negate().impl_mul(f_prime)
+                    }
+                    Func::Asin => {
+                        let arg = op_node.right.clone();
+                        let inner = NodeInner::one().sub(arg.clone().pow(2));
+                        let f_prime = NodeInner::from_function(Func::Sqrt, inner);
+                        arg.get_derivative().div(f_prime)
+                    }
+                    Func::Acos => {
+                        let arg = op_node.right.clone();
+                        let inner = NodeInner::one().sub(arg.clone().pow(2));
+                        let f_prime = NodeInner::from_function(Func::Sqrt, inner);
+                        arg.get_derivative().negate().div(f_prime)
+                    }
+                    Func::Atan => {
+                        let arg = op_node.right.clone();
+                        let f_prime = NodeInner::one().add(arg.clone().pow(2));
+                        arg.get_derivative().div(f_prime)
+                    }
+                    Func::Sqrt => {
+                        let arg = op_node.right.clone();
+                        let f_prime = NodeInner::from_number(2)
+                            .wrap()
+                            .impl_mul(NodeInner::from_function(Func::Sqrt, arg.clone()));
+                        arg.get_derivative().div(f_prime)
                     }
                     Func::Ln => {
                         let arg = op_node.right.clone();

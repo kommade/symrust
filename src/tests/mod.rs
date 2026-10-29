@@ -1,6 +1,8 @@
+mod test_antiderivative;
 mod test_derivative;
 mod test_expr;
 mod test_float_gcd;
+mod test_float_math;
 
 static INIT: std::sync::Once = std::sync::Once::new();
 

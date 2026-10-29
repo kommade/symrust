@@ -11,6 +11,10 @@ pub enum Func {
     Sec,
     Csc,
     Cot,
+    Asin,
+    Acos,
+    Atan,
+    Sqrt,
     Log(Float),
     Ln,
 }
@@ -24,6 +28,10 @@ impl Display for Func {
             Self::Sec => write!(f, "sec"),
             Self::Csc => write!(f, "csc"),
             Self::Cot => write!(f, "cot"),
+            Self::Asin => write!(f, "asin"),
+            Self::Acos => write!(f, "acos"),
+            Self::Atan => write!(f, "atan"),
+            Self::Sqrt => write!(f, "sqrt"),
             Self::Log(n) => {
                 if n.is_integer() {
                     let str = n.to_string();
@@ -312,6 +320,10 @@ impl Lexer {
                     "sec" => Ok(Token::from_func(Func::Sec)),
                     "csc" => Ok(Token::from_func(Func::Csc)),
                     "cot" => Ok(Token::from_func(Func::Cot)),
+                    "asin" | "arcsin" => Ok(Token::from_func(Func::Asin)),
+                    "acos" | "arccos" => Ok(Token::from_func(Func::Acos)),
+                    "atan" | "arctan" => Ok(Token::from_func(Func::Atan)),
+                    "sqrt" => Ok(Token::from_func(Func::Sqrt)),
                     "log" => {
                         let mut base = 10.0;
                         if let Ok(c) = self.unwrap_next() {
@@ -373,6 +385,28 @@ impl Lexer {
         let mut tokens = Vec::with_capacity(self.size);
         while self.pos < self.size {
             tokens.push(self.next()?);
+        }
+        // A minus is unary when it does not follow an operand. Rewriting it as
+        // `0 - ...` lets expressions such as `e^(-3x)` parse.
+        let mut index = 0;
+        while index < tokens.len() {
+            if matches!(tokens[index], Token::Operator(Op::Sub)) {
+                let unary = index == 0
+                    || !matches!(
+                        tokens[index - 1],
+                        Token::Number(_)
+                            | Token::Float(_)
+                            | Token::Constant(_)
+                            | Token::Indp(_)
+                            | Token::Var(_)
+                            | Token::RPar
+                    );
+                if unary {
+                    tokens.insert(index, Token::from_num(0));
+                    index += 1;
+                }
+            }
+            index += 1;
         }
         let mut i = 0;
         while i < tokens.len() {

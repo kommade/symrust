@@ -40,6 +40,6 @@ pub fn get_subscriber() -> impl Subscriber {
         .with_file(false)
         .with_line_number(false)
         .with_target(false)
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(tracing::Level::INFO)
         .finish()
 }
