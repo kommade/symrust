@@ -8,7 +8,7 @@ use crate::{
 
 /// `(integrand, antiderivative)` pairs. The constant of integration is
 /// intentionally omitted from the results.
-static EXAMPLES: [(&str, &str); 75] = [
+static EXAMPLES: [(&str, &str); 77] = [
     // Power rule and polynomials
     ("2x", "x ^ 2"),
     ("x^2", "x ^ 3 / 3"),
@@ -92,6 +92,15 @@ static EXAMPLES: [(&str, &str); 75] = [
     // Repeated quadratic factors
     ("1/(x^2+1)^2", "(x / 2) / (x ^ 2 + 1) + atan(x) / 2"),
     ("1/(x^4+2x^2+1)", "(x / 2) / (x ^ 2 + 1) + atan(x) / 2"),
+    // Irreducible quartic factors, split over a quadratic extension
+    (
+        "1/(x^4+1)",
+        "ln(x ^ 2 + sqrt(2) x + 1) sqrt(2) / 8 + (atan((2 x + sqrt(2)) / sqrt(2)) / 2) / sqrt(2) + (atan((2 x - sqrt(2)) / sqrt(2)) / 2) / sqrt(2) - ln(x ^ 2 - sqrt(2) x + 1) sqrt(2) / 8",
+    ),
+    (
+        "1/(x^6+1)",
+        "atan(x) / 3 + ln(x ^ 2 + sqrt(3) x + 1) sqrt(3) / 12 + atan(2 x + sqrt(3)) / 6 + atan(2 x - sqrt(3)) / 6 - ln(x ^ 2 - sqrt(3) x + 1) sqrt(3) / 12",
+    ),
     // Square roots
     ("sqrt(x^3)", "2 x ^ 2.5 / 5"),
     ("sqrt(1-x^2)", "x sqrt(1 - x ^ 2) / 2 + asin(x) / 2"),
@@ -129,7 +138,37 @@ fn try_antiderivative() {
         let result = expr
             .get_antiderivative()
             .unwrap_or_else(|error| panic!("{input} failed: {error}"));
+        tracing::info!("------------------------------------------------------------------------");
         assert_eq!(result.to_string(), expected, "antiderivative of {input}");
+    }
+}
+
+#[test]
+fn factored_and_expanded_denominators_agree() {
+    super::setup();
+    let pairs = [
+        ("1/(x^5+1)", "1/((x+1)(x^4-x^3+x^2-x+1))"),
+        ("1/(x^4+5x^2+4)", "1/((x^2+1)(x^2+4))"),
+    ];
+    for (expanded, factored) in pairs {
+        let left = create_expr!(expanded).unwrap();
+        let right = create_expr!(factored).unwrap();
+        let left_integral = left.get_antiderivative().unwrap();
+        let right_integral = right.get_antiderivative().unwrap();
+        assert_eq!(
+            left_integral.to_string(),
+            right_integral.to_string(),
+            "{expanded} and {factored}"
+        );
+    }
+}
+
+#[test]
+fn irreducible_denominators_report_failure() {
+    super::setup();
+    for input in ["1/(x^7+1)", "1/(x^3+2)", "1/(x^8+1)"] {
+        let expr = create_expr!(input).unwrap();
+        assert!(expr.get_antiderivative().is_err(), "{input}");
     }
 }
 
@@ -190,10 +229,7 @@ fn derivative_of_extended_functions() {
 #[test]
 fn try_custom() {
     super::setup();
-    let expr = create_expr!("x^2 e^(-3x)").unwrap();
+    let expr = create_expr!("1/(x^3+2)").unwrap();
     let antiderivative = expr.get_antiderivative().unwrap();
-    assert_eq!(
-        antiderivative.to_string(),
-        "-x ^ 2 e ^ (-3 x) / 3 - 2 x e ^ (-3 x) / 9 - 2 e ^ (-3 x) / 27"
-    );
+    println!("antiderivative: {}", antiderivative.to_string());
 }

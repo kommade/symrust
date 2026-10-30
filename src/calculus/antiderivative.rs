@@ -7,7 +7,9 @@
 //! 2. Powers, exponentials and the standard elementary functions, including
 //!    functions of a linear argument (`power_of` and the rule table).
 //! 3. Rational functions: polynomial division and partial fractions over
-//!    repeated linear and irreducible quadratic factors.
+//!    repeated linear and irreducible quadratic factors. Any denominator is
+//!    factored over the rationals, and irreducible quartics are split into
+//!    quadratics over a quadratic extension such as `Q(sqrt(2))`.
 //! 4. Powers and products of trigonometric functions, including the reduction
 //!    formulas, product-to-sum identities and reciprocal forms.
 //! 5. Square roots of quadratics and their reciprocals.
@@ -35,6 +37,7 @@
 
 mod helpers;
 mod rational;
+mod surd;
 mod trig;
 
 use std::{
@@ -313,6 +316,20 @@ impl Integrator {
                 }
             }
         }
+        // `log_b(u)` is `ln(u) / ln(b)`: rewrite it so the change of base is
+        // visible in the log and the natural logarithm is integrated normally.
+        if let Shape::Operator(Token::Function(Func::Log(base)), _, argument) = helpers::shape(node)
+        {
+            info!(
+                "Rewriting {} as ln({}) / ln({}) using the change of base formula",
+                describe_signed(node),
+                describe_signed(&argument),
+                describe_number(&base)
+            );
+            let numerator = self.integrate(&helpers::function(Func::Ln, argument))?;
+            let denominator = helpers::function(Func::Ln, helpers::float(base));
+            return Ok(helpers::div(numerator, denominator));
+        }
         // `-u` integrates to the negation of the integral of `u`.
         if let Shape::Operator(Token::Operator(Op::Sub), left, right) = helpers::shape(node) {
             if helpers::is_zero(&left) {
@@ -370,9 +387,10 @@ impl Integrator {
                     return Ok(helpers::multiply_by(self.variable_node(), value));
                 }
                 info!(
-                    "Pulling the constant {} out of {}",
+                    "{} => constant = {}, dependent = {}",
+                    describe_signed(node),
                     describe_number(&value),
-                    describe_signed(node)
+                    describe_signed(&dependent)
                 );
                 let integral = self.integrate(&dependent)?;
                 let scaled = helpers::scale(integral.clone(), value);
@@ -395,6 +413,10 @@ impl Integrator {
             let result = self.integrate_inner(&expanded);
             self.depth -= 1;
             return result;
+        }
+        // `ln(u)^n` uses the standard reduction formula.
+        if let Some(result) = self.try_logarithm_power(node) {
+            return Ok(result);
         }
         // Table lookups for elementary functions with linear arguments. This
         // runs before the rational function machinery so that simple powers are
@@ -445,7 +467,7 @@ impl Integrator {
     }
 
     /// Elementary antiderivatives of the form `f(a x + b)`.
-    #[tracing::instrument(skip_all, parent = None, name = "(step) standard_rules", fields(result))]
+    #[tracing::instrument(skip_all, parent = None, name = "(step) standard_integral", fields(result))]
     fn try_table(&self, node: &Node) -> Option<Node> {
         let result = self.find_standard_rule(node);
         log_technique_outcome(node, record_option(result.as_ref()));
@@ -455,10 +477,7 @@ impl Integrator {
     fn find_standard_rule(&self, node: &Node) -> Option<Node> {
         match helpers::shape(node) {
             Shape::Operand(Token::Indp(_)) => {
-                info!(
-                    "Applying the power rule to {} with exponent 1, raising it to 2",
-                    describe(node)
-                );
+                info!("Applying the power rule to {}", describe(node));
                 let variable = self.variable_node();
                 Some(helpers::divide_by(
                     helpers::pow(variable, number(2)),
@@ -466,9 +485,6 @@ impl Integrator {
                 ))
             }
             Shape::Operator(Token::Operator(Op::Pow), base, exponent) => {
-                if let Some(result) = self.logarithm_power(&base, &exponent) {
-                    return Some(result);
-                }
                 self.power_of(base, exponent)
             }
             Shape::Operator(Token::Operator(Op::Div), numerator, denominator) => {
@@ -507,12 +523,22 @@ impl Integrator {
                     }
                 }
                 let (slope, _) = helpers::linear_coefficients(&arg)?;
-                info!(
-                    "Using the standard antiderivative of {}({})",
-                    func,
-                    describe(&arg)
-                );
-                let antiderivative = antiderivative_of_function(&func, arg)?;
+                let antiderivative = antiderivative_of_function(&func, arg.clone())?;
+                if slope.is_one() {
+                    info!(
+                        "Using the standard antiderivative of {}({})",
+                        func,
+                        describe_signed(&arg)
+                    );
+                } else {
+                    // The linear argument needs the chain rule: integrate the
+                    // standard function of `u` and divide by `du/dx`.
+                    info!(
+                        "Using the standard antiderivative of {func}(u) with u = {} and du = {} dx",
+                        describe_signed(&arg),
+                        describe_number(&slope)
+                    );
+                }
                 Some(helpers::divide_by(antiderivative, slope))
             }
             _ => None,
@@ -528,8 +554,9 @@ impl Integrator {
             }
             let (slope, _) = helpers::linear_coefficients(&exponent)?;
             info!(
-                "Applying the exponential rule to {}",
-                describe(&helpers::pow(base.clone(), exponent.clone()))
+                "Applying the exponential rule to {}{}",
+                describe(&helpers::pow(base.clone(), exponent.clone())),
+                chain_rule_note(&exponent, &slope)
             );
             let is_e = constant.float_equal(&Float::e(FP128));
             let current = helpers::pow(base, exponent);
@@ -554,8 +581,9 @@ impl Integrator {
         let (slope, _) = helpers::linear_coefficients(&base)?;
         if exponent_value.is_neg_one() {
             info!(
-                "Applying the power rule with exponent -1 to {}",
-                describe(&base)
+                "Applying the power rule to {}{}",
+                describe(&base),
+                chain_rule_note(&base, &slope)
             );
             return Some(helpers::divide_by(helpers::function(Func::Ln, base), slope));
         }
@@ -564,9 +592,9 @@ impl Integrator {
             return None;
         }
         info!(
-            "Applying the power rule to {}^{}, raising the exponent to {}",
-            describe(&base),
-            describe(&helpers::float(exponent_value)),
+            "Applying the power rule to {}{}, raising the exponent to {}",
+            describe(&helpers::pow(base.clone(), helpers::float(exponent_value))),
+            chain_rule_note(&base, &slope),
             describe(&helpers::float(new_exponent.clone()))
         );
         Some(helpers::divide_by(
@@ -577,25 +605,36 @@ impl Integrator {
 
     /// `integral of ln(u)^n dx` using the reduction formula
     /// `I_n = u ln(u)^n / a - n I_(n-1)`.
-    fn logarithm_power(&self, base: &Node, exponent: &Node) -> Option<Node> {
-        let Shape::Operator(Token::Function(Func::Ln), _, argument) = helpers::shape(base) else {
+    #[tracing::instrument(skip_all, parent = None, name = "(step) logarithm_reduction", fields(result))]
+    fn try_logarithm_power(&self, node: &Node) -> Option<Node> {
+        let result = self.logarithm_power(node);
+        log_technique_outcome(node, record_option(result.as_ref()));
+        result
+    }
+
+    fn logarithm_power(&self, node: &Node) -> Option<Node> {
+        let Shape::Operator(Token::Operator(Op::Pow), base, exponent) = helpers::shape(node) else {
             return None;
         };
-        let power = helpers::constant_integer(exponent)?;
+        let Shape::Operator(Token::Function(Func::Ln), _, argument) = helpers::shape(&base) else {
+            return None;
+        };
+        let power = helpers::constant_integer(&exponent)?;
         if !(1..=32).contains(&power) {
             return None;
         }
-        debug!(
-            "Applying the logarithm power reduction formula to {}",
-            describe(base)
-        );
         let (slope, _) = helpers::linear_coefficients(&argument)?;
+        info!(
+            "Applying the reduction formula I_n = u ln(u)^n / a - n I_(n-1) to {}",
+            describe_signed(node)
+        );
         let mut current = self.variable_node();
         for step in 1..=power {
             let logarithm = helpers::pow(base.clone(), number(step));
             let term = helpers::divide_by(helpers::mul(argument.clone(), logarithm), slope.clone());
             let previous = helpers::scale(current, float_from(-(step as f64)));
             current = helpers::add(term, previous);
+            debug!("I_{step} = {}", describe_signed(&current));
         }
         Some(current)
     }
@@ -1194,6 +1233,20 @@ fn record_option(result: Option<&Node>) -> bool {
     };
     tracing::Span::current().record("result", text);
     result.is_some()
+}
+
+/// The ` with u = ... and du = ... dx` suffix used when a linear argument
+/// requires the chain rule.
+fn chain_rule_note(argument: &Node, slope: &Float) -> String {
+    if slope.is_one() {
+        String::new()
+    } else {
+        format!(
+            " with u = {} and du = {} dx",
+            describe_signed(argument),
+            describe_number(slope)
+        )
+    }
 }
 
 /// Describe an expression with a leading minus sign pulled out, so that

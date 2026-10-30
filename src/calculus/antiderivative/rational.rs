@@ -7,6 +7,7 @@
 use tracing::{debug, info};
 
 use super::helpers::{self, Shape};
+use super::surd::Surd;
 use crate::{
     parse::lexer::{Func, Op, Token},
     structs::node::Node,
@@ -417,6 +418,15 @@ impl Poly {
     }
 
     /// The polynomial in `y = x^2`, if only even powers appear.
+    /// Replace `y` with `x^2`, used when reversing the `y = x^2` substitution.
+    pub(super) fn substitute_square(&self) -> Option<Self> {
+        let mut coeffs = vec![Rat::ZERO; self.coeffs.len() * 2];
+        for (degree, coefficient) in self.coeffs.iter().enumerate() {
+            coeffs[2 * degree] = *coefficient;
+        }
+        Some(Self::new(coeffs))
+    }
+
     pub(super) fn even_part(&self) -> Option<Self> {
         let mut coeffs = Vec::with_capacity(self.coeffs.len() / 2 + 1);
         for (degree, coefficient) in self.coeffs.iter().enumerate() {
@@ -629,22 +639,10 @@ impl RationalFunction {
             factorization.leading.to_f64()
         );
         for (factor, multiplicity) in &factorization.factors {
-            let description = match factor {
-                Factor::Linear { root } => {
-                    let value = root.to_f64();
-                    if value == 0.0 {
-                        String::from("x")
-                    } else if value < 0.0 {
-                        format!("(x + {})", -value)
-                    } else {
-                        format!("(x - {value})")
-                    }
-                }
-                Factor::Quadratic { linear, constant } => {
-                    format!("(x^2 + {} x + {})", linear.to_f64(), constant.to_f64())
-                }
-            };
-            debug!("Factor {description} with multiplicity {multiplicity}");
+            debug!(
+                "Factor {} with multiplicity {multiplicity}",
+                factor.describe()
+            );
         }
 
         // Verify the factorization before relying on it.
@@ -660,6 +658,7 @@ impl RationalFunction {
         let mut columns: Vec<Poly> = Vec::new();
         let mut descriptors: Vec<Descriptor> = Vec::new();
         for (index, (factor, multiplicity)) in factorization.factors.iter().enumerate() {
+            let degree = factor.degree()?;
             let power_poly = factor.to_poly().pow(*multiplicity as u32)?;
             let cofactor = self.denom.div_exact(&power_poly)?;
             for power in 1..=*multiplicity {
@@ -668,29 +667,20 @@ impl RationalFunction {
                 if remaining > 0 {
                     base = base.mul(&factor.to_poly().pow(remaining as u32)?)?;
                 }
-                match factor {
-                    Factor::Linear { .. } => {
-                        columns.push(base);
-                        descriptors.push(Descriptor {
-                            factor: index,
-                            power,
-                            slope: false,
-                        });
-                    }
-                    Factor::Quadratic { .. } => {
-                        columns.push(base.mul(&Poly::variable())?);
-                        descriptors.push(Descriptor {
-                            factor: index,
-                            power,
-                            slope: true,
-                        });
-                        columns.push(base);
-                        descriptors.push(Descriptor {
-                            factor: index,
-                            power,
-                            slope: false,
-                        });
-                    }
+                // A factor of degree `d` contributes `d` unknown coefficients,
+                // one for each power of x below `d`.
+                for basis in 0..degree {
+                    let column = if basis == 0 {
+                        base.clone()
+                    } else {
+                        base.mul(&Poly::variable().pow(basis as u32)?)?
+                    };
+                    columns.push(column);
+                    descriptors.push(Descriptor {
+                        factor: index,
+                        power,
+                        basis,
+                    });
                 }
             }
         }
@@ -722,17 +712,17 @@ impl RationalFunction {
                 .join(", ")
         );
 
+        let coefficient_at = |index: usize, power: usize, basis: usize| {
+            descriptors.iter().position(|descriptor| {
+                descriptor.factor == index && descriptor.power == power && descriptor.basis == basis
+            })
+        };
         let mut terms = Vec::new();
         for (index, (factor, multiplicity)) in factorization.factors.iter().enumerate() {
             match factor {
                 Factor::Linear { root } => {
                     for power in 1..=*multiplicity {
-                        let position = descriptors.iter().position(|descriptor| {
-                            descriptor.factor == index
-                                && descriptor.power == power
-                                && !descriptor.slope
-                        })?;
-                        let coefficient = solution[position];
+                        let coefficient = solution[coefficient_at(index, power, 0)?];
                         if !coefficient.is_zero() {
                             if power == 1 {
                                 debug!(
@@ -754,18 +744,8 @@ impl RationalFunction {
                 }
                 Factor::Quadratic { linear, constant } => {
                     for power in 1..=*multiplicity {
-                        let slope_position = descriptors.iter().position(|descriptor| {
-                            descriptor.factor == index
-                                && descriptor.power == power
-                                && descriptor.slope
-                        })?;
-                        let constant_position = descriptors.iter().position(|descriptor| {
-                            descriptor.factor == index
-                                && descriptor.power == power
-                                && !descriptor.slope
-                        })?;
-                        let slope = solution[slope_position];
-                        let offset = solution[constant_position];
+                        let slope = solution[coefficient_at(index, power, 1)?];
+                        let offset = solution[coefficient_at(index, power, 0)?];
                         if !slope.is_zero() || !offset.is_zero() {
                             debug!(
                                 "Partial fraction term: ({} x + {}) / ({})^{}",
@@ -779,6 +759,26 @@ impl RationalFunction {
                             slope, offset, *linear, *constant, power, variable,
                         )?);
                     }
+                }
+                Factor::General(poly) => {
+                    let degree = poly.degree()?;
+                    if *multiplicity != 1 {
+                        debug!(
+                            "Cannot integrate {} because its power is greater than one",
+                            factor.describe()
+                        );
+                        return None;
+                    }
+                    let mut coefficients = Vec::with_capacity(degree);
+                    for basis in 0..degree {
+                        coefficients.push(solution[coefficient_at(index, 1, basis)?]);
+                    }
+                    debug!(
+                        "Partial fraction term: ({}) / ({})",
+                        describe_coefficients(&coefficients),
+                        describe_polynomial(poly)
+                    );
+                    terms.push(general_term(&coefficients, poly, variable)?);
                 }
             }
         }
@@ -823,7 +823,8 @@ fn describe_quadratic(linear: Rat, constant: Rat) -> String {
 struct Descriptor {
     factor: usize,
     power: usize,
-    slope: bool,
+    /// Which power of `x` multiplies this column (0 for the constant term).
+    basis: usize,
 }
 
 fn linear_factor(root: Rat) -> Poly {
@@ -896,6 +897,302 @@ fn quadratic_term(
         ));
     }
     Some(helpers::sum(terms))
+}
+
+/// Render a polynomial numerator from its coefficients (low degree first).
+fn describe_coefficients(coefficients: &[Rat]) -> String {
+    describe_polynomial(&Poly::new(coefficients.to_vec()))
+}
+
+/// Integrate a partial fraction term whose denominator is an irreducible
+/// factor of degree three or more.
+fn general_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
+    match factor.degree() {
+        Some(4) => quartic_term(coefficients, factor, variable),
+        _ => None,
+    }
+}
+
+/// A monic quadratic `x^2 + linear x + constant` over one quadratic extension.
+#[derive(Clone, Copy, Debug)]
+struct SurdQuadratic {
+    linear: Surd,
+    constant: Surd,
+}
+
+fn surd_poly(quadratic: &SurdQuadratic) -> [Surd; 3] {
+    [
+        quadratic.constant,
+        quadratic.linear,
+        Surd::rational(Rat::ONE),
+    ]
+}
+
+fn surd_zero() -> Surd {
+    Surd::rational(Rat::ZERO)
+}
+
+fn surd_multiply(left: &[Surd], right: &[Surd]) -> Option<Vec<Surd>> {
+    if left.is_empty() || right.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut product = vec![surd_zero(); left.len() + right.len() - 1];
+    for (i, a) in left.iter().enumerate() {
+        for (j, b) in right.iter().enumerate() {
+            let term = a.mul(*b)?;
+            product[i + j] = product[i + j].add(term)?;
+        }
+    }
+    Some(product)
+}
+
+/// Multiply a surd polynomial by `x`.
+fn surd_shift(poly: &[Surd]) -> Vec<Surd> {
+    let mut shifted = vec![surd_zero()];
+    shifted.extend_from_slice(poly);
+    shifted
+}
+
+fn split_matches(poly: &Poly, first: &SurdQuadratic, second: &SurdQuadratic) -> bool {
+    let Some(product) = surd_multiply(&surd_poly(first), &surd_poly(second)) else {
+        return false;
+    };
+    if product.len() != 5 {
+        return false;
+    }
+    (0..5).all(
+        |degree| match product[degree].sub(Surd::rational(poly.coeff(degree))) {
+            Some(difference) => difference.is_zero(),
+            None => false,
+        },
+    )
+}
+
+/// Split a monic quartic into two quadratics with coefficients in a single
+/// quadratic extension, when such a split exists.
+fn split_quartic(poly: &Poly) -> Option<(SurdQuadratic, SurdQuadratic)> {
+    if poly.degree() != Some(4) || !poly.coeff(4).is_one() {
+        return None;
+    }
+    let cubed = poly.coeff(3);
+    let squared = poly.coeff(2);
+    let linear = poly.coeff(1);
+    let constant = poly.coeff(0);
+
+    // Biquadratic: x^4 + q x^2 + r = (x^2 + u x + s)(x^2 - u x + s).
+    if cubed.is_zero() && linear.is_zero() && !constant.is_zero() {
+        if let Some(root) = constant.sqrt_exact() {
+            for shift in [root, root.neg()] {
+                let Some(square) = shift.mul(Rat::from_i64(2))?.sub(squared) else {
+                    continue;
+                };
+                if square.is_negative() {
+                    continue;
+                }
+                let Some(u) = super::surd::sqrt_rational(square) else {
+                    continue;
+                };
+                let first = SurdQuadratic {
+                    linear: u,
+                    constant: Surd::rational(shift),
+                };
+                let second = SurdQuadratic {
+                    linear: u.neg(),
+                    constant: Surd::rational(shift),
+                };
+                if split_matches(poly, &first, &second) {
+                    return Some((first, second));
+                }
+            }
+        }
+    }
+
+    // Palindromic: x^4 + b x^3 + c x^2 + b x + 1 factors as
+    // (x^2 + u x + 1)(x^2 + v x + 1) with u + v = b and u v = c - 2.
+    if constant.is_one() && cubed == linear {
+        let four = Rat::from_i64(4);
+        let eight = Rat::from_i64(8);
+        let discriminant = cubed.mul(cubed)?.add(eight)?.sub(four.mul(squared)?)?;
+        if let Some(root) = super::surd::sqrt_rational(discriminant) {
+            let half = Rat::new(1, 2)?;
+            let u = Surd::rational(cubed).add(root)?.mul(Surd::rational(half))?;
+            let v = Surd::rational(cubed).sub(root)?.mul(Surd::rational(half))?;
+            let first = SurdQuadratic {
+                linear: u,
+                constant: Surd::rational(Rat::ONE),
+            };
+            let second = SurdQuadratic {
+                linear: v,
+                constant: Surd::rational(Rat::ONE),
+            };
+            if split_matches(poly, &first, &second) {
+                return Some((first, second));
+            }
+        }
+    }
+    None
+}
+
+/// Integrate `N(x) / Q(x)` for an irreducible quartic `Q` by splitting it into
+/// quadratics over `Q(sqrt(k))` and decomposing again.
+fn quartic_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
+    let (first, second) = split_quartic(factor)?;
+    let first_node = surd_quadratic_node(first.linear, first.constant, variable);
+    let second_node = surd_quadratic_node(second.linear, second.constant, variable);
+    info!(
+        "Splitting {} into {} and {} using a quadratic extension",
+        describe_polynomial(factor),
+        super::describe_signed(&first_node),
+        super::describe_signed(&second_node)
+    );
+    let first_poly = surd_poly(&first);
+    let second_poly = surd_poly(&second);
+    // N = (s1 x + s0) Q2 + (t1 x + t0) Q1
+    let columns = [
+        surd_shift(&second_poly),
+        second_poly.to_vec(),
+        surd_shift(&first_poly),
+        first_poly.to_vec(),
+    ];
+    let size = 4;
+    let mut matrix = vec![vec![surd_zero(); size]; size];
+    let mut rhs = Vec::with_capacity(size);
+    for degree in 0..size {
+        for column in 0..size {
+            matrix[degree][column] = columns[column]
+                .get(degree)
+                .copied()
+                .unwrap_or_else(surd_zero);
+        }
+        rhs.push(Surd::rational(
+            coefficients.get(degree).copied().unwrap_or(Rat::ZERO),
+        ));
+    }
+    let solution = solve_surd_system(matrix, rhs)?;
+    let first_term = quadratic_surd_term(
+        solution[0],
+        solution[1],
+        first.linear,
+        first.constant,
+        variable,
+    )?;
+    let second_term = quadratic_surd_term(
+        solution[2],
+        solution[3],
+        second.linear,
+        second.constant,
+        variable,
+    )?;
+    Some(helpers::add(first_term, second_term))
+}
+
+/// Integrate `(s1 x + s0) / (x^2 + linear x + constant)` with surd
+/// coefficients by completing the square.
+fn quadratic_surd_term(
+    slope: Surd,
+    offset: Surd,
+    linear: Surd,
+    constant: Surd,
+    variable: &Node,
+) -> Option<Node> {
+    if slope.is_zero() && offset.is_zero() {
+        return Some(helpers::zero());
+    }
+    let half = Rat::new(1, 2)?;
+    let quadratic_node = surd_quadratic_node(linear, constant, variable);
+    let mut terms = Vec::new();
+
+    // The slope part is a multiple of the derivative of the quadratic.
+    if !slope.is_zero() {
+        let coefficient = slope.scale_by(half)?;
+        terms.push(helpers::mul(
+            coefficient.to_node(),
+            helpers::function(Func::Ln, quadratic_node.clone()),
+        ));
+    }
+
+    // The rest completes the square into an arctangent or a logarithm.
+    let remainder = offset.sub(slope.scale_by(half)?.mul(linear)?)?;
+    if !remainder.is_zero() {
+        let four = Rat::from_i64(4);
+        let discriminant = linear.mul(linear)?.sub(constant.scale_by(four)?)?;
+        let value = discriminant.to_f64();
+        let tolerance = 1e-9;
+        if value > tolerance {
+            let root = surd_sqrt_node(discriminant);
+            let twice = helpers::mul(helpers::number(2), variable.clone());
+            let shifted = helpers::add(twice, linear.to_node());
+            let difference = helpers::sub(shifted.clone(), root.clone());
+            let total = helpers::add(shifted, root.clone());
+            let logarithm = helpers::function(Func::Ln, helpers::div(difference, total));
+            terms.push(helpers::div(
+                helpers::mul(remainder.to_node(), logarithm),
+                root,
+            ));
+        } else if value < -tolerance {
+            let root = surd_sqrt_node(discriminant.neg());
+            let twice = helpers::mul(helpers::number(2), variable.clone());
+            let shifted = helpers::add(twice, linear.to_node());
+            let argument = helpers::div(shifted, root.clone());
+            let arc = helpers::function(Func::Atan, argument);
+            let coefficient = helpers::div(helpers::number(2), root);
+            terms.push(helpers::mul(
+                helpers::mul(remainder.to_node(), coefficient),
+                arc,
+            ));
+        } else {
+            // A repeated root needs a different formula.
+            return None;
+        }
+    }
+    Some(helpers::sum(terms))
+}
+
+fn surd_quadratic_node(linear: Surd, constant: Surd, variable: &Node) -> Node {
+    let square = helpers::pow(variable.clone(), helpers::number(2));
+    let linear_term = helpers::mul(linear.to_node(), variable.clone());
+    helpers::add(helpers::add(square, linear_term), constant.to_node())
+}
+
+fn surd_sqrt_node(value: Surd) -> Node {
+    match value.sqrt() {
+        Some(root) => root.to_node(),
+        None => helpers::sqrt_arg(value.to_node()),
+    }
+}
+
+/// Gaussian elimination over a quadratic extension.
+fn solve_surd_system(mut matrix: Vec<Vec<Surd>>, mut rhs: Vec<Surd>) -> Option<Vec<Surd>> {
+    let size = matrix.len();
+    if size == 0 || matrix.iter().any(|row| row.len() != size) {
+        return None;
+    }
+    for column in 0..size {
+        let pivot = (column..size).find(|row| !matrix[*row][column].is_zero())?;
+        matrix.swap(column, pivot);
+        rhs.swap(column, pivot);
+        let inverse = Surd::rational(Rat::ONE).div(matrix[column][column])?;
+        for entry in matrix[column].iter_mut() {
+            *entry = entry.mul(inverse)?;
+        }
+        rhs[column] = rhs[column].mul(inverse)?;
+        let pivot_row = matrix[column].clone();
+        let pivot_rhs = rhs[column];
+        for row in 0..size {
+            if row == column {
+                continue;
+            }
+            let factor = matrix[row][column];
+            if factor.is_zero() {
+                continue;
+            }
+            for index in 0..size {
+                matrix[row][index] = matrix[row][index].sub(factor.mul(pivot_row[index])?)?;
+            }
+            rhs[row] = rhs[row].sub(factor.mul(pivot_rhs)?)?;
+        }
+    }
+    Some(rhs)
 }
 
 /// Render a polynomial in descending powers for the logs, e.g. `x^2 - 1`.
@@ -982,8 +1279,17 @@ fn quadratic_power_integral(centre: Node, k_squared: Rat, power: usize) -> Optio
 
 #[derive(Clone, Debug)]
 enum Factor {
-    Linear { root: Rat },
-    Quadratic { linear: Rat, constant: Rat },
+    Linear {
+        root: Rat,
+    },
+    Quadratic {
+        linear: Rat,
+        constant: Rat,
+    },
+    /// An irreducible factor of degree three or more. It is kept whole here and
+    /// split further (for example over a quadratic extension) only when its
+    /// partial fraction term is integrated.
+    General(Poly),
 }
 
 impl Factor {
@@ -991,6 +1297,25 @@ impl Factor {
         match self {
             Factor::Linear { root } => linear_factor(*root),
             Factor::Quadratic { linear, constant } => Poly::new(vec![*constant, *linear, Rat::ONE]),
+            Factor::General(poly) => poly.clone(),
+        }
+    }
+
+    fn degree(&self) -> Option<usize> {
+        match self {
+            Factor::Linear { .. } => Some(1),
+            Factor::Quadratic { .. } => Some(2),
+            Factor::General(poly) => poly.degree(),
+        }
+    }
+
+    fn describe(&self) -> String {
+        match self {
+            Factor::Linear { root } => describe_linear(*root),
+            Factor::Quadratic { linear, constant } => {
+                format!("({})", describe_quadratic(*linear, *constant))
+            }
+            Factor::General(poly) => format!("({})", describe_polynomial(poly)),
         }
     }
 }
@@ -1072,7 +1397,17 @@ fn collect_factors(
                     factors.push((Factor::Quadratic { linear, constant }, multiplier as usize));
                     Some(())
                 }
-                _ => None,
+                Some(_) => {
+                    let coefficient = polynomial.leading()?;
+                    if coefficient.is_zero() {
+                        return None;
+                    }
+                    *leading = leading.mul(coefficient.pow(multiplier)?)?;
+                    let monic = polynomial.scale(coefficient.recip()?)?;
+                    factors.push((Factor::General(monic), multiplier as usize));
+                    Some(())
+                }
+                None => None,
             }
         }
     }
@@ -1151,30 +1486,51 @@ fn factorise(poly: &Poly) -> Option<Factorization> {
                 }
             }
             // Even polynomials can be factored through the substitution
-            // `y = x^2`, which handles forms like `x^4 + 5x^2 + 4`.
-            let even = remaining.even_part()?;
-            if even.degree().is_none_or(|degree| degree < 1) {
-                return None;
+            // `y = x^2`, which handles forms like `x^4 + 5x^2 + 4` and
+            // `x^6 + 1 = (x^2 + 1)(x^4 - x^2 + 1)`.
+            if let Some(mapped) = factor_even(&remaining) {
+                factors.extend(mapped);
+                return Some(Factorization { leading, factors });
             }
-            let inner = factorise(&even)?;
-            if !inner.leading.is_one() {
-                return None;
-            }
-            for (factor, multiplicity) in inner.factors {
-                match factor {
-                    Factor::Linear { root } => factors.push((
-                        Factor::Quadratic {
-                            linear: Rat::ZERO,
-                            constant: root.neg(),
-                        },
-                        multiplicity,
-                    )),
-                    Factor::Quadratic { .. } => return None,
-                }
-            }
+            // Anything left is irreducible over the rationals; keep it whole so
+            // the partial fraction step can try an extension.
+            factors.push((Factor::General(remaining), 1));
         }
     }
     Some(Factorization { leading, factors })
+}
+
+/// Factor `q(x^2)` through `y = x^2`, mapping the factors back to `x`.
+fn factor_even(poly: &Poly) -> Option<Vec<(Factor, usize)>> {
+    let even = poly.even_part()?;
+    if even.degree().is_none_or(|degree| degree < 1) {
+        return None;
+    }
+    let inner = factorise(&even)?;
+    if !inner.leading.is_one() {
+        return None;
+    }
+    let mut mapped = Vec::with_capacity(inner.factors.len());
+    for (factor, multiplicity) in inner.factors {
+        let factor = match factor {
+            Factor::Linear { root } => Factor::Quadratic {
+                linear: Rat::ZERO,
+                constant: root.neg(),
+            },
+            other => Factor::General(other.to_poly().substitute_square()?),
+        };
+        mapped.push((factor, multiplicity));
+    }
+    // The mapping is only valid when it reproduces the original polynomial.
+    let mut rebuilt = Poly::one();
+    for (factor, multiplicity) in &mapped {
+        rebuilt = rebuilt.mul(&factor.to_poly().pow(*multiplicity as u32)?)?;
+    }
+    if rebuilt.sub(poly)?.is_zero() {
+        Some(mapped)
+    } else {
+        None
+    }
 }
 
 fn find_rational_root(poly: &Poly) -> Option<Rat> {
