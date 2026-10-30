@@ -1,5 +1,3 @@
-use std::ops::Div;
-
 use arpfloat::{FP128, Float};
 
 static EPSILON: std::sync::LazyLock<Float> =
@@ -21,7 +19,11 @@ pub trait FloatMath {
     fn is_neg_one(&self) -> bool;
     fn is_integer(&self) -> bool;
     fn gcd(&self, other: &Self) -> (u64, i64, i64);
-    fn float_div(&self, div: &Float) -> Option<Float>;
+    /// `self / div` when the division is exact, `None` otherwise.
+    ///
+    /// Used to fold constant factors without losing exactness: `6 / 2` folds
+    /// to `3`, while `3 / 2` is left as a fraction.
+    fn exact_div(&self, div: &Float) -> Option<Float>;
     /// Arctangent in radians. Implemented here because `arpfloat` does not
     /// provide the inverse trigonometric functions.
     fn atan(&self) -> Float;
@@ -44,19 +46,11 @@ impl FloatMath for Float {
         if !self.is_integer() || !other.is_integer() {
             return (1, 0, 0);
         }
-        let mut a = self.to_i64();
-        let mut b = other.to_i64();
-        while b != 0 {
-            let t = b;
-            b = a % b;
-            a = t;
-        }
-        let gcd = a;
-        (
-            gcd.unsigned_abs(),
-            self.to_i64().div(gcd),
-            other.to_i64().div(gcd),
-        )
+        let left = self.to_i64();
+        let right = other.to_i64();
+        let gcd = crate::utils::gcd_u128(left.unsigned_abs() as u128, right.unsigned_abs() as u128)
+            as i64;
+        (gcd.unsigned_abs(), left / gcd, right / gcd)
     }
     fn float_equal(&self, other: &Float) -> bool {
         (self - other).abs() <= *EPSILON
@@ -70,13 +64,17 @@ impl FloatMath for Float {
         self.float_equal(&ONE.neg())
     }
 
-    fn float_div(&self, div: &Float) -> Option<Float> {
+    fn exact_div(&self, div: &Float) -> Option<Float> {
         if !self.is_integer() || !div.is_integer() || div.is_zero() {
             return None;
         }
         let dividend = self.to_i64();
         let divisor = div.to_i64();
-        Some(Float::from_i64(self.get_semantics(), dividend % divisor))
+        if dividend.checked_rem(divisor)? != 0 {
+            return None;
+        }
+        let quotient = dividend.checked_div(divisor)?;
+        Some(Float::from_i64(self.get_semantics(), quotient))
     }
 
     fn atan(&self) -> Float {

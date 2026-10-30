@@ -530,40 +530,6 @@ impl NodeInner {
             has_func: false,
         }
     }
-    fn evaluate_constants(op: Op, left: Node, right: Node) -> Node {
-        let left_val = left.inner.borrow().evaluate().unwrap();
-        let right_val = right.inner.borrow().evaluate().unwrap();
-        match op {
-            Op::ImplicitMul | Op::Mul => {
-                if left_val.is_zero() || right_val.is_zero() {
-                    return NodeInner::zero();
-                }
-                if left_val.is_one() {
-                    return right;
-                }
-                if right_val.is_one() {
-                    return left;
-                }
-                NodeInner::from_float(left_val * right_val).wrap()
-            }
-            Op::Div => {
-                if right_val.is_zero() {
-                    panic!("Division by zero");
-                }
-                if left_val.is_zero() {
-                    return NodeInner::zero();
-                }
-                if right_val.is_one() {
-                    return left;
-                }
-                if let Some(result) = left_val.float_div(&right_val) {
-                    return NodeInner::from_float(result).wrap();
-                }
-                NodeInner::operator(Token::Operator(op), left, right).wrap()
-            }
-            _ => unreachable!("cannot evaluate constants where operator is of type {op}"),
-        }
-    }
 
     fn is_constant_node(node: &Node) -> bool {
         !node.inner.borrow().has_indp
@@ -1206,35 +1172,6 @@ impl NodeInner {
     }
 }
 
-pub struct SplitNode {
-    pub constant: Node,
-    pub dependent: Node,
-    has_divisor: u64,
-}
-
-impl SplitNode {
-    pub fn join(&self) -> Node {
-        NodeInner::from_operation(
-            Op::ImplicitMul,
-            self.constant.clone(),
-            self.dependent.clone(),
-        )
-    }
-    pub fn get_constant(&self) -> Float {
-        // The caller must ensure that the constant can be evaluated to a float
-        self.constant.inner.borrow().evaluate().unwrap()
-    }
-}
-
-impl Display for SplitNode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let constant = self.constant.inner.borrow();
-        let dependent = self.dependent.inner.borrow();
-        let result = format!("constant = {constant} | dependent = {dependent}");
-        write!(f, "{result}")
-    }
-}
-
 #[derive(Clone, Debug)]
 struct PowComponents {
     coefficient: Node,
@@ -1272,7 +1209,6 @@ where
     fn recip(self) -> Self;
     fn distribute_constant(self, k: T, mul_type: MulType) -> Self;
     fn distribute_expr(self, other: Self, mul_type: MulType) -> Self;
-    fn apply_linearity(self, log: bool) -> SplitNode;
     fn remove_constants(self) -> Float;
     fn simplify(self, expand: bool, combine_fns: bool) -> Self;
     fn is_polynomial(self) -> bool;
@@ -1699,174 +1635,6 @@ impl NodeFunctions<Float> for Node {
             },
             NodeValue::Empty => Float::zero(FP128, false),
         }
-    }
-    #[tracing::instrument(skip_all, parent = None, name = "(step) linearize", fields(result))]
-    fn apply_linearity(self, log: bool) -> SplitNode {
-        let node_ptr = self.inner.clone();
-        let node = self.inner.borrow();
-        let result = match &node.value {
-            NodeValue::Operator(op_node) => {
-                match op_node.token {
-                    Token::Operator(ref op) => match op {
-                        Op::ImplicitMul | Op::Div | Op::Mul => {
-                            // just split the left and right into constant and variable parts
-                            if node.has_indp {
-                                let left = node.get_left().unwrap().apply_linearity(false);
-                                let right = node.get_right().unwrap().apply_linearity(false);
-                                let constant = NodeInner::evaluate_constants(
-                                    op.clone(),
-                                    left.constant,
-                                    right.constant,
-                                );
-                                let dependent = NodeInner::from_operation(
-                                    op.clone(),
-                                    left.dependent,
-                                    right.dependent,
-                                )
-                                .simplify(false, true);
-                                SplitNode {
-                                    constant,
-                                    dependent,
-                                    has_divisor: 0,
-                                }
-                            } else {
-                                drop(node);
-                                SplitNode {
-                                    constant: self,
-                                    dependent: NodeInner::one(),
-                                    has_divisor: 0,
-                                }
-                            }
-                        }
-                        Op::Add | Op::Sub => {
-                            if node.has_indp {
-                                let left = node.get_left().unwrap().apply_linearity(false);
-                                let right = node.get_right().unwrap().apply_linearity(false);
-                                let (divisor, l_quotient, r_quotient) = left
-                                    .constant
-                                    .remove_constants()
-                                    .gcd(&right.constant.remove_constants());
-                                if left.has_divisor == u64::MAX || right.has_divisor == u64::MAX || // no common divisor
-                                   (left.has_divisor != 0 && right.has_divisor != 0 && left.has_divisor != right.has_divisor) || // different common divisors
-                                   (divisor == 1 || ( left.has_divisor != 0 && left.has_divisor != divisor) || (right.has_divisor != 0 && right.has_divisor != divisor))
-                                {
-                                    drop(node);
-                                    SplitNode {
-                                        constant: NodeInner::one(),
-                                        dependent: self,
-                                        has_divisor: u64::MAX,
-                                    } // return the whole expression, no common divisor
-                                } else {
-                                    // because this is subtraction or addition, we need to divide both sides by the common divisor and recombine
-                                    let constant =
-                                        NodeInner::from_number(divisor.try_into().unwrap()).wrap();
-                                    let new_left_k = NodeInner::from_number(l_quotient).wrap();
-                                    let new_right_k = NodeInner::from_number(r_quotient).wrap();
-                                    let new_left = NodeInner::from_operation(
-                                        Op::ImplicitMul,
-                                        new_left_k,
-                                        left.dependent,
-                                    );
-                                    let new_right = NodeInner::from_operation(
-                                        Op::ImplicitMul,
-                                        new_right_k,
-                                        right.dependent,
-                                    );
-                                    let dependent =
-                                        NodeInner::from_operation(op.clone(), new_left, new_right)
-                                            .simplify(false, true);
-                                    SplitNode {
-                                        constant,
-                                        dependent,
-                                        has_divisor: divisor,
-                                    }
-                                }
-                            } else {
-                                drop(node);
-                                SplitNode {
-                                    constant: self,
-                                    dependent: NodeInner::one(),
-                                    has_divisor: 0,
-                                }
-                            }
-                        }
-                        Op::Pow => {
-                            if node.has_indp {
-                                drop(node);
-                                SplitNode {
-                                    constant: NodeInner::one(),
-                                    dependent: self,
-                                    has_divisor: 0,
-                                }
-                            } else {
-                                drop(node);
-                                SplitNode {
-                                    constant: self,
-                                    dependent: NodeInner::one(),
-                                    has_divisor: 0,
-                                }
-                            }
-                        }
-                    },
-                    Token::Function(_) => {
-                        if node.has_indp {
-                            drop(node);
-                            SplitNode {
-                                constant: NodeInner::one(),
-                                dependent: self,
-                                has_divisor: 0,
-                            }
-                        } else {
-                            drop(node);
-                            SplitNode {
-                                constant: self,
-                                dependent: NodeInner::one(),
-                                has_divisor: 0,
-                            }
-                        }
-                    }
-                    _ => {
-                        drop(node);
-                        SplitNode {
-                            constant: self,
-                            dependent: NodeInner::one(),
-                            has_divisor: 0,
-                        }
-                    }
-                }
-            }
-            NodeValue::Operand(_) => {
-                if node.has_indp {
-                    drop(node);
-                    SplitNode {
-                        constant: NodeInner::one(),
-                        dependent: self,
-                        has_divisor: 0,
-                    }
-                } else {
-                    drop(node);
-                    SplitNode {
-                        constant: self,
-                        dependent: NodeInner::one(),
-                        has_divisor: 0,
-                    }
-                }
-            }
-            _ => {
-                drop(node);
-                SplitNode {
-                    constant: self,
-                    dependent: NodeInner::one(),
-                    has_divisor: 0,
-                }
-            }
-        };
-        if log && !result.constant.inner.borrow().is_one() {
-            tracing::Span::current().record("result", &format!("{}", result));
-            let borrowed = node_ptr.borrow();
-            tracing::info!("{borrowed}");
-        }
-        result
     }
     fn simplify(self, expand: bool, combine_fns: bool) -> Self {
         let node = self.inner.borrow();

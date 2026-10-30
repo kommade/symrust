@@ -96,5 +96,6 @@ fn expr_simplify() {
 #[test]
 fn expr_linearise() {
     let expr = create_expr!("-2 * sin(x) / cos(x)").unwrap();
-    println!("{}", expr.tree.apply_linearity(false).to_string());
+    let split = crate::calculus::expr::split_constant(&expr.tree);
+    println!("{split}");
 }

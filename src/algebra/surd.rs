@@ -2,23 +2,22 @@
 //!
 //! Some denominators only factor once a square root is allowed, for example
 //! `x^4 + 1 = (x^2 + sqrt(2) x + 1)(x^2 - sqrt(2) x + 1)`. Keeping the
-//! coefficients in `a + b sqrt(k)` form lets the partial fraction machinery
-//! work with those factors exactly.
+//! coefficients in `a + b sqrt(k)` form lets the polynomial routines work with
+//! those factors exactly.
 
-use super::helpers::{self};
-use super::rational::Rat;
+use super::{expr, rational::Rat};
 use crate::structs::node::Node;
 
 /// `a + b sqrt(k)` with a squarefree `k`. A rational is stored with `k = 0`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct Surd {
+pub(crate) struct Surd {
     k: i64,
     a: Rat,
     b: Rat,
 }
 
 impl Surd {
-    pub(super) const fn rational(value: Rat) -> Self {
+    pub(crate) const fn rational(value: Rat) -> Self {
         Self {
             k: 0,
             a: value,
@@ -27,7 +26,7 @@ impl Surd {
     }
 
     /// Build `a + b sqrt(k)`, folding the expression when it is rational.
-    pub(super) fn new(k: i64, a: Rat, b: Rat) -> Option<Self> {
+    pub(crate) fn new(k: i64, a: Rat, b: Rat) -> Option<Self> {
         if b.is_zero() {
             return Some(Self::rational(a));
         }
@@ -47,19 +46,19 @@ impl Surd {
         })
     }
 
-    pub(super) fn is_zero(&self) -> bool {
+    pub(crate) fn is_zero(&self) -> bool {
         self.a.is_zero() && self.b.is_zero()
     }
 
-    pub(super) fn is_one(&self) -> bool {
+    pub(crate) fn is_one(&self) -> bool {
         self.k == 0 && self.a.is_one()
     }
 
-    pub(super) fn is_negative(&self) -> bool {
+    pub(crate) fn is_negative(&self) -> bool {
         self.to_f64() < 0.0
     }
 
-    pub(super) fn to_f64(&self) -> f64 {
+    pub(crate) fn to_f64(&self) -> f64 {
         if self.b.is_zero() {
             self.a.to_f64()
         } else {
@@ -67,7 +66,7 @@ impl Surd {
         }
     }
 
-    pub(super) fn neg(self) -> Self {
+    pub(crate) fn neg(self) -> Self {
         Self {
             k: self.k,
             a: self.a.neg(),
@@ -84,16 +83,16 @@ impl Surd {
         }
     }
 
-    pub(super) fn add(self, other: Self) -> Option<Self> {
+    pub(crate) fn add(self, other: Self) -> Option<Self> {
         let k = self.common_field(other)?;
         Self::new(k, self.a.add(other.a)?, self.b.add(other.b)?)
     }
 
-    pub(super) fn sub(self, other: Self) -> Option<Self> {
+    pub(crate) fn sub(self, other: Self) -> Option<Self> {
         self.add(other.neg())
     }
 
-    pub(super) fn mul(self, other: Self) -> Option<Self> {
+    pub(crate) fn mul(self, other: Self) -> Option<Self> {
         let k = self.common_field(other)?;
         // (a1 + b1 s)(a2 + b2 s) = a1a2 + k b1b2 + (a1b2 + a2b1) s
         let radicand = Rat::from_i64(k);
@@ -105,7 +104,7 @@ impl Surd {
         Self::new(k, a, b)
     }
 
-    pub(super) fn div(self, other: Self) -> Option<Self> {
+    pub(crate) fn div(self, other: Self) -> Option<Self> {
         let k = self.common_field(other)?;
         // Multiply both sides by the conjugate of the divisor.
         let conjugate = other.neg_conjugate();
@@ -126,12 +125,12 @@ impl Surd {
         Self::new(self.k, self.a.mul(factor)?, self.b.mul(factor)?)
     }
 
-    pub(super) fn scale_by(self, factor: Rat) -> Option<Self> {
+    pub(crate) fn scale_by(self, factor: Rat) -> Option<Self> {
         self.scale(factor)
     }
 
     /// The exact square root when it stays inside a single quadratic extension.
-    pub(super) fn sqrt(self) -> Option<Self> {
+    pub(crate) fn sqrt(self) -> Option<Self> {
         if self.is_negative() {
             return None;
         }
@@ -168,21 +167,17 @@ impl Surd {
         Self::new(self.k, first_root, sign)
     }
 
-    pub(super) fn to_node(self) -> Node {
+    pub(crate) fn to_node(self) -> Node {
         if self.b.is_zero() {
             return self.a.to_node();
         }
-        let root = helpers::sqrt_arg(helpers::number(self.k));
-        let radical = helpers::multiply_by_rational(root, self.b);
+        let root = expr::sqrt(expr::number(self.k));
+        let radical = expr::multiply_by_rational(root, self.b);
         if self.a.is_zero() {
             radical
         } else {
-            helpers::add(self.a.to_node(), radical)
+            expr::add(self.a.to_node(), radical)
         }
-    }
-
-    pub(super) fn describe(self) -> String {
-        super::describe_signed(&self.to_node())
     }
 }
 
@@ -196,7 +191,7 @@ fn denominator_norm(value: Surd, k: i64) -> Option<Rat> {
 }
 
 /// Write `value = k * rest^2` with a squarefree `k`.
-pub(super) fn squarefree_part(value: i128) -> Option<(i64, i128)> {
+pub(crate) fn squarefree_part(value: i128) -> Option<(i64, i128)> {
     if value == 0 {
         return Some((0, 0));
     }
@@ -229,7 +224,7 @@ pub(super) fn squarefree_part(value: i128) -> Option<(i64, i128)> {
 }
 
 /// `sqrt(value)` as a single surd, when possible.
-pub(super) fn sqrt_rational(value: Rat) -> Option<Surd> {
+pub(crate) fn sqrt_rational(value: Rat) -> Option<Surd> {
     if value.is_negative() {
         return None;
     }
@@ -251,5 +246,18 @@ pub(super) fn sqrt_rational(value: Rat) -> Option<Surd> {
         Some(Surd::rational(coefficient))
     } else {
         Surd::new(product_k, Rat::ZERO, coefficient)
+    }
+}
+
+pub(crate) fn surd_quadratic_node(linear: Surd, constant: Surd, variable: &Node) -> Node {
+    let square = expr::pow(variable.clone(), expr::number(2));
+    let linear_term = expr::mul(linear.to_node(), variable.clone());
+    expr::add(expr::add(square, linear_term), constant.to_node())
+}
+
+pub(crate) fn surd_sqrt_node(value: Surd) -> Node {
+    match value.sqrt() {
+        Some(root) => root.to_node(),
+        None => expr::sqrt(value.to_node()),
     }
 }

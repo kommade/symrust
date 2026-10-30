@@ -37,7 +37,6 @@
 
 mod helpers;
 mod rational;
-mod surd;
 mod trig;
 
 use std::{
@@ -51,6 +50,7 @@ use arpfloat::{FP128, Float};
 use tracing::{debug, info};
 
 use crate::{
+    algebra,
     parse::lexer::{Func, Op, Token},
     structs::{
         expr::Expr,
@@ -674,15 +674,15 @@ impl Integrator {
             }
             _ => return None,
         };
-        let polynomial = rational::Poly::from_node(&argument)?;
+        let polynomial = algebra::polynomial::Poly::from_node(&argument)?;
         if polynomial.degree() != Some(2) {
             return None;
         }
         let quadratic = polynomial.coeff(2);
         let linear = polynomial.coeff(1);
         let constant = polynomial.coeff(0);
-        let two = rational::Rat::from_i64(2);
-        let four = rational::Rat::from_i64(4);
+        let two = algebra::rational::Rat::from_i64(2);
+        let four = algebra::rational::Rat::from_i64(4);
         let shift = linear.div(quadratic.mul(two)?)?;
         let completed = constant.sub(linear.mul(linear)?.div(quadratic.mul(four)?)?)?;
         let variable = self.variable_node();
@@ -692,12 +692,12 @@ impl Integrator {
                 return None;
             }
             let magnitude = quadratic.neg();
-            let root_magnitude = rational::square_root_of(magnitude);
-            let scale = rational::square_root_of(magnitude.div(completed)?);
+            let root_magnitude = algebra::rational::square_root_of(magnitude);
+            let scale = algebra::rational::square_root_of(magnitude.div(completed)?);
             let argument = helpers::mul(scale, centre);
             helpers::div(helpers::function(Func::Asin, argument), root_magnitude)
         } else {
-            let root = rational::square_root_of(quadratic);
+            let root = algebra::rational::square_root_of(quadratic);
             let scaled = helpers::mul(root.clone(), centre);
             let total = helpers::add(scaled, helpers::sqrt_arg(argument));
             helpers::div(helpers::function(Func::Ln, total), root)
@@ -727,15 +727,15 @@ impl Integrator {
             }
             _ => return None,
         };
-        let polynomial = rational::Poly::from_node(&argument)?;
+        let polynomial = algebra::polynomial::Poly::from_node(&argument)?;
         if polynomial.degree() != Some(2) {
             return None;
         }
         let quadratic = polynomial.coeff(2);
         let linear = polynomial.coeff(1);
         let constant = polynomial.coeff(0);
-        let two = rational::Rat::from_i64(2);
-        let four = rational::Rat::from_i64(4);
+        let two = algebra::rational::Rat::from_i64(2);
+        let four = algebra::rational::Rat::from_i64(4);
         let shift = linear.div(quadratic.mul(two)?)?;
         let completed = constant.sub(linear.mul(linear)?.div(quadratic.mul(four)?)?)?;
         let variable = self.variable_node();
@@ -748,8 +748,8 @@ impl Integrator {
                 return None;
             }
             let magnitude = quadratic.neg();
-            let root_magnitude = rational::square_root_of(magnitude);
-            let scale = rational::square_root_of(magnitude.div(completed)?);
+            let root_magnitude = algebra::rational::square_root_of(magnitude);
+            let scale = algebra::rational::square_root_of(magnitude.div(completed)?);
             let arc = helpers::function(Func::Asin, helpers::mul(scale, centre));
             let factor = helpers::mul(number(2), root_magnitude);
             helpers::add(
@@ -761,7 +761,7 @@ impl Integrator {
                 // sqrt(a) |t| is not differentiable at the centre.
                 return None;
             }
-            let root_quadratic = rational::square_root_of(quadratic);
+            let root_quadratic = algebra::rational::square_root_of(quadratic);
             let logarithm =
                 helpers::add(helpers::mul(root_quadratic.clone(), centre), root.clone());
             let arc = helpers::function(Func::Ln, logarithm);
@@ -1264,7 +1264,7 @@ fn describe_signed(node: &Node) -> String {
 /// Format a constant for the logs, preferring exact fractions over the long
 /// decimal expansion of a float.
 fn describe_number(value: &Float) -> String {
-    if let Some(rational) = rational::Rat::from_float_simple(value) {
+    if let Some(rational) = algebra::rational::Rat::from_float_simple(value) {
         let (numerator, denominator) = rational.parts();
         if denominator == 1 {
             return numerator.to_string();

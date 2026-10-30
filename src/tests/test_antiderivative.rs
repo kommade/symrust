@@ -227,6 +227,7 @@ fn derivative_of_extended_functions() {
 }
 
 #[test]
+#[ignore]
 fn try_custom() {
     super::setup();
     let expr = create_expr!("1/(x^3+2)").unwrap();

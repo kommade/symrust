@@ -5,7 +5,7 @@ use tracing::{debug, info};
 
 use super::Integrator;
 use super::helpers::{self, Shape};
-use super::rational::{Poly, Rat};
+use crate::algebra::{polynomial::Poly, rational::Rat};
 use crate::{
     parse::lexer::{Func, Op, Token},
     structs::node::{Node, NodeFunctions},

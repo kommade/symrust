@@ -1,5 +1,6 @@
 use tracing::Subscriber;
 
+pub(crate) mod algebra;
 pub mod calculus;
 mod parse;
 pub mod structs;
