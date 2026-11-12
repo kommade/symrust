@@ -1,9 +1,9 @@
 use std::{error::Error, fmt::Display};
 
-use crate::numeric::Real;
+use crate::numeric::{FloatType, Real};
 
 #[derive(Debug, Clone)]
-pub enum Func {
+pub enum Func<T = Real> {
     Sin,
     Cos,
     Tan,
@@ -14,11 +14,11 @@ pub enum Func {
     Acos,
     Atan,
     Sqrt,
-    Log(Real),
+    Log(T),
     Ln,
 }
 
-impl Display for Func {
+impl<T: FloatType + Display> Display for Func<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::Sin => write!(f, "sin"),
@@ -81,10 +81,10 @@ pub enum Const {
 }
 
 impl Const {
-    pub fn get_value(&self) -> Real {
+    pub fn get_value<T: FloatType>(&self) -> T {
         match self {
-            Self::Pi => Real::pi(),
-            Self::E => Real::e(),
+            Self::Pi => T::pi(),
+            Self::E => T::e(),
         }
     }
 }
@@ -99,19 +99,19 @@ impl Display for Const {
 }
 
 #[derive(Debug, Clone)]
-pub enum Token {
-    Function(Func),
+pub enum Token<T = Real> {
+    Function(Func<T>),
     Operator(Op),
     Constant(Const),
     Number(i64),
-    Float(Real),
+    Float(T),
     Indp(char),
     Var(char),
     LPar,
     RPar,
 }
 
-impl Display for Token {
+impl<T: FloatType + Display> Display for Token<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::Function(func) => write!(f, "{func}"),
@@ -126,8 +126,8 @@ impl Display for Token {
     }
 }
 
-impl Token {
-    pub const fn from_func(func: Func) -> Self {
+impl<T> Token<T> {
+    pub const fn from_func(func: Func<T>) -> Self {
         Self::Function(func)
     }
     pub const fn from_op(op: Op) -> Self {
@@ -139,7 +139,7 @@ impl Token {
     pub const fn from_num(n: i64) -> Self {
         Self::Number(n)
     }
-    pub fn from_float(n: Real) -> Self {
+    pub const fn from_float(n: T) -> Self {
         Self::Float(n)
     }
     pub const fn from_var(c: char) -> Self {

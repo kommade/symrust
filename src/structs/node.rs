@@ -1,9 +1,7 @@
 use std::{cell::RefCell, cmp::Ordering, error::Error, fmt::Display, ops::Neg, rc::Rc};
 
-use once_cell::sync::OnceCell;
-
 use crate::{
-    numeric::Real,
+    numeric::{FloatType, Real},
     parse::lexer::{Const, Func, Op, Token},
     utils::fmt::unnecessary_brackets,
 };
@@ -15,43 +13,39 @@ pub enum MulType {
 }
 
 #[derive(Clone, Debug)]
-pub struct OpNode {
-    pub token: Token,
-    pub left: Node,
-    pub right: Node,
+pub struct OpNode<T = Real> {
+    pub token: Token<T>,
+    pub left: Node<T>,
+    pub right: Node<T>,
 }
 
 #[derive(Clone, Debug)]
-pub enum NodeValue {
-    Operand(Token),
-    Operator(OpNode),
+pub enum NodeValue<T = Real> {
+    Operand(Token<T>),
+    Operator(OpNode<T>),
     Empty,
 }
 
 #[derive(Clone, Debug)]
-pub struct NodeInner {
-    pub(crate) value: NodeValue,
+pub struct NodeInner<T = Real> {
+    pub(crate) value: NodeValue<T>,
     pub(crate) has_indp: bool,
     pub(crate) has_const: bool,
     pub(crate) has_func: bool,
 }
 
 #[derive(Clone, Debug)]
-pub struct Node {
-    pub(crate) inner: Rc<RefCell<NodeInner>>,
+pub struct Node<T = Real> {
+    pub(crate) inner: Rc<RefCell<NodeInner<T>>>,
 }
 
-impl Node {
-    fn new(inner: NodeInner) -> Self {
+impl<T> Node<T> {
+    fn new(inner: NodeInner<T>) -> Self {
         Self {
             inner: Rc::new(RefCell::new(inner)),
         }
     }
 }
-
-const EMPTY: OnceCell<Node> = OnceCell::new();
-const ZERO: OnceCell<Node> = OnceCell::new();
-const ONE: OnceCell<Node> = OnceCell::new();
 
 #[derive(Debug)]
 pub enum NodeError {
@@ -70,56 +64,52 @@ impl Display for NodeError {
 
 impl Error for NodeError {}
 
-impl NodeInner {
-    pub fn get_left(&self) -> Result<Node, NodeError> {
+impl<T: FloatType + Display> NodeInner<T> {
+    pub fn get_left(&self) -> Result<Node<T>, NodeError> {
         match &self.value {
             NodeValue::Operator(op_node) => Ok(op_node.left.clone()),
             _ => Err(NodeError::NotOperator),
         }
     }
-    pub fn get_right(&self) -> Result<Node, NodeError> {
+    pub fn get_right(&self) -> Result<Node<T>, NodeError> {
         match &self.value {
             NodeValue::Operator(op_node) => Ok(op_node.right.clone()),
             _ => Err(NodeError::NotOperator),
         }
     }
-    /// Return a reference to an empty node.
-    pub fn empty() -> Node {
-        EMPTY
-            .get_or_init(|| {
-                Node::new(NodeInner {
-                    value: NodeValue::Empty,
-                    has_indp: false,
-                    has_const: false,
-                    has_func: false,
-                })
-            })
-            .clone()
-    }
-    /// Return a reference to a zero node.
-    pub fn zero() -> Node {
-        ZERO.get_or_init(|| {
-            Node::new(NodeInner {
-                value: NodeValue::Operand(Token::Number(0)),
-                has_indp: false,
-                has_const: false,
-                has_func: false,
-            })
+    /// Return an empty node.
+    pub fn empty() -> Node<T> {
+        Node::new(NodeInner {
+            value: NodeValue::Empty,
+            has_indp: false,
+            has_const: false,
+            has_func: false,
         })
-        .clone()
     }
-    /// Return a reference to a one node.
-    pub fn one() -> Node {
-        ONE.get_or_init(|| {
-            Node::new(NodeInner {
-                value: NodeValue::Operand(Token::Number(1)),
-                has_indp: false,
-                has_const: false,
-                has_func: false,
-            })
+    /// Return a zero node.
+    pub fn zero() -> Node<T> {
+        Node::new(NodeInner {
+            value: NodeValue::Operand(Token::Number(0)),
+            has_indp: false,
+            has_const: false,
+            has_func: false,
         })
-        .clone()
     }
+    /// Return a one node.
+    pub fn one() -> Node<T> {
+        Node::new(NodeInner {
+            value: NodeValue::Operand(Token::Number(1)),
+            has_indp: false,
+            has_const: false,
+            has_func: false,
+        })
+    }
+    pub(crate) const fn is_empty(&self) -> bool {
+        matches!(&self.value, NodeValue::Empty)
+    }
+}
+
+impl NodeInner {
     pub(crate) fn to_latex(&self) -> Result<String, NodeError> {
         match &self.value {
             NodeValue::Operand(token) => match token {
@@ -271,7 +261,7 @@ impl NodeInner {
     }
 }
 
-impl Display for NodeInner {
+impl Display for NodeInner<Real> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.value {
             NodeValue::Operand(ref token) => write!(f, "{token}"),
@@ -433,12 +423,12 @@ impl Display for NodeInner {
     }
 }
 
-impl NodeInner {
-    pub(crate) fn wrap(self) -> Node {
+impl<T: FloatType + Display> NodeInner<T> {
+    pub(crate) fn wrap(self) -> Node<T> {
         Node::new(self)
     }
     /// Creates a new node from a operand token.
-    pub(crate) fn operand(token: Token) -> Self {
+    pub(crate) fn operand(token: Token<T>) -> Self {
         let (has_indp, has_const, has_func) = match token {
             Token::Indp(_) => (true, false, false),
             Token::Constant(_) | Token::Var(_) => (false, true, false),
@@ -455,7 +445,7 @@ impl NodeInner {
         }
     }
     /// Creates a new operator node from a token.
-    pub(crate) fn operator(token: Token, left: Node, right: Node) -> Self {
+    pub(crate) fn operator(token: Token<T>, left: Node<T>, right: Node<T>) -> Self {
         let left_borrow = left.inner.borrow();
         let right_borrow = right.inner.borrow();
         let has_var = left_borrow.has_indp || right_borrow.has_indp;
@@ -477,11 +467,11 @@ impl NodeInner {
         }
     }
     /// Creates a new node from an operation.
-    pub(crate) fn from_operation(op: Op, left: Node, right: Node) -> Node {
+    pub(crate) fn from_operation(op: Op, left: Node<T>, right: Node<T>) -> Node<T> {
         Self::operator(Token::Operator(op), left, right).wrap()
     }
     /// Creates a new node from a function.
-    pub(crate) fn from_function(func: Func, node: Node) -> Node {
+    pub(crate) fn from_function(func: Func<T>, node: Node<T>) -> Node<T> {
         let node_borrow = node.inner.borrow();
         let has_var = node_borrow.has_indp;
         let has_const = node_borrow.has_const;
@@ -513,7 +503,7 @@ impl NodeInner {
         }
     }
     /// Creates a new node from a float.
-    pub(crate) fn from_float(num: Real) -> Self {
+    pub(crate) fn from_float(num: T) -> Self {
         Self {
             value: NodeValue::Operand(Token::Float(num)),
             has_indp: false,
@@ -530,7 +520,9 @@ impl NodeInner {
             has_func: false,
         }
     }
+}
 
+impl NodeInner {
     fn is_constant_node(node: &Node) -> bool {
         !node.inner.borrow().has_indp
     }
@@ -550,7 +542,7 @@ impl NodeInner {
                         Token::Operator(op) => {
                             if *op == Op::Pow {
                                 return Some(PowComponents {
-                                    coefficient: NodeInner::one(),
+                                    coefficient: Self::one(),
                                     base: op_node.left.clone(),
                                     exponent: op_node.right.clone(),
                                 });
@@ -559,11 +551,11 @@ impl NodeInner {
                                 let left = op_node.left.clone();
                                 let right = op_node.right.clone();
                                 drop(borrow);
-                                if NodeInner::is_constant_node(&left) {
+                                if Self::is_constant_node(&left) {
                                     if let Some(mut inner) =
-                                        NodeInner::extract_pow_components(&right, extract_fns)
+                                        Self::extract_pow_components(&right, extract_fns)
                                     {
-                                        inner.coefficient = NodeInner::from_operation(
+                                        inner.coefficient = Self::from_operation(
                                             Op::ImplicitMul,
                                             left,
                                             inner.coefficient,
@@ -572,11 +564,11 @@ impl NodeInner {
                                         return Some(inner);
                                     }
                                 }
-                                if NodeInner::is_constant_node(&right) {
+                                if Self::is_constant_node(&right) {
                                     if let Some(mut inner) =
-                                        NodeInner::extract_pow_components(&left, extract_fns)
+                                        Self::extract_pow_components(&left, extract_fns)
                                     {
-                                        inner.coefficient = NodeInner::from_operation(
+                                        inner.coefficient = Self::from_operation(
                                             Op::ImplicitMul,
                                             right,
                                             inner.coefficient,
@@ -591,11 +583,11 @@ impl NodeInner {
                                 let left = op_node.left.clone();
                                 let right = op_node.right.clone();
                                 drop(borrow);
-                                if NodeInner::is_constant_node(&left) {
+                                if Self::is_constant_node(&left) {
                                     if let Some(mut inner) =
-                                        NodeInner::extract_pow_components(&right, extract_fns)
+                                        Self::extract_pow_components(&right, extract_fns)
                                     {
-                                        inner.coefficient = NodeInner::from_operation(
+                                        inner.coefficient = Self::from_operation(
                                             Op::Div,
                                             left,
                                             inner.coefficient,
@@ -610,9 +602,9 @@ impl NodeInner {
                         }
                         Token::Function(_) if extract_fns => {
                             return Some(PowComponents {
-                                coefficient: NodeInner::one(),
+                                coefficient: Self::one(),
                                 base: node.clone(),
-                                exponent: NodeInner::one(),
+                                exponent: Self::one(),
                             });
                         }
                         _ => {}
@@ -620,9 +612,9 @@ impl NodeInner {
                 }
                 NodeValue::Operand(_) if borrow.has_indp => {
                     return Some(PowComponents {
-                        coefficient: NodeInner::one(),
+                        coefficient: Self::one(),
                         base: node.clone(),
-                        exponent: NodeInner::one(),
+                        exponent: Self::one(),
                     });
                 }
                 _ => {}
@@ -633,9 +625,9 @@ impl NodeInner {
 
     fn combine_coefficients(left: Node, right: Node, op: &Op) -> Node {
         if *op == Op::Div {
-            NodeInner::from_operation(Op::Div, left, right).simplify(false, true)
+            Self::from_operation(Op::Div, left, right).simplify(false, true)
         } else {
-            NodeInner::from_operation(Op::ImplicitMul, left, right).simplify(false, true)
+            Self::from_operation(Op::ImplicitMul, left, right).simplify(false, true)
         }
     }
 
@@ -655,7 +647,7 @@ impl NodeInner {
         let borrow = node.inner.borrow();
         if !borrow.has_indp {
             drop(borrow);
-            return Some((node.clone(), NodeInner::one()));
+            return Some((node.clone(), Self::one()));
         }
         if let NodeValue::Operator(op_node) = &borrow.value {
             if let Token::Operator(op) = &op_node.token {
@@ -663,13 +655,13 @@ impl NodeInner {
                     let left = op_node.left.clone();
                     let right = op_node.right.clone();
                     drop(borrow);
-                    let left_const = NodeInner::is_constant_node(&left);
-                    let right_const = NodeInner::is_constant_node(&right);
+                    let left_const = Self::is_constant_node(&left);
+                    let right_const = Self::is_constant_node(&right);
                     return match (left_const, right_const) {
                         (true, true) => Some((
-                            NodeInner::from_operation(Op::ImplicitMul, left, right)
+                            Self::from_operation(Op::ImplicitMul, left, right)
                                 .simplify(false, true),
-                            NodeInner::one(),
+                            Self::one(),
                         )),
                         (true, false) => Some((left, right)),
                         (false, true) => Some((right, left)),
@@ -689,8 +681,8 @@ impl NodeInner {
                     let left = op_node.left.clone();
                     let right = op_node.right.clone();
                     drop(borrow);
-                    NodeInner::collect_mul_factors(&left, factors);
-                    NodeInner::collect_mul_factors(&right, factors);
+                    Self::collect_mul_factors(&left, factors);
+                    Self::collect_mul_factors(&right, factors);
                     return;
                 }
             }
@@ -701,12 +693,12 @@ impl NodeInner {
 
     fn rebuild_product_from_factors(mut factors: Vec<Node>) -> Node {
         if factors.is_empty() {
-            return NodeInner::one();
+            return Self::one();
         }
         let mut iter = factors.drain(..);
         let mut acc = iter.next().unwrap();
         for factor in iter {
-            acc = NodeInner::from_operation(Op::ImplicitMul, acc, factor);
+            acc = Self::from_operation(Op::ImplicitMul, acc, factor);
         }
         acc
     }
@@ -717,32 +709,32 @@ impl NodeInner {
         combine_fns: bool,
     ) -> Option<Node> {
         let mul_op = Op::ImplicitMul;
-        if NodeInner::nodes_equal(&left.base, &right.base) {
-            let new_coeff = NodeInner::combine_coefficients(
+        if Self::nodes_equal(&left.base, &right.base) {
+            let new_coeff = Self::combine_coefficients(
                 left.coefficient.clone(),
                 right.coefficient.clone(),
                 &mul_op,
             );
             let new_exponent =
-                NodeInner::from_operation(Op::Add, left.exponent.clone(), right.exponent.clone());
-            let pow = NodeInner::from_operation(Op::Pow, left.base.clone(), new_exponent);
+                Self::from_operation(Op::Add, left.exponent.clone(), right.exponent.clone());
+            let pow = Self::from_operation(Op::Pow, left.base.clone(), new_exponent);
             return Some(
-                NodeInner::from_operation(Op::ImplicitMul, new_coeff, pow)
+                Self::from_operation(Op::ImplicitMul, new_coeff, pow)
                     .simplify(false, combine_fns),
             );
         }
-        if NodeInner::nodes_equal(&left.exponent, &right.exponent) {
-            let new_coeff = NodeInner::combine_coefficients(
+        if Self::nodes_equal(&left.exponent, &right.exponent) {
+            let new_coeff = Self::combine_coefficients(
                 left.coefficient.clone(),
                 right.coefficient.clone(),
                 &mul_op,
             );
             let base =
-                NodeInner::from_operation(Op::ImplicitMul, left.base.clone(), right.base.clone())
+                Self::from_operation(Op::ImplicitMul, left.base.clone(), right.base.clone())
                     .simplify(false, combine_fns);
-            let pow = NodeInner::from_operation(Op::Pow, base, left.exponent.clone());
+            let pow = Self::from_operation(Op::Pow, base, left.exponent.clone());
             return Some(
-                NodeInner::from_operation(Op::ImplicitMul, new_coeff, pow)
+                Self::from_operation(Op::ImplicitMul, new_coeff, pow)
                     .simplify(false, combine_fns),
             );
         }
@@ -751,31 +743,31 @@ impl NodeInner {
 
     fn try_combine_mul_chain(left: &Node, right: &Node, combine_fns: bool) -> Option<Node> {
         let mut factors = Vec::new();
-        NodeInner::collect_mul_factors(left, &mut factors);
-        NodeInner::collect_mul_factors(right, &mut factors);
+        Self::collect_mul_factors(left, &mut factors);
+        Self::collect_mul_factors(right, &mut factors);
         if factors.len() < 2 {
             return None;
         }
         for i in 0..factors.len() {
             let left_factor = factors[i].clone();
-            let left_comp = match NodeInner::extract_pow_components(&left_factor, combine_fns) {
+            let left_comp = match Self::extract_pow_components(&left_factor, combine_fns) {
                 Some(comp) => comp,
                 None => continue,
             };
             for j in (i + 1)..factors.len() {
                 let right_factor = factors[j].clone();
-                let right_comp = match NodeInner::extract_pow_components(&right_factor, combine_fns)
+                let right_comp = match Self::extract_pow_components(&right_factor, combine_fns)
                 {
                     Some(comp) => comp,
                     None => continue,
                 };
                 if let Some(new_factor) =
-                    NodeInner::combine_components_for_mul(&left_comp, &right_comp, combine_fns)
+                    Self::combine_components_for_mul(&left_comp, &right_comp, combine_fns)
                 {
                     factors.remove(i);
                     let target = j - 1;
                     factors[target] = new_factor;
-                    return Some(NodeInner::rebuild_product_from_factors(factors));
+                    return Some(Self::rebuild_product_from_factors(factors));
                 }
             }
         }
@@ -788,32 +780,32 @@ impl NodeInner {
         op: &Op,
         combine_fns: bool,
     ) -> Option<Node> {
-        let left_components = NodeInner::extract_pow_components(left, combine_fns);
-        let right_components = NodeInner::extract_pow_components(right, combine_fns);
+        let left_components = Self::extract_pow_components(left, combine_fns);
+        let right_components = Self::extract_pow_components(right, combine_fns);
         if let (Some(left_comp), Some(right_comp)) = (&left_components, &right_components) {
-            if NodeInner::nodes_equal(&left_comp.base, &right_comp.base) {
-                let new_coeff = NodeInner::combine_coefficients(
+            if Self::nodes_equal(&left_comp.base, &right_comp.base) {
+                let new_coeff = Self::combine_coefficients(
                     left_comp.coefficient.clone(),
                     right_comp.coefficient.clone(),
                     op,
                 );
                 let exponent_op = if *op == Op::Div { Op::Sub } else { Op::Add };
-                let new_exponent = NodeInner::from_operation(
+                let new_exponent = Self::from_operation(
                     exponent_op,
                     left_comp.exponent.clone(),
                     right_comp.exponent.clone(),
                 );
                 let new_pow =
-                    NodeInner::from_operation(Op::Pow, left_comp.base.clone(), new_exponent);
-                return Some(NodeInner::from_operation(
+                    Self::from_operation(Op::Pow, left_comp.base.clone(), new_exponent);
+                return Some(Self::from_operation(
                     Op::ImplicitMul,
                     new_coeff,
                     new_pow,
                 ));
             }
 
-            if NodeInner::nodes_equal(&left_comp.exponent, &right_comp.exponent) {
-                let new_coeff = NodeInner::combine_coefficients(
+            if Self::nodes_equal(&left_comp.exponent, &right_comp.exponent) {
+                let new_coeff = Self::combine_coefficients(
                     left_comp.coefficient.clone(),
                     right_comp.coefficient.clone(),
                     op,
@@ -823,16 +815,16 @@ impl NodeInner {
                 } else {
                     Op::ImplicitMul
                 };
-                let new_base = NodeInner::from_operation(
+                let new_base = Self::from_operation(
                     base_op,
                     left_comp.base.clone(),
                     right_comp.base.clone(),
                 )
                 .simplify(false, false);
                 let new_pow =
-                    NodeInner::from_operation(Op::Pow, new_base, left_comp.exponent.clone())
+                    Self::from_operation(Op::Pow, new_base, left_comp.exponent.clone())
                         .simplify(false, false);
-                return Some(NodeInner::from_operation(
+                return Some(Self::from_operation(
                     Op::ImplicitMul,
                     new_coeff,
                     new_pow,
@@ -841,19 +833,19 @@ impl NodeInner {
         }
 
         if op.is_mul() {
-            if let Some(result) = NodeInner::try_combine_mul_chain(left, right, combine_fns) {
+            if let Some(result) = Self::try_combine_mul_chain(left, right, combine_fns) {
                 return Some(result);
             }
             let combine_with_division = |division: &Node, other: &Node| -> Option<Node> {
-                let (numerator, denominator) = NodeInner::extract_division(division)?;
-                if !NodeInner::is_constant_node(&numerator) {
+                let (numerator, denominator) = Self::extract_division(division)?;
+                if !Self::is_constant_node(&numerator) {
                     return None;
                 }
                 let new_numerator =
-                    NodeInner::from_operation(Op::ImplicitMul, other.clone(), numerator)
+                    Self::from_operation(Op::ImplicitMul, other.clone(), numerator)
                         .simplify(false, false);
                 Some(
-                    NodeInner::from_operation(Op::Div, new_numerator, denominator)
+                    Self::from_operation(Op::Div, new_numerator, denominator)
                         .simplify(false, false),
                 )
             };
@@ -878,16 +870,16 @@ impl NodeInner {
                         let left = op_node.left.clone();
                         let right = op_node.right.clone();
                         drop(borrow);
-                        NodeInner::collect_sum_terms(&left, sign, terms);
-                        NodeInner::collect_sum_terms(&right, sign, terms);
+                        Self::collect_sum_terms(&left, sign, terms);
+                        Self::collect_sum_terms(&right, sign, terms);
                         return;
                     }
                     Op::Sub => {
                         let left = op_node.left.clone();
                         let right = op_node.right.clone();
                         drop(borrow);
-                        NodeInner::collect_sum_terms(&left, sign, terms);
-                        NodeInner::collect_sum_terms(&right, -sign, terms);
+                        Self::collect_sum_terms(&left, sign, terms);
+                        Self::collect_sum_terms(&right, -sign, terms);
                         return;
                     }
                     _ => {}
@@ -899,7 +891,7 @@ impl NodeInner {
 
     fn combine_sum(node: &Node, combine_fns: bool) -> Option<Node> {
         let mut terms = Vec::new();
-        NodeInner::collect_sum_terms(node, 1, &mut terms);
+        Self::collect_sum_terms(node, 1, &mut terms);
         if terms.len() < 2 {
             return None;
         }
@@ -912,14 +904,14 @@ impl NodeInner {
         let mut constant_index: Option<usize> = None;
 
         for (idx, (term, sign)) in terms.into_iter().enumerate() {
-            if let Some(comp) = NodeInner::extract_pow_components(&term, combine_fns) {
+            if let Some(comp) = Self::extract_pow_components(&term, combine_fns) {
                 if let Some(mut coeff_val) = comp.coefficient.inner.borrow().evaluate() {
                     if sign == -1 {
                         coeff_val = coeff_val.neg();
                     }                    let mut found = false;
                     for (existing, sum, _) in pow_terms.iter_mut() {
-                        if NodeInner::nodes_equal(&existing.base, &comp.base)
-                            && NodeInner::nodes_equal(&existing.exponent, &comp.exponent)
+                        if Self::nodes_equal(&existing.base, &comp.base)
+                            && Self::nodes_equal(&existing.exponent, &comp.exponent)
                         {
                             *sum = sum.clone() + coeff_val.clone();
                             combined_like_terms = true;
@@ -930,7 +922,7 @@ impl NodeInner {
                     if !found {
                         pow_terms.push((
                             PowComponents {
-                                coefficient: NodeInner::one(),
+                                coefficient: Self::one(),
                                 base: comp.base.clone(),
                                 exponent: comp.exponent.clone(),
                             },
@@ -970,11 +962,11 @@ impl NodeInner {
                 combined_like_terms = true;
                 continue;
             }
-            let coeff_node = NodeInner::from_float(coeff.clone()).wrap();
+            let coeff_node = Self::from_float(coeff.clone()).wrap();
             let pow_node =
-                NodeInner::from_operation(Op::Pow, comp.base.clone(), comp.exponent.clone())
+                Self::from_operation(Op::Pow, comp.base.clone(), comp.exponent.clone())
                     .simplify(false, false);
-            let term_node = NodeInner::from_operation(Op::ImplicitMul, coeff_node, pow_node)
+            let term_node = Self::from_operation(Op::ImplicitMul, coeff_node, pow_node)
                 .simplify(false, false);
             ordered_terms.push((order, term_node));
         }
@@ -987,7 +979,7 @@ impl NodeInner {
         if has_constant && !constant_value.is_zero() {
             ordered_terms.push((
                 constant_index.unwrap_or(ordered_terms.len()),
-                NodeInner::from_float(constant_value.clone()).wrap(),
+                Self::from_float(constant_value.clone()).wrap(),
             ));
         }
 
@@ -996,9 +988,9 @@ impl NodeInner {
         }
 
         ordered_terms.sort_by(|(idx_a, node_a), (idx_b, node_b)| {
-            let degree_a = NodeInner::extract_pow_components(node_a, combine_fns)
+            let degree_a = Self::extract_pow_components(node_a, combine_fns)
                 .and_then(|comp| comp.exponent.inner.borrow().evaluate());
-            let degree_b = NodeInner::extract_pow_components(node_b, combine_fns)
+            let degree_b = Self::extract_pow_components(node_b, combine_fns)
                 .and_then(|comp| comp.exponent.inner.borrow().evaluate());
             match (degree_a, degree_b) {
                 (Some(a), Some(b)) => b.partial_cmp(&a).unwrap_or(Ordering::Equal),
@@ -1017,12 +1009,12 @@ impl NodeInner {
         });
 
         if ordered_terms.is_empty() {
-            return Some(NodeInner::zero());
+            return Some(Self::zero());
         }
         let mut iter = ordered_terms.into_iter();
         let (_, mut result) = iter.next().unwrap();
         for (_, term) in iter {
-            result = NodeInner::from_operation(Op::Add, result, term);
+            result = Self::from_operation(Op::Add, result, term);
         }
         Some(result)
     }
@@ -1050,9 +1042,6 @@ impl NodeInner {
     }
     pub(crate) const fn is_operand(&self) -> bool {
         matches!(&self.value, NodeValue::Operand(_))
-    }
-    pub(crate) const fn is_empty(&self) -> bool {
-        matches!(&self.value, NodeValue::Empty)
     }
     pub(crate) const fn is_log(&self) -> bool {
         match &self.value {
@@ -1216,22 +1205,22 @@ where
 
 impl NodeOperations<Self> for Node {
     fn add(self, other: Self) -> Self {
-        NodeInner::from_operation(Op::Add, self, other)
+        NodeInner::<Real>::from_operation(Op::Add, self, other)
     }
     fn sub(self, other: Self) -> Self {
-        NodeInner::from_operation(Op::Sub, self, other)
+        NodeInner::<Real>::from_operation(Op::Sub, self, other)
     }
     fn mul(self, other: Self) -> Self {
-        NodeInner::from_operation(Op::Mul, self, other)
+        NodeInner::<Real>::from_operation(Op::Mul, self, other)
     }
     fn impl_mul(self, other: Self) -> Self {
-        NodeInner::from_operation(Op::ImplicitMul, self, other)
+        NodeInner::<Real>::from_operation(Op::ImplicitMul, self, other)
     }
     fn div(self, other: Self) -> Self {
-        NodeInner::from_operation(Op::Div, self, other)
+        NodeInner::<Real>::from_operation(Op::Div, self, other)
     }
     fn pow(self, other: Self) -> Self {
-        NodeInner::from_operation(Op::Pow, self, other)
+        NodeInner::<Real>::from_operation(Op::Pow, self, other)
     }
 }
 
@@ -1240,36 +1229,36 @@ impl NodeOperations<i64> for Node {
         if other == 0 {
             self
         } else if other == 1 {
-            self.add(NodeInner::one())
+            self.add(NodeInner::<Real>::one())
         } else {
-            self.add(NodeInner::from_number(other).wrap())
+            self.add(NodeInner::<Real>::from_number(other).wrap())
         }
     }
     fn sub(self, other: i64) -> Self {
         if other == 0 {
             self
         } else if other == 1 {
-            self.sub(NodeInner::one())
+            self.sub(NodeInner::<Real>::one())
         } else {
-            self.sub(NodeInner::from_number(other).wrap())
+            self.sub(NodeInner::<Real>::from_number(other).wrap())
         }
     }
     fn mul(self, other: i64) -> Self {
         if other == 0 {
-            NodeInner::zero()
+            NodeInner::<Real>::zero()
         } else if other == 1 {
             self
         } else {
-            NodeInner::from_number(other).wrap().mul(self)
+            NodeInner::<Real>::from_number(other).wrap().mul(self)
         }
     }
     fn impl_mul(self, other: i64) -> Self {
         if other == 0 {
-            NodeInner::zero()
+            NodeInner::<Real>::zero()
         } else if other == 1 {
             self
         } else {
-            NodeInner::from_number(other).wrap().impl_mul(self)
+            NodeInner::<Real>::from_number(other).wrap().impl_mul(self)
         }
     }
     fn div(self, other: i64) -> Self {
@@ -1278,16 +1267,16 @@ impl NodeOperations<i64> for Node {
         } else if other == 1 {
             self
         } else {
-            NodeInner::from_number(other).wrap().div(self)
+            NodeInner::<Real>::from_number(other).wrap().div(self)
         }
     }
     fn pow(self, other: i64) -> Self {
         if other == 0 {
-            NodeInner::one()
+            NodeInner::<Real>::one()
         } else if other == 1 {
             self
         } else {
-            self.pow(NodeInner::from_number(other).wrap())
+            self.pow(NodeInner::<Real>::from_number(other).wrap())
         }
     }
 }
@@ -1296,9 +1285,9 @@ impl NodeFunctions<Real> for Node {
     fn negate(self) -> Self {
         match &self.inner.borrow().value {
             NodeValue::Operand(token) => match token {
-                Token::Number(num) => NodeInner::from_number(-*num).wrap(),
-                Token::Float(num) => NodeInner::from_float(num.clone().neg()).wrap(),
-                _ => NodeInner::zero().sub(self.clone()),
+                Token::Number(num) => NodeInner::<Real>::from_number(-*num).wrap(),
+                Token::Float(num) => NodeInner::<Real>::from_float(num.clone().neg()).wrap(),
+                _ => NodeInner::<Real>::zero().sub(self.clone()),
             },
             NodeValue::Operator(op_node) => match &op_node.token {
                 Token::Operator(op) => {
@@ -1315,10 +1304,10 @@ impl NodeFunctions<Real> for Node {
                         Op::Add => left.negate().sub(right),
                         Op::Mul | Op::ImplicitMul => left.negate().impl_mul(right),
                         Op::Div => left.negate().div(right),
-                        Op::Pow => NodeInner::zero().sub(self.clone()),
+                        Op::Pow => NodeInner::<Real>::zero().sub(self.clone()),
                     }
                 }
-                _ => NodeInner::zero().sub(self.clone()),
+                _ => NodeInner::<Real>::zero().sub(self.clone()),
             },
             _ => self.clone(),
         }
@@ -1326,33 +1315,33 @@ impl NodeFunctions<Real> for Node {
     fn recip(self) -> Self {
         match &self.inner.borrow().value {
             NodeValue::Operand(token) => match token {
-                Token::Number(num) => NodeInner::from_number(1 / num).wrap(),
+                Token::Number(num) => NodeInner::<Real>::from_number(1 / num).wrap(),
                 Token::Float(num) => {
-                    NodeInner::from_float(Real::neg_one() / num.clone()).wrap()
+                    NodeInner::<Real>::from_float(Real::neg_one() / num.clone()).wrap()
                 }
-                _ => NodeInner::one().div(self.clone()),
+                _ => NodeInner::<Real>::one().div(self.clone()),
             },
             NodeValue::Operator(op_node) => match &op_node.token {
                 Token::Operator(op) => {
                     let left = op_node.left.clone();
                     let right = op_node.right.clone();
                     match op {
-                        Op::Div => NodeInner::from_operation(Op::Div, right.clone(), left.clone()),
-                        _ => NodeInner::one().div(self.clone()),
+                        Op::Div => NodeInner::<Real>::from_operation(Op::Div, right.clone(), left.clone()),
+                        _ => NodeInner::<Real>::one().div(self.clone()),
                     }
                 }
-                _ => NodeInner::one().div(self.clone()),
+                _ => NodeInner::<Real>::one().div(self.clone()),
             },
             _ => self.clone(),
         }
     }
     fn distribute_constant(self, k: Real, mul_type: MulType) -> Self {
         if k.is_zero() {
-            return NodeInner::zero();
+            return NodeInner::<Real>::zero();
         } else if k.is_one() {
             return self;
         }
-        let constant = NodeInner::from_float(k.clone()).wrap();
+        let constant = NodeInner::<Real>::from_float(k.clone()).wrap();
         match &self.inner.borrow().value {
             NodeValue::Operator(op_node) => match &op_node.token {
                 Token::Operator(op) => {
@@ -1361,13 +1350,13 @@ impl NodeFunctions<Real> for Node {
                     match op {
                         Op::Mul | Op::ImplicitMul => {
                             if !right.inner.borrow().has_indp {
-                                NodeInner::from_operation(
+                                NodeInner::<Real>::from_operation(
                                     op.clone(),
                                     right.distribute_constant(k, mul_type),
                                     left,
                                 )
                             } else {
-                                NodeInner::from_operation(
+                                NodeInner::<Real>::from_operation(
                                     op.clone(),
                                     left.distribute_constant(k, mul_type),
                                     right,
@@ -1375,59 +1364,59 @@ impl NodeFunctions<Real> for Node {
                             }
                         }
                         Op::Div => match mul_type {
-                            MulType::OpMul => NodeInner::from_operation(
+                            MulType::OpMul => NodeInner::<Real>::from_operation(
                                 Op::Div,
                                 left.distribute_constant(k, MulType::OpMul),
                                 right,
                             ),
-                            MulType::OpDiv => NodeInner::from_operation(
+                            MulType::OpDiv => NodeInner::<Real>::from_operation(
                                 Op::Div,
                                 left,
                                 right.distribute_constant(k, MulType::OpMul),
                             ),
                         },
-                        Op::Add | Op::Sub => NodeInner::from_operation(
+                        Op::Add | Op::Sub => NodeInner::<Real>::from_operation(
                             op.clone(),
                             left.distribute_constant(k.clone(), mul_type),
                             right.distribute_constant(k.clone(), mul_type),
                         ),
                         _ => match mul_type {
                             MulType::OpMul => {
-                                NodeInner::from_operation(Op::ImplicitMul, constant, self.clone())
+                                NodeInner::<Real>::from_operation(Op::ImplicitMul, constant, self.clone())
                             }
                             MulType::OpDiv => {
-                                NodeInner::from_operation(Op::Div, self.clone(), constant)
+                                NodeInner::<Real>::from_operation(Op::Div, self.clone(), constant)
                             }
                         },
                     }
                 }
                 _ => match mul_type {
                     MulType::OpMul => {
-                        NodeInner::from_operation(Op::ImplicitMul, constant, self.clone())
+                        NodeInner::<Real>::from_operation(Op::ImplicitMul, constant, self.clone())
                     }
-                    MulType::OpDiv => NodeInner::from_operation(Op::Div, self.clone(), constant),
+                    MulType::OpDiv => NodeInner::<Real>::from_operation(Op::Div, self.clone(), constant),
                 },
             },
             NodeValue::Operand(op) => match op {
                 Token::Number(num) => match mul_type {
-                    MulType::OpMul => NodeInner::operand(Token::Float(
+                    MulType::OpMul => NodeInner::<Real>::operand(Token::Float(
                         Real::from_i64(*num) * k,
                     ))
                     .wrap(),
-                    MulType::OpDiv => NodeInner::operand(Token::Float(
+                    MulType::OpDiv => NodeInner::<Real>::operand(Token::Float(
                         Real::from_i64(*num) / k,
                     ))
                     .wrap(),
                 },
                 Token::Float(num) => match mul_type {
-                    MulType::OpMul => NodeInner::operand(Token::Float(num.clone() * k)).wrap(),
-                    MulType::OpDiv => NodeInner::operand(Token::Float(num.clone() / k)).wrap(),
+                    MulType::OpMul => NodeInner::<Real>::operand(Token::Float(num.clone() * k)).wrap(),
+                    MulType::OpDiv => NodeInner::<Real>::operand(Token::Float(num.clone() / k)).wrap(),
                 },
                 Token::Indp(_) | Token::Var(_) | Token::Constant(_) => match mul_type {
                     MulType::OpMul => {
-                        NodeInner::from_operation(Op::ImplicitMul, constant, self.clone())
+                        NodeInner::<Real>::from_operation(Op::ImplicitMul, constant, self.clone())
                     }
-                    MulType::OpDiv => NodeInner::from_operation(Op::Div, self.clone(), constant),
+                    MulType::OpDiv => NodeInner::<Real>::from_operation(Op::Div, self.clone(), constant),
                 },
                 _ => unreachable!(),
             },
@@ -1462,24 +1451,24 @@ impl NodeFunctions<Real> for Node {
                     drop(self_borrow);
                     match (self_exp, other_exp) {
                         (None, None) if eq => {
-                            return NodeInner::from_operation(
+                            return NodeInner::<Real>::from_operation(
                                 Op::Pow,
                                 self,
-                                NodeInner::from_number(2).wrap(),
+                                NodeInner::<Real>::from_number(2).wrap(),
                             );
                         }
                         (Some(exp), None) | (None, Some(exp)) => {
-                            return NodeInner::from_operation(
+                            return NodeInner::<Real>::from_operation(
                                 Op::Pow,
                                 self.inner.borrow().get_left().unwrap(),
-                                NodeInner::from_operation(Op::Add, exp, NodeInner::one()),
+                                NodeInner::<Real>::from_operation(Op::Add, exp, NodeInner::<Real>::one()),
                             );
                         }
                         (Some(exp_a), Some(exp_b)) => {
-                            return NodeInner::from_operation(
+                            return NodeInner::<Real>::from_operation(
                                 Op::Pow,
                                 self.inner.borrow().get_left().unwrap(),
-                                NodeInner::from_operation(Op::Add, exp_a, exp_b),
+                                NodeInner::<Real>::from_operation(Op::Add, exp_a, exp_b),
                             );
                         }
                         _ => {}
@@ -1511,19 +1500,19 @@ impl NodeFunctions<Real> for Node {
                     let eq = self_borrow.eq(&other_borrow);
                     drop(self_borrow);
                     match (self_exp, other_exp) {
-                        (None, None) if eq => return NodeInner::one(),
+                        (None, None) if eq => return NodeInner::<Real>::one(),
                         (Some(exp), None) | (None, Some(exp)) => {
-                            return NodeInner::from_operation(
+                            return NodeInner::<Real>::from_operation(
                                 Op::Pow,
                                 self.inner.borrow().get_left().unwrap(),
-                                NodeInner::from_operation(Op::Sub, exp, NodeInner::one()),
+                                NodeInner::<Real>::from_operation(Op::Sub, exp, NodeInner::<Real>::one()),
                             );
                         }
                         (Some(exp_a), Some(exp_b)) => {
-                            return NodeInner::from_operation(
+                            return NodeInner::<Real>::from_operation(
                                 Op::Pow,
                                 self.inner.borrow().get_left().unwrap(),
-                                NodeInner::from_operation(Op::Sub, exp_a, exp_b),
+                                NodeInner::<Real>::from_operation(Op::Sub, exp_a, exp_b),
                             );
                         }
                         _ => {}
@@ -1551,7 +1540,7 @@ impl NodeFunctions<Real> for Node {
                 None
             }
         } {
-            return NodeInner::from_operation(
+            return NodeInner::<Real>::from_operation(
                 op,
                 left.distribute_expr(other.clone(), mul_type),
                 right.distribute_expr(other, mul_type),
@@ -1580,14 +1569,14 @@ impl NodeFunctions<Real> for Node {
                 }
             }
         {
-            return NodeInner::from_operation(
+            return NodeInner::<Real>::from_operation(
                 op,
                 self.clone().distribute_expr(left, mul_type),
                 self.distribute_expr(right, mul_type),
             );
         }
 
-        NodeInner::from_operation(operator, self, other)
+        NodeInner::<Real>::from_operation(operator, self, other)
     }
     fn remove_constants(self) -> Real {
         // Work on an owned copy so the borrow is not held while recursing.
@@ -1649,13 +1638,13 @@ impl NodeFunctions<Real> for Node {
                 };
                 if let NodeValue::Operator(inner_op_node) = &arg.inner.borrow().value {
                     if matches!(inner_op_node.token, Token::Operator(Op::Pow)) {
-                        return inner_op_node.right.clone().mul(NodeInner::from_function(
+                        return inner_op_node.right.clone().mul(NodeInner::<Real>::from_function(
                             Func::Log(base),
                             inner_op_node.left.clone(),
                         ));
                     }
                 }
-                NodeInner::from_function(Func::Log(base), arg)
+                NodeInner::<Real>::from_function(Func::Log(base), arg)
             }
             t if t.is_empty() || t.is_operand() || t.is_fn() => {
                 drop(t);
@@ -1698,7 +1687,7 @@ impl NodeFunctions<Real> for Node {
                             }
                             if op.is_mul() {
                                 if left_borrow.is_zero() || right_borrow.is_zero() {
-                                    return NodeInner::zero();
+                                    return NodeInner::<Real>::zero();
                                 }
                                 if left_borrow.is_one() {
                                     drop(right_borrow);
@@ -1728,7 +1717,7 @@ impl NodeFunctions<Real> for Node {
                                 }
                             } else if op == Op::Div {
                                 if left_borrow.is_zero() {
-                                    return NodeInner::zero();
+                                    return NodeInner::<Real>::zero();
                                 }
                                 if right_borrow.is_one() {
                                     drop(left_borrow);
@@ -1758,16 +1747,16 @@ impl NodeFunctions<Real> for Node {
                                 drop(right_borrow);
                                 if let Some(num_val) = left_const_val {
                                     if let Some((den_const, den_rest)) =
-                                        NodeInner::extract_constant_factor(&right)
+                                        NodeInner::<Real>::extract_constant_factor(&right)
                                     {
                                         if let Some(den_val) = den_const.inner.borrow().evaluate() {
                                             if !den_val.is_zero() {
                                                 let new_numerator =
-                                                    NodeInner::from_float(num_val / den_val).wrap();
+                                                    NodeInner::<Real>::from_float(num_val / den_val).wrap();
                                                 if den_rest.inner.borrow().is_one() {
                                                     return new_numerator;
                                                 } else {
-                                                    return NodeInner::from_operation(
+                                                    return NodeInner::<Real>::from_operation(
                                                         Op::Div,
                                                         new_numerator,
                                                         den_rest,
@@ -1778,10 +1767,10 @@ impl NodeFunctions<Real> for Node {
                                         }
                                     }
                                 }
-                                return NodeInner::from_operation(Op::Div, left, right);
+                                return NodeInner::<Real>::from_operation(Op::Div, left, right);
                             } else if op == Op::Pow {
                                 if right_borrow.is_zero() {
-                                    return NodeInner::one();
+                                    return NodeInner::<Real>::one();
                                 } else if right_borrow.is_one() {
                                     drop(left_borrow);
                                     return left;
@@ -1828,11 +1817,11 @@ impl NodeFunctions<Real> for Node {
                                     // subtraction would flip its sign.
                                     drop(left_borrow);
                                     drop(right_borrow);
-                                    return NodeInner::from_operation(Op::Sub, left, right);
+                                    return NodeInner::<Real>::from_operation(Op::Sub, left, right);
                                 }
                             }
                             if op.is_mul() || op == Op::Div {
-                                if let Some(result) = NodeInner::try_combine_pow_terms(
+                                if let Some(result) = NodeInner::<Real>::try_combine_pow_terms(
                                     &left,
                                     &right,
                                     &op,
@@ -1841,19 +1830,19 @@ impl NodeFunctions<Real> for Node {
                                     return result.simplify(expand, false);
                                 }
                             } else if op == Op::Add || op == Op::Sub {
-                                let current = NodeInner::from_operation(
+                                let current = NodeInner::<Real>::from_operation(
                                     op.clone(),
                                     left.clone(),
                                     right.clone(),
                                 );
-                                if let Some(result) = NodeInner::combine_sum(&current, combine_fns)
+                                if let Some(result) = NodeInner::<Real>::combine_sum(&current, combine_fns)
                                 {
                                     return result.simplify(expand, false);
                                 }
                             }
                             drop(left_borrow);
                             drop(right_borrow);
-                            NodeInner::from_operation(op, left, right)
+                            NodeInner::<Real>::from_operation(op, left, right)
                         } else {
                             unreachable!()
                         }
@@ -1866,7 +1855,7 @@ impl NodeFunctions<Real> for Node {
                         drop(left_borrow);
                         left
                     }
-                    (true, true) => NodeInner::empty(),
+                    (true, true) => NodeInner::<Real>::empty(),
                 }
             }
             _ => unreachable!(),
@@ -1884,7 +1873,7 @@ impl NodeFunctions<Real> for Node {
                         drop(node);
                         let left_factored = left.factorise();
                         let right_factored = right.factorise();
-                        return NodeInner::from_operation(op_clone, left_factored, right_factored)
+                        return NodeInner::<Real>::from_operation(op_clone, left_factored, right_factored)
                             .simplify(false, true);
                     }
                 }
@@ -1932,9 +1921,9 @@ impl NodeFunctions<Real> for Node {
                         return;
                     } else if *op == Op::Div && !op_node.left.inner.borrow().is_one() {
                         let left = op_node.left.clone();
-                        let right = NodeInner::from_operation(
+                        let right = NodeInner::<Real>::from_operation(
                             Op::Div,
-                            NodeInner::one(),
+                            NodeInner::<Real>::one(),
                             op_node.right.clone(),
                         );
                         drop(borrowed);
@@ -1950,33 +1939,33 @@ impl NodeFunctions<Real> for Node {
 
         fn rebuild_product(factors: Vec<Node>) -> Node {
             if factors.is_empty() {
-                return NodeInner::one();
+                return NodeInner::<Real>::one();
             }
             let mut iter = factors.into_iter();
             let mut acc = iter.next().unwrap();
             for factor in iter {
-                acc = NodeInner::from_operation(Op::ImplicitMul, acc, factor);
+                acc = NodeInner::<Real>::from_operation(Op::ImplicitMul, acc, factor);
             }
             acc
         }
 
         fn rebuild_sum(terms: Vec<Node>) -> Node {
             if terms.is_empty() {
-                return NodeInner::zero();
+                return NodeInner::<Real>::zero();
             }
             let mut iter = terms.into_iter();
             let mut acc = iter.next().unwrap();
             for term in iter {
-                acc = NodeInner::from_operation(Op::Add, acc, term);
+                acc = NodeInner::<Real>::from_operation(Op::Add, acc, term);
             }
             acc
         }
 
         fn sort_terms(terms: &mut Vec<(usize, Node)>) {
             terms.sort_by(|(idx_a, node_a), (idx_b, node_b)| {
-                let degree_a = NodeInner::extract_pow_components(node_a, true)
+                let degree_a = NodeInner::<Real>::extract_pow_components(node_a, true)
                     .and_then(|comp| comp.exponent.inner.borrow().evaluate());
-                let degree_b = NodeInner::extract_pow_components(node_b, true)
+                let degree_b = NodeInner::<Real>::extract_pow_components(node_b, true)
                     .and_then(|comp| comp.exponent.inner.borrow().evaluate());
                 match (degree_a, degree_b) {
                     (Some(a), Some(b)) => b.partial_cmp(&a).unwrap_or(Ordering::Equal),
@@ -1992,7 +1981,7 @@ impl NodeFunctions<Real> for Node {
             collect_mul_terms(term, &mut factors);
             if let Some(index) = factors
                 .iter()
-                .position(|existing| NodeInner::nodes_equal(existing, factor))
+                .position(|existing| NodeInner::<Real>::nodes_equal(existing, factor))
             {
                 factors.remove(index);
                 return Some(rebuild_product(factors));
@@ -2046,11 +2035,11 @@ impl NodeFunctions<Real> for Node {
         sort_terms(&mut new_terms);
         let ordered_terms: Vec<Node> = new_terms.into_iter().map(|(_, term)| term).collect();
         let grouped = rebuild_sum(ordered_terms).simplify(false, true);
-        NodeInner::from_operation(Op::ImplicitMul, factor, grouped).simplify(false, true)
+        NodeInner::<Real>::from_operation(Op::ImplicitMul, factor, grouped).simplify(false, true)
     }
 }
 
-impl PartialEq for NodeInner {
+impl PartialEq for NodeInner<Real> {
     fn eq(&self, other: &Self) -> bool {
         if self.to_latex().unwrap() == other.to_latex().unwrap() {
             return true;
@@ -2058,3 +2047,4 @@ impl PartialEq for NodeInner {
         false
     }
 }
+

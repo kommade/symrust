@@ -193,7 +193,7 @@ fn numeric_evaluate_inner(node: &Node, depth: usize) -> Option<Float> {
         Shape::Operand(token) => match token {
             Token::Number(value) => Float::from_i64(FP128, value),
             Token::Float(value) => value.into(),
-            Token::Constant(constant) => constant.get_value().into(),
+            Token::Constant(constant) => constant.get_value::<Real>().into(),
             _ => return None,
         },
         Shape::Operator(token, left, right) => match token {
