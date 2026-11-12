@@ -8,6 +8,10 @@ use crate::structs::node::NodeInner;
 
 use super::node::{MulType, Node, NodeError, NodeFunctions, NodeOperations};
 
+pub mod evaluate;
+
+pub use evaluate::{Evaluable, Evaluated};
+
 /// A struct representing a mathematical expression.
 ///
 /// The expression tree is generic over its leaf number type `T`, which defaults

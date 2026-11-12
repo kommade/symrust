@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use arpfloat::{FP128, Float};
 
 use crate::create_expr;
-use crate::evaluate::Evaluated;
+use crate::structs::expr::evaluate::Evaluated;
 use crate::structs::expr::Expr;
 
 #[test]

@@ -227,7 +227,7 @@ impl Expr {
     /// # Examples
     /// ```
     /// use rust_calculus::create_expr;
-    /// use rust_calculus::evaluate::Evaluated;
+    /// use rust_calculus::structs::expr::evaluate::Evaluated;
     /// use rust_calculus::structs::expr::Expr;
     ///
     /// let expr = create_expr!("2x^2 + 3").unwrap();
