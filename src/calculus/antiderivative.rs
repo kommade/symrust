@@ -89,6 +89,9 @@ pub enum IntegrationError {
         /// The feature that must be enabled.
         feature: &'static str,
     },
+    /// A definite integral bound could not be turned into a numeric value
+    /// (for example the antiderivative is undefined or still symbolic there).
+    BoundNotEvaluable(String),
 }
 
 impl Display for IntegrationError {
@@ -108,6 +111,10 @@ impl Display for IntegrationError {
                  `{feature}` feature; enable it (cargo build --features {feature}) to integrate \
                  factors of degree three or more"
             ),
+            Self::BoundNotEvaluable(bound) => write!(
+                f,
+                "could not evaluate the antiderivative at the bound {bound}"
+            ),
         }
     }
 }
@@ -124,6 +131,17 @@ pub trait Antiderivative {
     ) -> Result<Self, IntegrationError>
     where
         Self: Sized;
+    /// Evaluate a definite integral over `[lower, upper]`, returning a numeric
+    /// result of type `T`.
+    ///
+    /// The antiderivative `F` is found, then the result is `F(upper) - F(lower)`
+    /// evaluated in `T`. Bounds may be infinite (`Real::infinity()`, or any `T`
+    /// where `T::is_infinite()` holds) to request an improper integral; the
+    /// infinite case is not yet implemented.
+    fn integrate<T>(&self, lower: T, upper: T) -> Result<T, IntegrationError>
+    where
+        Self: Sized,
+        T: crate::numeric::FloatType + Display;
 }
 
 impl Antiderivative for Expr {
@@ -175,6 +193,39 @@ impl Antiderivative for Expr {
         let result = Self::from_node(tree).simplify(false);
         tracing::Span::current().record("result", result.to_string());
         info!("Calculation complete");
+        Ok(result)
+    }
+
+    /// Evaluate a definite integral over `[lower, upper]`.
+    ///
+    /// # Examples
+    /// ```
+    /// use rust_calculus::numeric::Real;
+    /// use rust_calculus::{create_expr, calculus::antiderivative::Antiderivative};
+    /// let expr = create_expr!("2x").unwrap();
+    /// let value = expr.integrate(Real::from_i64(0), Real::from_i64(3)).unwrap();
+    /// assert_eq!(value, Real::from_i64(9));
+    /// ```
+    #[tracing::instrument(skip_all, parent = None, name = "(main) integrate", fields(result))]
+    fn integrate<T>(&self, lower: T, upper: T) -> Result<T, IntegrationError>
+    where
+        T: crate::numeric::FloatType + Display,
+    {
+        if lower.is_infinite() || upper.is_infinite() {
+            // Improper integrals (limits at ±∞) are not implemented yet.
+            todo!("improper (infinite-bound) definite integrals");
+        }
+        let antiderivative = self.get_antiderivative()?;
+        let evaluate = |bound: &T| -> Result<T, IntegrationError> {
+            antiderivative
+                .evaluate(bound.clone())
+                .value()
+                .ok_or_else(|| IntegrationError::BoundNotEvaluable(bound.to_string()))
+        };
+        let upper_value = evaluate(&upper)?;
+        let lower_value = evaluate(&lower)?;
+        let result = upper_value - lower_value;
+        tracing::Span::current().record("result", result.to_string());
         Ok(result)
     }
 }

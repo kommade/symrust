@@ -69,6 +69,21 @@ impl Real {
         Self(Float::e(FP128))
     }
 
+    /// Positive infinity (`+∞`).
+    ///
+    /// Useful as an improper-integral bound:
+    /// `expr.integrate(Real::from_i64(0), Real::infinity())`.
+    #[must_use]
+    pub fn infinity() -> Self {
+        Self(Float::inf(FP128, false))
+    }
+
+    /// Negative infinity (`-∞`).
+    #[must_use]
+    pub fn neg_infinity() -> Self {
+        Self(Float::inf(FP128, true))
+    }
+
     /// Build from an integer.
     #[must_use]
     pub fn from_i64(value: i64) -> Self {
