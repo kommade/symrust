@@ -49,7 +49,7 @@ use std::{
 
 use tracing::{debug, info};
 
-use crate::numeric::Real;
+use crate::numeric::{FloatBridge, Real};
 use crate::{
     algebra,
     parse::lexer::{Func, Op, Token},
@@ -211,20 +211,40 @@ impl Antiderivative for Expr {
     where
         T: crate::numeric::FloatType + Display,
     {
-        if lower.is_infinite() || upper.is_infinite() {
-            // Improper integrals (limits at ±∞) are not implemented yet.
-            todo!("improper (infinite-bound) definite integrals");
-        }
         let antiderivative = self.get_antiderivative()?;
-        let evaluate = |bound: &T| -> Result<T, IntegrationError> {
-            antiderivative
-                .evaluate(bound.clone())
-                .value()
-                .ok_or_else(|| IntegrationError::BoundNotEvaluable(bound.to_string()))
+        let variable = crate::calculus::expr::independent_variable(&antiderivative.tree);
+
+        // Evaluate the antiderivative at a bound: a plain substitution when the
+        // bound is finite, otherwise a limit toward ±∞ (improper integral).
+        let value_at = |bound: &T| -> Result<Real, IntegrationError> {
+            let bound = Real::from(bound.to_float());
+            let value = if bound.is_infinite() {
+                match antiderivative.limit(variable, bound.clone()) {
+                    crate::structs::expr::limit::Limit::Finite(value) => value,
+                    crate::structs::expr::limit::Limit::PosInfinity
+                    | crate::structs::expr::limit::Limit::NegInfinity => {
+                        // The antiderivative diverges at the bound, so the
+                        // definite integral does not converge.
+                        return Err(IntegrationError::BoundNotEvaluable(bound.to_string()));
+                    }
+                    crate::structs::expr::limit::Limit::DoesNotExist => {
+                        return Err(IntegrationError::BoundNotEvaluable(bound.to_string()));
+                    }
+                }
+            } else {
+                antiderivative
+                    .evaluate(bound.clone())
+                    .value()
+                    .ok_or_else(|| IntegrationError::BoundNotEvaluable(bound.to_string()))?
+            };
+            Ok(value)
         };
-        let upper_value = evaluate(&upper)?;
-        let lower_value = evaluate(&lower)?;
+
+        let upper_value = value_at(&upper)?;
+        let lower_value = value_at(&lower)?;
+        // `F(upper) - F(lower)`, computed in Real, then cast to the caller's type.
         let result = upper_value - lower_value;
+        let result = T::from_float(result.to_float());
         tracing::Span::current().record("result", result.to_string());
         Ok(result)
     }

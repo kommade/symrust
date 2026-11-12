@@ -9,8 +9,10 @@ use crate::structs::node::NodeInner;
 use super::node::{MulType, Node, NodeError, NodeFunctions, NodeOperations};
 
 pub mod evaluate;
+pub mod limit;
 
 pub use evaluate::{Evaluable, Evaluated};
+pub use limit::Limit;
 
 /// A struct representing a mathematical expression.
 ///
