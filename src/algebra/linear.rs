@@ -2587,7 +2587,7 @@ impl <T, const N: usize> StaticSquareMatrixFns<T, N> for StaticMatrix<T, N, N> w
     }
 
     fn minor(&self, row: usize, column: usize) -> StaticMatrix<T, { N - 1 }, { N - 1 }> {
-        let rows: Vec<[T; { N - 1 }]> = minor_rows(self, row, column)
+        let rows: Vec<[T; N - 1]> = minor_rows(self, row, column)
             .into_iter()
             .map(|values| values.try_into().expect("minor row length is N - 1"))
             .collect();

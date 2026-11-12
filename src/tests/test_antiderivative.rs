@@ -235,15 +235,6 @@ fn derivative_of_extended_functions() {
     }
 }
 
-#[test]
-#[ignore]
-fn try_custom() {
-    super::setup();
-    let expr = create_expr!("1/(x^4+1)").unwrap();
-    let antiderivative = expr.get_antiderivative().unwrap();
-    println!("antiderivative: {}", antiderivative.to_string());
-}
-
 /// With the `algebraic` feature, an irreducible cubic denominator that the
 /// rational/surd methods give up on is integrated using an exact real root
 /// (Sturm-sequence isolation). Without the feature this same integral fails,
