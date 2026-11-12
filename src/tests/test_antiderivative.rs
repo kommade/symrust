@@ -222,6 +222,25 @@ fn antiderivative_with_custom_variable() {
     assert_eq!(antiderivative.to_string(), "t ^ 2 + t");
 }
 
+/// With the `algebraic` feature, a cubic with three real roots (here all
+/// irrational) is integrated by peeling its real roots, even though the
+/// single-real-root path does not apply.
+#[cfg(feature = "algebraic")]
+#[test]
+fn algebraic_feature_integrates_a_3real_root_cubic() {
+    super::setup();
+    let expr = create_expr!("1/(x^3 - 3x + 1)").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("algebraic feature should integrate a 3-real-root cubic");
+    // Three simple real poles give three log terms (and hence verify).
+    let rendered = antiderivative.to_string();
+    assert!(
+        rendered.matches("ln(").count() >= 3,
+        "expected three log terms, got {rendered}"
+    );
+}
+
 #[test]
 fn derivative_of_extended_functions() {
     super::setup();

@@ -36,6 +36,7 @@ use crate::{
         rational::{Rat, square_root_of},
         surd::{Surd, surd_quadratic_node, surd_sqrt_node},
     },
+    calculus::expr::float_from,
     parse::lexer::{Func, Op, Token},
     structs::node::Node,
 };
@@ -408,6 +409,13 @@ fn algebraic_factor_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -
     let degree = factor.degree()?;
     let roots = real_roots(factor);
 
+    // Any factor that is not the classic "cubic with a single real root" is
+    // handed to the general real-root peeler, which handles any degree that
+    // leaves at most a quadratic remainder.
+    if !(degree == 3 && roots.len() == 1) {
+        return higher_degree_term(coefficients, factor, &roots, variable);
+    }
+
     // Handle the case the exact paths cannot: a cubic with a single real root.
     // The partial fraction is `A/(x - r) + (B x + C)/(x^2 + p x + q)`; the
     // numerator `N(x)` is split accordingly. `A, B, C` are found by matching
@@ -498,6 +506,202 @@ fn algebraic_factor_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -
     }
 
     Some(helpers::sum(terms))
+}
+
+/// General real-root peeler for factors the exact paths cannot handle.
+///
+/// With the `algebraic` feature it isolates every real root (Sturm sequences)
+/// and splits `N(x)/D(x)` as `sum A_i/(x - r_i)` (simple poles, `A_i =
+/// N(r_i)/D'(r_i)`) plus a remainder over the deflated denominator. When the
+/// deflated denominator has degree at most two the remainder integrates exactly
+/// (log/atan); a larger complex remainder returns `None`.
+#[cfg(feature = "algebraic")]
+fn higher_degree_term(
+    coefficients: &[Rat],
+    factor: &Poly,
+    roots: &[crate::algebra::algebraic::RealAlgebraic],
+    variable: &Node,
+) -> Option<Node> {
+    let degree = factor.degree()?;
+    if degree.saturating_sub(roots.len()) > 2 {
+        return None;
+    }
+
+    let denom: Vec<f64> = (0..=degree).map(|i| factor.coeff(i).to_f64()).collect();
+    let numer: Vec<f64> = coefficients.iter().map(|value| value.to_f64()).collect();
+    let numer_at = |x: f64| poly_at(&numer, x);
+    let slope_at = {
+        let deriv = derivative_coeffs(&denom);
+        move |x: f64| poly_at(&deriv, x)
+    };
+
+    let mut terms: Vec<Node> = Vec::new();
+    let mut poles: Vec<(f64, f64)> = Vec::new();
+    for root in roots {
+        let r = root.to_f64();
+        let slope = slope_at(r);
+        if slope.abs() < 1e-9 {
+            return None;
+        }
+        let a = numer_at(r) / slope;
+        poles.push((r, a));
+        if a.abs() > 1e-9 {
+            let base = helpers::sub(variable.clone(), helpers::float(float_from(r)));
+            terms.push(helpers::multiply_by(
+                helpers::function(Func::Ln, base),
+                float_from(a),
+            ));
+        }
+    }
+
+    let mut remainder_numer = numer;
+    for (r, a) in &poles {
+        let cofactor = divide_by_root(&denom, *r);
+        add_scaled(&mut remainder_numer, &cofactor, -a);
+    }
+    let mut remainder_denom = denom;
+    for (r, _) in &poles {
+        remainder_denom = divide_by_root(&remainder_denom, *r);
+    }
+
+    terms.push(integrate_low_degree(&remainder_numer, &remainder_denom, variable)?);
+    Some(helpers::sum(terms))
+}
+
+#[cfg(feature = "algebraic")]
+fn poly_at(coefficients: &[f64], x: f64) -> f64 {
+    coefficients.iter().rev().fold(0.0, |acc, c| acc * x + c)
+}
+
+#[cfg(feature = "algebraic")]
+fn derivative_coeffs(coefficients: &[f64]) -> Vec<f64> {
+    coefficients
+        .iter()
+        .enumerate()
+        .skip(1)
+        .map(|(power, c)| c * power as f64)
+        .collect()
+}
+
+#[cfg(feature = "algebraic")]
+fn divide_by_root(coefficients: &[f64], root: f64) -> Vec<f64> {
+    let n = coefficients.len();
+    if n <= 1 {
+        return vec![0.0];
+    }
+    let mut quotient = vec![0.0; n - 1];
+    let mut carry = 0.0;
+    for power in (1..n).rev() {
+        carry = coefficients[power] + root * carry;
+        quotient[power - 1] = carry;
+    }
+    quotient
+}
+
+#[cfg(feature = "algebraic")]
+fn add_scaled(target: &mut Vec<f64>, source: &[f64], scale: f64) {
+    if target.len() < source.len() {
+        target.resize(source.len(), 0.0);
+    }
+    for (slot, value) in target.iter_mut().zip(source.iter()) {
+        *slot += scale * value;
+    }
+}
+
+#[cfg(feature = "algebraic")]
+fn integrate_low_degree(numerator: &[f64], denominator: &[f64], variable: &Node) -> Option<Node> {
+    let n = |i: usize| numerator.get(i).copied().unwrap_or(0.0);
+    let d = |i: usize| denominator.get(i).copied().unwrap_or(0.0);
+
+    if d(1).abs() < 1e-12 {
+        if d(0).abs() < 1e-12 {
+            return None;
+        }
+        let mut terms = Vec::new();
+        for power in 0..numerator.len().max(1) {
+            let coefficient = n(power);
+            if coefficient.abs() <= 1e-12 {
+                continue;
+            }
+            let exponent = power as i64 + 1;
+            terms.push(helpers::multiply_by(
+                helpers::pow(variable.clone(), helpers::number(power as i64 + 1)),
+                float_from(coefficient / d(0) / exponent as f64),
+            ));
+        }
+        return Some(helpers::sum(terms));
+    }
+
+    if d(2).abs() < 1e-12 {
+        let (b0, b1) = (n(0), n(1));
+        let (d0, d1) = (d(0), d(1));
+        let mut terms = Vec::new();
+        if b1.abs() > 1e-12 {
+            terms.push(helpers::multiply_by(variable.clone(), float_from(b1 / d1)));
+            terms.push(helpers::multiply_by(
+                helpers::function(Func::Ln, linear_node(d0, d1, variable)),
+                float_from(-b1 * d0 / (d1 * d1)),
+            ));
+        }
+        let constant = b0 - b1 * d0 / d1;
+        if constant.abs() > 1e-12 {
+            terms.push(helpers::multiply_by(
+                helpers::function(Func::Ln, linear_node(d0, d1, variable)),
+                float_from(constant / d1),
+            ));
+        }
+        return Some(helpers::sum(terms));
+    }
+
+    let (a, b, e) = (d(2), d(1), d(0));
+    let mut terms = Vec::new();
+    let log_coefficient = n(1) / (2.0 * a);
+    if log_coefficient.abs() > 1e-12 {
+        terms.push(helpers::multiply_by(
+            helpers::function(Func::Ln, quadratic_node(a, b, e, variable)),
+            float_from(log_coefficient),
+        ));
+    }
+    let remainder = n(0) - n(1) * b / (2.0 * a);
+    if remainder.abs() > 1e-12 {
+        let discriminant = 4.0 * a * e - b * b;
+        if discriminant.abs() < 1e-12 {
+            return None;
+        }
+        let sqrt_d = discriminant.abs().sqrt();
+        let centre = helpers::add(variable.clone(), helpers::float(float_from(b / (2.0 * a))));
+        let scaled = helpers::div(
+            helpers::mul(centre, helpers::float(float_from(2.0 * a))),
+            helpers::float(float_from(sqrt_d)),
+        );
+        terms.push(helpers::multiply_by(
+            helpers::function(Func::Atan, scaled),
+            float_from(remainder * 2.0 / sqrt_d),
+        ));
+    }
+    Some(helpers::sum(terms))
+}
+
+#[cfg(feature = "algebraic")]
+fn linear_node(constant: f64, slope: f64, variable: &Node) -> Node {
+    helpers::add(
+        helpers::multiply_by(variable.clone(), float_from(slope)),
+        helpers::float(float_from(constant)),
+    )
+}
+
+#[cfg(feature = "algebraic")]
+fn quadratic_node(a: f64, b: f64, e: f64, variable: &Node) -> Node {
+    helpers::add(
+        helpers::add(
+            helpers::multiply_by(
+                helpers::pow(variable.clone(), helpers::number(2)),
+                float_from(a),
+            ),
+            helpers::multiply_by(variable.clone(), float_from(b)),
+        ),
+        helpers::float(float_from(e)),
+    )
 }
 
 fn quartic_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
