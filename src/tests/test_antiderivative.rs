@@ -8,7 +8,7 @@ use crate::{
 
 /// `(integrand, antiderivative)` pairs. The constant of integration is
 /// intentionally omitted from the results.
-static EXAMPLES: [(&str, &str); 77] = [
+static EXAMPLES: [(&str, &str); 79] = [
     // Power rule and polynomials
     ("2x", "x ^ 2"),
     ("x^2", "x ^ 3 / 3"),
@@ -119,6 +119,9 @@ static EXAMPLES: [(&str, &str); 77] = [
         "sqrt(x^2+1)",
         "x sqrt(x ^ 2 + 1) / 2 + ln(x + sqrt(x ^ 2 + 1)) / 2",
     ),
+    // Trigonometric functions of a logarithm (u = ln(x), exponential x trig)
+    ("cos(ln(x))", "x (cos(ln(x)) + sin(ln(x))) / 2"),
+    ("sin(ln(x))", "x (sin(ln(x)) - cos(ln(x))) / 2"),
 ];
 
 static NOT_ELEMENTARY: [&str; 6] = [
@@ -233,6 +236,14 @@ fn derivative_of_extended_functions() {
         let expr = create_expr!(input).unwrap();
         assert_eq!(expr.get_derivative().to_string(), expected, "{input}");
     }
+}
+
+#[test]
+fn try_custom() {
+    super::setup();
+    let expr = create_expr!("cos(ln(x))").unwrap();
+    let antiderivative = expr.get_antiderivative().unwrap();
+    println!("antiderivative: {}", antiderivative.to_string());
 }
 
 /// With the `algebraic` feature, an irreducible cubic denominator that the

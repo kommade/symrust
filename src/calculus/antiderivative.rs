@@ -450,6 +450,10 @@ impl Integrator {
         if let Some(result) = self.try_exponential_trig(node) {
             return Ok(result);
         }
+        // `sin`/`cos` of a logarithm: `sin(a ln x + b)`, `cos(a ln x + b)`.
+        if let Some(result) = self.try_log_trig(node) {
+            return Ok(result);
+        }
         // Powers and products of trigonometric functions.
         if let Some(result) = trig::try_integrate(self, node) {
             return Ok(result);
@@ -803,6 +807,55 @@ impl Integrator {
         let result = self.find_exponential_trig(node);
         log_technique_outcome(node, record_option(result.as_ref()));
         result
+    }
+
+    /// `integral of sin/cos(a ln(x) + b) dx`.
+    ///
+    /// Substituting `u = ln(x)` (so `dx = x du`) turns these into
+    /// `integral of x sin/cos(a u + b) du`, i.e. an exponential-times-trig
+    /// integral. With the standard results
+    /// `integral of e^u sin(a u + b) du = e^u (sin - a cos)/(1 + a^2)` and
+    /// `integral of e^u cos(a u + b) du = e^u (cos + a sin)/(1 + a^2)`
+    /// (and `x = e^u`), the antiderivative follows directly.
+    fn try_log_trig(&self, node: &Node) -> Option<Node> {
+        let result = self.find_log_trig(node);
+        log_technique_outcome(node, record_option(result.as_ref()));
+        result
+    }
+
+    fn find_log_trig(&self, node: &Node) -> Option<Node> {
+        let Shape::Operator(Token::Function(func), _, argument) = helpers::shape(node) else {
+            return None;
+        };
+        let is_sin = matches!(func, Func::Sin);
+        if !is_sin && !matches!(func, Func::Cos) {
+            return None;
+        }
+        // The argument must be `a * ln(x) + b` with constant `a != 0`, `b`.
+        let slope = log_argument_slope(&argument, 0)?;
+        if slope.is_zero() {
+            return None;
+        }
+        let denominator = Float::one(FP128, false) + slope.clone() * slope.clone();
+        if denominator.is_zero() {
+            return None;
+        }
+        let sine = helpers::function(Func::Sin, argument.clone());
+        let cosine = helpers::function(Func::Cos, argument);
+        // `x * (...)`: the e^u factor, since x = e^u.
+        let x = self.variable_node();
+        let combination = if is_sin {
+            // sin: (sin - a cos)
+            helpers::subtract(sine, helpers::scale(cosine, slope.clone()))
+        } else {
+            // cos: (cos + a sin)
+            helpers::add(cosine, helpers::scale(sine, slope))
+        };
+        info!(
+            "Using u = ln(x) to integrate {} as an exponential times trigonometric",
+            describe(node)
+        );
+        Some(helpers::divide_by(helpers::mul(x, combination), denominator))
     }
 
     fn find_exponential_trig(&self, node: &Node) -> Option<Node> {
@@ -1284,10 +1337,65 @@ fn describe_signed(node: &Node) -> String {
     }
 }
 
+/// Extract the coefficient `a` from an argument of the form `a * ln(x) + b`
+/// (with `a`, `b` constants and `a != 0`). Used by [`Antiderivative::try_log_trig`].
+///
+/// Handles `ln(x)`, `k ln(x)`, `a ln(x) + b`, `a ln(x) - b`, `b + a ln(x)`,
+/// and negations thereof. Returns `None` for any other shape.
+fn log_argument_slope(node: &Node, depth: usize) -> Option<Float> {
+    if depth > 64 {
+        return None;
+    }
+    match helpers::shape(node) {
+        // `ln(x)` on its own contributes a slope of 1.
+        Shape::Operator(Token::Function(Func::Ln), _, argument) => {
+            if matches!(helpers::shape(&argument), Shape::Operand(Token::Indp(_))) {
+                Some(Float::one(FP128, false))
+            } else {
+                None
+            }
+        }
+        Shape::Operator(Token::Operator(Op::Add), left, right) => {
+            // One side must be a constant, the other a `ln`-multiple.
+            match (
+                helpers::constant_value(&left),
+                helpers::constant_value(&right),
+            ) {
+                (Some(_), None) => log_argument_slope(&right, depth + 1),
+                (None, Some(_)) => log_argument_slope(&left, depth + 1),
+                _ => None,
+            }
+        }
+        Shape::Operator(Token::Operator(Op::Sub), left, right) => {
+            if helpers::constant_value(&right).is_some() {
+                log_argument_slope(&left, depth + 1)
+            } else {
+                None
+            }
+        }
+        Shape::Operator(Token::Operator(Op::Mul | Op::ImplicitMul), left, right) => {
+            // `k * ln(x)` with constant `k`.
+            match (
+                helpers::constant_value(&left),
+                log_argument_slope(&right, depth + 1),
+            ) {
+                (Some(k), Some(slope)) => Some(k * slope),
+                _ => match (
+                    log_argument_slope(&left, depth + 1),
+                    helpers::constant_value(&right),
+                ) {
+                    (Some(slope), Some(k)) => Some(slope * k),
+                    _ => None,
+                },
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Format a constant for the logs, preferring exact fractions over the long
 /// decimal expansion of a float.
-fn describe_number(value: &Float) -> String {
-    if let Some(rational) = algebra::rational::Rat::from_float_simple(value) {
+fn describe_number(value: &Float) -> String {    if let Some(rational) = algebra::rational::Rat::from_float_simple(value) {
         let (numerator, denominator) = rational.parts();
         if denominator == 1 {
             return numerator.to_string();
