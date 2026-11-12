@@ -254,6 +254,12 @@ impl Real {
         Self(self.0.log())
     }
 
+    /// Logarithm with respect to `base`, i.e. `ln(self) / ln(base)`.
+    #[must_use]
+    pub fn log(self, base: Self) -> Self {
+        Self::ln(self) / Self::ln(base)
+    }
+
     #[must_use]
     pub fn exp(self) -> Self {
         Self(self.0.exp())
