@@ -100,7 +100,7 @@ fn evaluate_operand<T: Evaluable>(token: &Token, lookup: &dyn Fn(char) -> Option
             node: crate::structs::node::NodeInner::from_number(*number).wrap(),
         },
         Token::Float(float) => Step {
-            value: Some(T::from_float(float.clone())),
+            value: Some(T::from_float(float.clone().into())),
             node: crate::structs::node::NodeInner::from_float(float.clone()).wrap(),
         },
         Token::Constant(constant) => Step {
@@ -114,7 +114,7 @@ fn evaluate_operand<T: Evaluable>(token: &Token, lookup: &dyn Fn(char) -> Option
                 let float = value.to_float();
                 Step {
                     value: Some(value),
-                    node: crate::structs::node::NodeInner::from_float(float).wrap(),
+                    node: crate::structs::node::NodeInner::from_float(float.into()).wrap(),
                 }
             }
             None => Step {
@@ -192,7 +192,7 @@ fn apply_operator<T: Evaluable>(op: &Op, left: T, right_step: &Step<T>, right: T
                 left.pow_i64(*exponent)
             }
             crate::structs::node::NodeValue::Operand(Token::Float(exponent)) => {
-                left.pow_float(exponent.clone())
+                left.pow_float(exponent.clone().into())
             }
             _ => left.pow(right),
         },
@@ -212,7 +212,7 @@ fn apply_function<T: Evaluable>(func: &Func, argument: T) -> T {
         Func::Atan => argument.atan(),
         Func::Sqrt => argument.sqrt(),
         Func::Ln => argument.ln(),
-        Func::Log(base) => argument.log(base.clone()),
+        Func::Log(base) => argument.log(base.clone().into()),
     }
 }
 

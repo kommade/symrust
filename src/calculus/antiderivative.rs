@@ -338,7 +338,7 @@ impl Integrator {
                 "Rewriting {} as ln({}) / ln({}) using the change of base formula",
                 describe_signed(node),
                 describe_signed(&argument),
-                describe_number(&base)
+                describe_number(&base.clone().into())
             );
             let numerator = self.integrate(&helpers::function(Func::Ln, argument))?;
             let denominator = helpers::function(Func::Ln, helpers::float(base));

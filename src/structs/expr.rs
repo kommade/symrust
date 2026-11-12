@@ -2,8 +2,7 @@ use std::error::Error;
 use std::fmt::Display;
 use std::ops::{Add, Div, Mul, Sub};
 
-use arpfloat::{FP128, Float};
-
+use crate::numeric::Real;
 use crate::parse::{lexer::Lexer, parser::Parser};
 use crate::structs::node::NodeInner;
 
@@ -123,7 +122,7 @@ impl Mul<i64> for Expr {
     fn mul(self, other: i64) -> Self {
         Self::from_node(
             self.tree
-                .distribute_constant(Float::from_i64(FP128, other), MulType::OpMul),
+                .distribute_constant(Real::from_i64(other), MulType::OpMul),
         )
     }
 }
@@ -143,7 +142,7 @@ impl Div<i64> for Expr {
     fn div(self, other: i64) -> Self {
         Self::from_node(
             self.tree
-                .distribute_constant(Float::from_i64(FP128, other), MulType::OpDiv),
+                .distribute_constant(Real::from_i64(other), MulType::OpDiv),
         )
     }
 }

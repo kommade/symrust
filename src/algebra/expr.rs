@@ -4,7 +4,7 @@
 //! The algebra routines only need a handful of node constructors; keeping them
 //! here lets algebra stay independent of the integration helpers.
 
-use arpfloat::Float;
+use crate::numeric::Real;
 
 use super::rational::Rat;
 use crate::{
@@ -24,8 +24,8 @@ pub(crate) fn number(value: i64) -> Node {
     NodeInner::from_number(value).wrap()
 }
 
-pub(crate) fn float(value: Float) -> Node {
-    NodeInner::from_float(value).wrap()
+pub(crate) fn float(value: impl Into<Real>) -> Node {
+    NodeInner::from_float(value.into()).wrap()
 }
 
 pub(crate) fn add(left: Node, right: Node) -> Node {

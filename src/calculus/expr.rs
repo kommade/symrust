@@ -8,6 +8,7 @@
 
 use arpfloat::{FP128, Float};
 
+use crate::numeric::Real;
 use crate::{
     parse::lexer::{Func, Op, Token},
     structs::node::{Node, NodeFunctions, NodeInner, NodeValue},
@@ -107,7 +108,7 @@ pub(crate) fn multiply_by(node: Node, factor: Float) -> Node {
     match crate::algebra::rational::Rat::from_float_simple(&factor) {
         Some(value) if value.is_one() => node,
         Some(value) if !value.is_zero() => multiply_by_rational(node, value),
-        _ => node.distribute_constant(factor, crate::structs::node::MulType::OpMul),
+        _ => node.distribute_constant(factor.into(), crate::structs::node::MulType::OpMul),
     }
 }
 
@@ -191,8 +192,8 @@ fn numeric_evaluate_inner(node: &Node, depth: usize) -> Option<Float> {
     Some(match shape(node) {
         Shape::Operand(token) => match token {
             Token::Number(value) => Float::from_i64(FP128, value),
-            Token::Float(value) => value,
-            Token::Constant(constant) => constant.get_value(),
+            Token::Float(value) => value.into(),
+            Token::Constant(constant) => constant.get_value().into(),
             _ => return None,
         },
         Shape::Operator(token, left, right) => match token {
@@ -221,7 +222,7 @@ fn numeric_evaluate_inner(node: &Node, depth: usize) -> Option<Float> {
                     Func::Atan => argument.atan(),
                     Func::Sqrt => argument.sqrt(),
                     Func::Ln => argument.log(),
-                    Func::Log(base) => argument.log() / base.log(),
+                    Func::Log(base) => argument.log() / Float::from(base.clone()).log(),
                 }
             }
             _ => return None,
@@ -455,7 +456,7 @@ impl Split {
     ///
     /// Anything else (a fraction such as `1 / 2`, or `ln(2)`) is kept
     /// symbolic so results stay exact rather than collapsing to a float.
-    pub(crate) fn constant_literal(&self) -> Option<Float> {
+    pub(crate) fn constant_literal(&self) -> Option<Real> {
         match shape(&self.constant) {
             Shape::Operand(Token::Number(_) | Token::Float(_)) => {
                 self.constant.inner.borrow().evaluate()

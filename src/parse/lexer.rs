@@ -1,7 +1,6 @@
-use arpfloat::{FP128, Float};
 use std::{error::Error, fmt::Display};
 
-use crate::utils::float_math::FloatMath;
+use crate::numeric::Real;
 
 #[derive(Debug, Clone)]
 pub enum Func {
@@ -15,7 +14,7 @@ pub enum Func {
     Acos,
     Atan,
     Sqrt,
-    Log(Float),
+    Log(Real),
     Ln,
 }
 
@@ -32,15 +31,7 @@ impl Display for Func {
             Self::Acos => write!(f, "acos"),
             Self::Atan => write!(f, "atan"),
             Self::Sqrt => write!(f, "sqrt"),
-            Self::Log(n) => {
-                if n.is_integer() {
-                    let str = n.to_string();
-                    let sliced = str.strip_suffix('.').unwrap();
-                    write!(f, "log_{sliced}")
-                } else {
-                    write!(f, "log_{n}")
-                }
-            }
+            Self::Log(n) => write!(f, "log_{n}"),
             Self::Ln => write!(f, "ln"),
         }
     }
@@ -90,10 +81,10 @@ pub enum Const {
 }
 
 impl Const {
-    pub fn get_value(&self) -> Float {
+    pub fn get_value(&self) -> Real {
         match self {
-            Self::Pi => Float::pi(FP128),
-            Self::E => Float::e(FP128),
+            Self::Pi => Real::pi(),
+            Self::E => Real::e(),
         }
     }
 }
@@ -113,7 +104,7 @@ pub enum Token {
     Operator(Op),
     Constant(Const),
     Number(i64),
-    Float(Float),
+    Float(Real),
     Indp(char),
     Var(char),
     LPar,
@@ -127,17 +118,7 @@ impl Display for Token {
             Self::Operator(op) => write!(f, "{op}"),
             Self::Constant(c) => write!(f, "{c}"),
             Self::Number(n) => write!(f, "{n}"),
-            Self::Float(n) => {
-                if n.is_zero() {
-                    write!(f, "0")
-                } else if n.is_integer() {
-                    let str = n.to_string();
-                    let sliced = str.strip_suffix('.').unwrap();
-                    write!(f, "{sliced}")
-                } else {
-                    write!(f, "{n}")
-                }
-            }
+            Self::Float(n) => write!(f, "{n}"),
             Self::Indp(c) | Self::Var(c) => write!(f, "{c}"),
             Self::LPar => write!(f, "("),
             Self::RPar => write!(f, ")"),
@@ -158,7 +139,7 @@ impl Token {
     pub const fn from_num(n: i64) -> Self {
         Self::Number(n)
     }
-    pub const fn from_float(n: Float) -> Self {
+    pub fn from_float(n: Real) -> Self {
         Self::Float(n)
     }
     pub const fn from_var(c: char) -> Self {
@@ -261,7 +242,7 @@ impl Lexer {
                 }
                 if is_float {
                     Ok(Token::from_float(match num.parse::<f64>() {
-                        Ok(n) => Float::from_f64(n).cast(FP128),
+                        Ok(n) => Real::from_f64(n),
                         Err(e) => {
                             return Err(LexError::ParseError(format!(
                                 "Error parsing Float {} at pos {}: {}",
@@ -354,9 +335,7 @@ impl Lexer {
                                 };
                             }
                         }
-                        Ok(Token::from_func(Func::Log(
-                            Float::from_f64(base).cast(FP128),
-                        )))
+                        Ok(Token::from_func(Func::Log(Real::from_f64(base))))
                     }
                     "ln" => Ok(Token::from_func(Func::Ln)),
                     _ => {

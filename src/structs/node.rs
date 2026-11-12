@@ -1,11 +1,11 @@
-use std::{cell::RefCell, cmp::Ordering, error::Error, fmt::Display, rc::Rc};
+use std::{cell::RefCell, cmp::Ordering, error::Error, fmt::Display, ops::Neg, rc::Rc};
 
-use arpfloat::{FP128, Float};
 use once_cell::sync::OnceCell;
 
 use crate::{
+    numeric::Real,
     parse::lexer::{Const, Func, Op, Token},
-    utils::{float_math::FloatMath, fmt::unnecessary_brackets},
+    utils::fmt::unnecessary_brackets,
 };
 
 #[derive(Clone, Copy)]
@@ -513,7 +513,7 @@ impl NodeInner {
         }
     }
     /// Creates a new node from a float.
-    pub(crate) const fn from_float(num: Float) -> Self {
+    pub(crate) fn from_float(num: Real) -> Self {
         Self {
             value: NodeValue::Operand(Token::Float(num)),
             has_indp: false,
@@ -903,10 +903,10 @@ impl NodeInner {
         if terms.len() < 2 {
             return None;
         }
-        let mut pow_terms: Vec<(PowComponents, Float, usize)> = Vec::new();
+        let mut pow_terms: Vec<(PowComponents, Real, usize)> = Vec::new();
         let mut combined_like_terms = false;
         let mut others: Vec<(usize, Node)> = Vec::new();
-        let mut constant_value = Float::zero(FP128, false);
+        let mut constant_value = Real::zero();
         let mut has_constant = false;
         let mut constant_sum_changed = false;
         let mut constant_index: Option<usize> = None;
@@ -916,8 +916,7 @@ impl NodeInner {
                 if let Some(mut coeff_val) = comp.coefficient.inner.borrow().evaluate() {
                     if sign == -1 {
                         coeff_val = coeff_val.neg();
-                    }
-                    let mut found = false;
+                    }                    let mut found = false;
                     for (existing, sum, _) in pow_terms.iter_mut() {
                         if NodeInner::nodes_equal(&existing.base, &comp.base)
                             && NodeInner::nodes_equal(&existing.exponent, &comp.exponent)
@@ -1133,16 +1132,16 @@ impl NodeInner {
             _ => false,
         }
     }
-    pub(crate) fn evaluate(&self) -> Option<Float> {
+    pub(crate) fn evaluate(&self) -> Option<Real> {
         if self.has_indp {
             None
         } else {
             match &self.value {
                 NodeValue::Operand(token) => match token {
-                    Token::Number(0) => Some(Float::zero(FP128, false)),
-                    Token::Number(1) => Some(Float::one(FP128, false)),
-                    Token::Number(-1) => Some(Float::one(FP128, true)),
-                    Token::Number(num) => Some(Float::from_i64(FP128, *num)),
+                    Token::Number(0) => Some(Real::zero()),
+                    Token::Number(1) => Some(Real::one()),
+                    Token::Number(-1) => Some(Real::neg_one()),
+                    Token::Number(num) => Some(Real::from_i64(*num)),
                     Token::Float(num) => Some(num.clone()),
                     Token::Constant(k) => Some(k.get_value()),
                     _ => unreachable!(),
@@ -1203,16 +1202,16 @@ pub trait NodeOperations<T> {
 
 pub trait NodeFunctions<T>
 where
-    T: Into<Float>,
+    T: Into<Real>,
 {
     fn negate(self) -> Self;
     fn recip(self) -> Self;
     fn distribute_constant(self, k: T, mul_type: MulType) -> Self;
     fn distribute_expr(self, other: Self, mul_type: MulType) -> Self;
-    fn remove_constants(self) -> Float;
+    fn remove_constants(self) -> Real;
     fn simplify(self, expand: bool, combine_fns: bool) -> Self;
     fn factorise(self) -> Self;
-    //fn substitute(self, value: Float) -> Float;
+    //fn substitute(self, value: Real) -> Real;
 }
 
 impl NodeOperations<Self> for Node {
@@ -1293,12 +1292,12 @@ impl NodeOperations<i64> for Node {
     }
 }
 
-impl NodeFunctions<Float> for Node {
+impl NodeFunctions<Real> for Node {
     fn negate(self) -> Self {
         match &self.inner.borrow().value {
             NodeValue::Operand(token) => match token {
                 Token::Number(num) => NodeInner::from_number(-*num).wrap(),
-                Token::Float(num) => NodeInner::from_float(num.neg()).wrap(),
+                Token::Float(num) => NodeInner::from_float(num.clone().neg()).wrap(),
                 _ => NodeInner::zero().sub(self.clone()),
             },
             NodeValue::Operator(op_node) => match &op_node.token {
@@ -1329,7 +1328,7 @@ impl NodeFunctions<Float> for Node {
             NodeValue::Operand(token) => match token {
                 Token::Number(num) => NodeInner::from_number(1 / num).wrap(),
                 Token::Float(num) => {
-                    NodeInner::from_float(Float::one(FP128, true) / num.clone()).wrap()
+                    NodeInner::from_float(Real::neg_one() / num.clone()).wrap()
                 }
                 _ => NodeInner::one().div(self.clone()),
             },
@@ -1347,7 +1346,7 @@ impl NodeFunctions<Float> for Node {
             _ => self.clone(),
         }
     }
-    fn distribute_constant(self, k: Float, mul_type: MulType) -> Self {
+    fn distribute_constant(self, k: Real, mul_type: MulType) -> Self {
         if k.is_zero() {
             return NodeInner::zero();
         } else if k.is_one() {
@@ -1412,11 +1411,11 @@ impl NodeFunctions<Float> for Node {
             NodeValue::Operand(op) => match op {
                 Token::Number(num) => match mul_type {
                     MulType::OpMul => NodeInner::operand(Token::Float(
-                        Float::from_i64(k.get_semantics(), *num) * k,
+                        Real::from_i64(*num) * k,
                     ))
                     .wrap(),
                     MulType::OpDiv => NodeInner::operand(Token::Float(
-                        Float::from_i64(k.get_semantics(), *num) / k,
+                        Real::from_i64(*num) / k,
                     ))
                     .wrap(),
                 },
@@ -1590,15 +1589,15 @@ impl NodeFunctions<Float> for Node {
 
         NodeInner::from_operation(operator, self, other)
     }
-    fn remove_constants(self) -> Float {
+    fn remove_constants(self) -> Real {
         // Work on an owned copy so the borrow is not held while recursing.
         let value = self.inner.borrow().value.clone();
         match value {
             NodeValue::Operand(token) => match token {
-                Token::Constant(_) => Float::one(FP128, true),
-                Token::Number(value) => Float::from_i64(FP128, value),
+                Token::Constant(_) => Real::neg_one(),
+                Token::Number(value) => Real::from_i64(value),
                 Token::Float(value) => value,
-                Token::Indp(_) | Token::Var(_) => Float::one(FP128, true),
+                Token::Indp(_) | Token::Var(_) => Real::neg_one(),
                 _ => unreachable!(),
             },
             NodeValue::Operator(node) => match node.token {
@@ -1619,20 +1618,20 @@ impl NodeFunctions<Float> for Node {
                         Func::Sin => argument.sin(),
                         Func::Cos => argument.cos(),
                         Func::Tan => argument.tan(),
-                        Func::Sec => Float::one(FP128, false) / argument.cos(),
-                        Func::Csc => Float::one(FP128, false) / argument.sin(),
-                        Func::Cot => Float::one(FP128, false) / argument.tan(),
+                        Func::Sec => Real::one() / argument.cos(),
+                        Func::Csc => Real::one() / argument.sin(),
+                        Func::Cot => Real::one() / argument.tan(),
                         Func::Asin => argument.asin(),
                         Func::Acos => argument.acos(),
                         Func::Atan => argument.atan(),
                         Func::Sqrt => argument.sqrt(),
-                        Func::Ln => argument.log(),
-                        Func::Log(base) => argument.log() / base.log(),
+                        Func::Ln => argument.ln(),
+                        Func::Log(base) => argument.log(base),
                     }
                 }
                 _ => unreachable!(),
             },
-            NodeValue::Empty => Float::zero(FP128, false),
+            NodeValue::Empty => Real::zero(),
         }
     }
     fn simplify(self, expand: bool, combine_fns: bool) -> Self {

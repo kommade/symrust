@@ -135,6 +135,13 @@ impl Real {
         self.0.get_sign()
     }
 
+    /// Whether the sign bit is set (true means negative). Alias mirroring
+    /// `arpfloat::Float::get_sign`.
+    #[must_use]
+    pub fn get_sign(&self) -> bool {
+        self.0.get_sign()
+    }
+
     /// Whether this is an integer value (truncating changes nothing).
     #[must_use]
     pub fn is_integer(&self) -> bool {
