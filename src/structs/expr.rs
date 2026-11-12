@@ -34,7 +34,7 @@ impl<T: Clone> Clone for Expr<T> {
 impl<T: FloatType + Display> Default for Expr<T> {
     fn default() -> Self {
         Self {
-            tree: NodeInner::empty(),
+            tree: NodeInner::<T>::empty(),
         }
     }
 }
@@ -59,21 +59,22 @@ impl Expr<Real> {
 }
 
 impl<T: FloatType + Display> Expr<T> {
-    /// Create a new expression from a string, parsed as [`Real`] and then
-    /// re-typed into this expression's leaf type `T`. Takes an optional second
-    /// argument for the independent variable.
+    /// Create a new expression from a string, parsed **directly** into this
+    /// expression's leaf type `T`. Takes an optional second argument for the
+    /// independent variable.
     ///
-    /// For `T = Real` this is identical to [`Expr::new`]. This is the constructor
-    /// the [`create_expr!`][crate::create_expr] macro calls when a number type is
-    /// supplied explicitly, e.g. `create_expr!("2x^2", f64)`.
+    /// Numeric literals are converted straight into `T` (via
+    /// [`FloatType::parse_decimal`][crate::numeric::FloatType::parse_decimal]),
+    /// so there is no `Real` round-trip. For `T = Real` this is identical to
+    /// [`Expr::new`]. This is the constructor the [`create_expr!`][crate::create_expr]
+    /// macro calls when a number type is supplied explicitly, e.g.
+    /// `create_expr!("2x^2"; f64)`.
     pub fn parse(str: String, indp_var: Option<char>) -> Result<Self, Box<dyn Error>> {
-        let mut lexer = Lexer::new(str, indp_var);
+        let mut lexer = Lexer::<T>::new(str, indp_var);
         let lexed = lexer.lex()?;
-        let mut parser = Parser::new(lexed);
-        let real_tree = parser.parse()?;
-        Ok(Self {
-            tree: Node::<T>::from_real(&real_tree),
-        })
+        let mut parser = Parser::<T>::new(lexed);
+        let tree = parser.parse()?;
+        Ok(Self { tree })
     }
     /// Wrap an already-built [`Node<T>`] into an expression.
     #[must_use]

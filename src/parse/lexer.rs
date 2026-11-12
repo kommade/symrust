@@ -185,14 +185,15 @@ impl Display for LexError {
     }
 }
 
-pub struct Lexer {
+pub struct Lexer<T = Real> {
     input: String,
     size: usize,
     pos: usize,
     indp: char,
+    _marker: std::marker::PhantomData<T>,
 }
 
-impl Lexer {
+impl<T> Lexer<T> {
     pub fn new(input: String, indp: Option<char>) -> Self {
         let size = input.len();
         Self {
@@ -200,6 +201,7 @@ impl Lexer {
             size,
             pos: 0,
             indp: indp.unwrap_or('x'),
+            _marker: std::marker::PhantomData,
         }
     }
 
@@ -212,9 +214,11 @@ impl Lexer {
             Err(LexError::UnexpectedEOF(self.pos.to_string()))
         }
     }
+}
 
+impl<T: FloatType + Display> Lexer<T> {
     #[allow(clippy::too_many_lines)]
-    fn next(&mut self) -> Result<Token, LexError> {
+    fn next(&mut self) -> Result<Token<T>, LexError> {
         if self.pos > self.size {
             return Err(LexError::UnexpectedEOF(self.pos.to_string()));
         }
@@ -241,15 +245,13 @@ impl Lexer {
                     }
                 }
                 if is_float {
-                    Ok(Token::from_float(match num.parse::<f64>() {
-                        Ok(n) => Real::from_f64(n),
-                        Err(e) => {
-                            return Err(LexError::ParseError(format!(
-                                "Error parsing Float {} at pos {}: {}",
-                                num, self.pos, e
-                            )));
-                        }
-                    }))
+                    match T::parse_decimal(&num) {
+                        Ok(n) => Ok(Token::from_float(n)),
+                        Err(e) => Err(LexError::ParseError(format!(
+                            "Error parsing Float {} at pos {}: {}",
+                            num, self.pos, e
+                        ))),
+                    }
                 } else {
                     match num.parse() {
                         Ok(n) => Ok(Token::from_num(n)),
@@ -306,7 +308,8 @@ impl Lexer {
                     "atan" | "arctan" => Ok(Token::from_func(Func::Atan)),
                     "sqrt" => Ok(Token::from_func(Func::Sqrt)),
                     "log" => {
-                        let mut base = 10.0;
+                        let mut base = T::parse_decimal("10")
+                            .map_err(|e| LexError::ParseError(e))?;
                         if let Ok(c) = self.unwrap_next() {
                             if c == '_' {
                                 let mut base_str = String::new();
@@ -318,8 +321,8 @@ impl Lexer {
                                         break;
                                     }
                                 }
-                                match base_str.parse::<f64>() {
-                                    Ok(n) if n != 0.0 && n != 1.0 => base = n,
+                                match T::parse_decimal(&base_str) {
+                                    Ok(n) if !n.is_zero() && !n.is_one() => base = n,
                                     Ok(_) => {
                                         return Err(LexError::ParseError(format!(
                                             "Invalid log base {} at pos {}",
@@ -335,7 +338,7 @@ impl Lexer {
                                 };
                             }
                         }
-                        Ok(Token::from_func(Func::Log(Real::from_f64(base))))
+                        Ok(Token::from_func(Func::Log(base)))
                     }
                     "ln" => Ok(Token::from_func(Func::Ln)),
                     _ => {
@@ -360,7 +363,7 @@ impl Lexer {
         }
     }
 
-    pub fn lex(&mut self) -> Result<Vec<Token>, LexError> {
+    pub fn lex(&mut self) -> Result<Vec<Token<T>>, LexError> {
         let mut tokens = Vec::with_capacity(self.size);
         while self.pos < self.size {
             tokens.push(self.next()?);

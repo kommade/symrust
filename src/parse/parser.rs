@@ -1,5 +1,6 @@
 use std::{error::Error, fmt::Display};
 
+use crate::numeric::{FloatType, Real};
 use crate::structs::node::{Node, NodeInner};
 
 use super::lexer::{Op, Token};
@@ -25,16 +26,27 @@ impl Display for ParseError {
     }
 }
 
-pub struct Parser {
-    tokens: Vec<Token>,
+pub struct Parser<T = Real> {
+    tokens: Vec<Token<T>>,
 }
 
-impl Parser {
-    pub(crate) fn new(tokens: Vec<Token>) -> Self {
+/// Whether a node is a literal zero (`0` or `0.0`), used for the division-by-zero
+/// guard without relying on any numeric evaluation (so it works for any `T`).
+fn right_is_literal_zero<T: FloatType + Display>(node: &Node<T>) -> bool {
+    use crate::structs::node::NodeValue;
+    match &node.inner.borrow().value {
+        NodeValue::Operand(Token::Number(n)) => *n == 0,
+        NodeValue::Operand(Token::Float(f)) => f.is_zero(),
+        _ => false,
+    }
+}
+
+impl<T: FloatType + Display> Parser<T> {
+    pub(crate) fn new(tokens: Vec<Token<T>>) -> Self {
         Self { tokens }
     }
 
-    pub(crate) fn parse(&mut self) -> Result<Node, ParseError> {
+    pub(crate) fn parse(&mut self) -> Result<Node<T>, ParseError> {
         let mut output = Vec::with_capacity(self.tokens.len());
         let mut stack = Vec::with_capacity(self.tokens.len());
         let tokens = &mut self.tokens;
@@ -97,7 +109,7 @@ impl Parser {
                 _ => output.push(token),
             }
         }
-        let mut tree = Vec::with_capacity(output.len());
+        let mut tree: Vec<Node<T>> = Vec::with_capacity(output.len());
         for token in output {
             match token {
                 Token::Number(_)
@@ -111,7 +123,8 @@ impl Parser {
                     if tree.len() < 2 {
                         if *op == Op::Sub {
                             let right = tree.pop().unwrap();
-                            tree.push(crate::structs::node::NodeFunctions::negate(right));
+                            use crate::structs::node::NodeOperations;
+                            tree.push(NodeInner::zero().sub(right));
                             continue;
                         }
                         return Err(ParseError::InvalidExpression(format!(
@@ -120,7 +133,7 @@ impl Parser {
                     }
                     let right = tree.pop().unwrap();
                     let left = tree.pop().unwrap();
-                    if *op == Op::Div && right.inner.borrow().is_zero() {
+                    if *op == Op::Div && right_is_literal_zero(&right) {
                         return Err(ParseError::DivisionByZero);
                     }
                     tree.push(NodeInner::from_operation(op.clone(), left, right));

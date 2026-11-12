@@ -267,6 +267,26 @@ pub trait FloatType: ExpressionScalar {
     fn abs(&self) -> Self;
     /// Truncate towards zero.
     fn trunc(&self) -> Self;
+
+    /// Parse a decimal numeric literal (e.g. `"3.5"`, as produced by the lexer)
+    /// directly into `Self`.
+    ///
+    /// This is what lets the lexer/parser build a tree of a caller-chosen type
+    /// `T` straight from text, instead of parsing into `Real` and re-typing
+    /// afterwards. The default routes through `f64` (which is exact enough for
+    /// arbitrary-precision types like [`Real`] and correct for `f32`/`f64` at
+    /// their own precision); types that can parse more precisely should override
+    /// it.
+    ///
+    /// Returns an error message when the literal is not a valid number.
+    fn parse_decimal(literal: &str) -> Result<Self, String> {
+        let value: f64 = literal
+            .parse()
+            .map_err(|e| format!("Error parsing number {literal}: {e}"))?;
+        Ok(Self::from_float(
+            Float::from_f64(value).cast(arpfloat::FP128),
+        ))
+    }
 }
 
 impl FloatType for crate::numeric::Real {
@@ -386,6 +406,11 @@ macro_rules! impl_float_type_for_f {
                 }
                 fn abs(&self) -> Self { <$f>::abs(*self) }
                 fn trunc(&self) -> Self { <$f>::trunc(*self) }
+                fn parse_decimal(literal: &str) -> Result<Self, String> {
+                    literal
+                        .parse::<$f>()
+                        .map_err(|e| format!("Error parsing number {literal}: {e}"))
+                }
             }
         )*
     };

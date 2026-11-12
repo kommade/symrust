@@ -3,7 +3,7 @@
 //! constructors.
 
 use crate::create_expr;
-use crate::parse::lexer::Op;
+use crate::parse::lexer::{Op, Token};
 use crate::structs::expr::Expr;
 use crate::structs::node::Node;
 
@@ -44,4 +44,21 @@ fn build_f32_tree_from_string_matches_real_structure() {
     let real_tree = create_expr!("x + 1").unwrap();
     let f32_tree = Node::<f32>::from_real(real_tree.tree());
     assert!(f32_tree.is_operator_type(Op::Add));
+}
+
+#[test]
+fn string_literals_parse_directly_into_t() {
+    // The lexer/parser build `Node<T>` straight from text, so a decimal literal
+    // becomes a `Token::Float(T)` of the *chosen* type — no Real round-trip.
+    use crate::structs::node::NodeValue;
+
+    let expr: Expr<f64> = create_expr!("0.1"; f64).unwrap();
+    let inner = expr.tree().inner.borrow();
+    match &inner.value {
+        NodeValue::Operand(Token::Float(v)) => {
+            // Parsed natively as f64, i.e. exactly the f64 literal 0.1.
+            assert_eq!(*v, 0.1_f64);
+        }
+        other => panic!("expected a float leaf, got {other:?}"),
+    }
 }
