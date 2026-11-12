@@ -8,7 +8,8 @@
 use std::fmt::Display;
 
 use super::{expr, rational::Rat};
-use crate::{algebra::linear::Matrixable, structs::node::Node};
+use crate::numeric::ExactField;
+use crate::structs::node::Node;
 
 /// `a + b sqrt(k)` with a squarefree `k`. A rational is stored with `k = 0`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,7 +66,7 @@ impl std::ops::Neg for Surd {
     }
 }
 
-impl Matrixable for Surd {
+impl ExactField for Surd {
     fn multiplicative_identity() -> Self {
         Self::rational(Rat::ONE)
     }
@@ -79,7 +80,7 @@ impl Matrixable for Surd {
     }
 
     /// Conservative: returns `self` unchanged when the root leaves the field,
-    /// since `Matrixable::sqrt` cannot report failure.
+    /// since `ExactField::sqrt` cannot report failure.
     fn sqrt(self) -> Self {
         Surd::sqrt(self).expect("The square root leaves the quadratic field")
     }

@@ -1,4 +1,5 @@
-use crate::algebra::{linear::Matrixable, rational::Rat, surd::Surd};
+use crate::algebra::{rational::Rat, surd::Surd};
+use crate::numeric::ExactField;
 
 #[test]
 fn rat_sqrt_is_exact_for_perfect_squares() {

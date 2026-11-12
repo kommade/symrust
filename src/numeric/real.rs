@@ -473,6 +473,73 @@ impl Div for Real {
     }
 }
 
+impl crate::numeric::FloatBridge for Real {
+    fn from_float(value: Float) -> Self {
+        Self(value.cast(FP128))
+    }
+
+    fn to_float(&self) -> Float {
+        self.0.clone()
+    }
+}
+
+impl crate::numeric::ExpressionScalar for Real {
+    fn from_i64(value: i64) -> Self {
+        Real::from_i64(value)
+    }
+
+    fn pow(self, exponent: Self) -> Self {
+        Real::pow(self, &exponent)
+    }
+
+    fn pow_i64(self, exponent: i64) -> Self {
+        if exponent < 0 {
+            let magnitude = exponent.unsigned_abs();
+            Real::one() / Real::powi(self, magnitude)
+        } else {
+            Real::powi(self, exponent.unsigned_abs())
+        }
+    }
+
+    fn pow_float(self, exponent: Float) -> Self {
+        Real::pow(self, &Real(exponent.cast(FP128)))
+    }
+
+    fn sin(self) -> Self {
+        Real::sin(self)
+    }
+    fn cos(self) -> Self {
+        Real::cos(self)
+    }
+    fn tan(self) -> Self {
+        Real::tan(self)
+    }
+    fn asin(self) -> Self {
+        Real::asin(self)
+    }
+    fn acos(self) -> Self {
+        Real::acos(self)
+    }
+    fn atan(self) -> Self {
+        Real::atan(self)
+    }
+    fn sqrt(self) -> Self {
+        Real::sqrt(self)
+    }
+    fn ln(self) -> Self {
+        Real::ln(self)
+    }
+    fn log(self, base: Float) -> Self {
+        Real::ln(self) / Real::ln(crate::numeric::FloatBridge::from_float(base))
+    }
+    fn pi() -> Self {
+        Real::pi()
+    }
+    fn e() -> Self {
+        Real::e()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Real;

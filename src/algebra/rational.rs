@@ -7,7 +7,7 @@
 use std::fmt::Display;
 
 use super::expr;
-use crate::algebra::linear::Matrixable;
+use crate::numeric::ExactField;
 use crate::structs::node::Node;
 use crate::utils::gcd_u128;
 
@@ -121,7 +121,7 @@ impl std::ops::Neg for Rat {
     }
 }
 
-impl Matrixable for Rat {
+impl ExactField for Rat {
     fn multiplicative_identity() -> Self {
         Self::ONE
     }

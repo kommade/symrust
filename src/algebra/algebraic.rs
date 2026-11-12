@@ -449,7 +449,7 @@ impl std::ops::Neg for Multiquadratic {
     }
 }
 
-impl super::linear::Matrixable for Multiquadratic {
+impl crate::numeric::ExactField for Multiquadratic {
     fn multiplicative_identity() -> Self {
         Self::from_rat(Rat::ONE)
     }
@@ -952,7 +952,7 @@ mod tests {
 
     #[test]
     fn multiquadratic_exact_square_roots() {
-        use super::super::linear::Matrixable;
+        use crate::numeric::ExactField;
         // sqrt(6) stays sqrt(6), sqrt(3) stays sqrt(3), sqrt(4) is rational 2.
         let six = Multiquadratic::from_rat(Rat::from_i64(6));
         let root_six = six.try_sqrt().expect("sqrt 6 is in the field");

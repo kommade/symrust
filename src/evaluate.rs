@@ -12,109 +12,18 @@
 //! that still mentions the other variables.
 
 use std::collections::HashMap;
-use std::ops::{Add, Div, Mul, Sub};
 
 use arpfloat::{FP128, Float};
 
+use crate::numeric::{ExpressionScalar, FloatBridge};
 use crate::parse::lexer::{Const, Func, Op, Token};
 use crate::structs::expr::Expr;
 use crate::structs::node::Node;
 use crate::utils::float_math::FloatMath;
 
-/// The numeric types an [`Expr`] can be evaluated into.
-///
-/// A type implementing this trait promises to support every operation and
-/// function that can appear in an expression:
-///
-/// * the operators [`Op::Add`], [`Op::Sub`], [`Op::Mul`], [`Op::ImplicitMul`],
-///   [`Op::Div`] and [`Op::Pow`] — the first four come from the
-///   [`Add`]/[`Sub`]/[`Mul`]/[`Div`] supertraits, and [`pow`](Self::pow)
-///   supplies the fifth (there is no standard `Pow` trait);
-/// * the functions stored in [`Func`] (`sin`, `cos`, `tan`, `sec`, `csc`, `cot`,
-///   `asin`, `acos`, `atan`, `sqrt`, `ln` and `log_base`);
-/// * the constants stored in [`Const`] (`π` and `e`);
-/// * mixing with plain `i64` and [`arpfloat::Float`] values, which expressions
-///   spell as `Token::Number` / `Token::Float` leaves.
-///
-/// Only [`from_i64`](Self::from_i64), [`from_float`](Self::from_float),
-/// [`to_float`](Self::to_float), [`pow`](Self::pow) and the functions are
-/// required; everything with a sensible fallback is a default method.
-pub trait Evaluable:
-    Clone
-    + Sized
-    + Add<Output = Self>
-    + Sub<Output = Self>
-    + Mul<Output = Self>
-    + Div<Output = Self>
-{
-    /// Build the value from an integer (a `Token::Number` leaf).
-    fn from_i64(value: i64) -> Self;
-
-    /// Build the value from an [`arpfloat::Float`] (a `Token::Float` leaf).
-    fn from_float(value: Float) -> Self;
-
-    /// A best-effort conversion back to a float, used when the value has to be
-    /// embedded into a still-symbolic result and for the float fallbacks.
-    fn to_float(&self) -> Float;
-
-    /// `self ^ exponent` where the exponent is itself a value of this type.
-    fn pow(self, exponent: Self) -> Self;
-
-    /// `self ^ exponent` for an integer exponent (a `Token::Number` power).
-    /// Defaults to raising to the equivalent `Self` exponent.
-    fn pow_i64(self, exponent: i64) -> Self {
-        self.pow(Self::from_i64(exponent))
-    }
-
-    /// `self ^ exponent` for a float exponent (a `Token::Float` power).
-    /// Defaults to raising to the equivalent `Self` exponent.
-    fn pow_float(self, exponent: Float) -> Self {
-        self.pow(Self::from_float(exponent))
-    }
-
-    // --- functions ------------------------------------------------------
-
-    fn sin(self) -> Self;
-    fn cos(self) -> Self;
-    fn tan(self) -> Self;
-
-    /// `sec(self) = 1 / cos(self)`.
-    fn sec(self) -> Self {
-        Self::from_i64(1) / self.cos()
-    }
-    /// `csc(self) = 1 / sin(self)`.
-    fn csc(self) -> Self {
-        Self::from_i64(1) / self.sin()
-    }
-    /// `cot(self) = 1 / tan(self)`.
-    fn cot(self) -> Self {
-        Self::from_i64(1) / self.tan()
-    }
-
-    fn asin(self) -> Self;
-    fn acos(self) -> Self;
-    fn atan(self) -> Self;
-
-    fn sqrt(self) -> Self;
-
-    /// The natural logarithm.
-    fn ln(self) -> Self;
-
-    /// `log_base(self)`, defaulting to `ln(self) / ln(base)`.
-    fn log(self, base: Float) -> Self {
-        self.ln() / Self::from_float(base).ln()
-    }
-
-    /// The constant `π`.
-    fn pi() -> Self {
-        Self::from_float(Float::pi(FP128))
-    }
-
-    /// The constant `e`.
-    fn e() -> Self {
-        Self::from_float(Float::e(FP128))
-    }
-}
+/// Re-export of the evaluator's scalar bound, now defined in
+/// [`crate::numeric`] as a blanket over [`ExpressionScalar`].
+pub use crate::numeric::Evaluable;
 
 /// The outcome of [evaluating][crate::structs::expr::Expr::evaluate] an
 /// expression.
@@ -380,17 +289,9 @@ fn independent_variable(node: &Node) -> char {
 // Concrete implementations
 // ---------------------------------------------------------------------------
 
-impl Evaluable for Float {
+impl ExpressionScalar for Float {
     fn from_i64(value: i64) -> Self {
         Float::from_i64(FP128, value)
-    }
-
-    fn from_float(value: Float) -> Self {
-        value.cast(FP128)
-    }
-
-    fn to_float(&self) -> Float {
-        self.clone()
     }
 
     fn pow(self, exponent: Self) -> Self {
@@ -442,26 +343,26 @@ impl Evaluable for Float {
     }
 }
 
+impl FloatBridge for Float {
+    fn from_float(value: Float) -> Self {
+        value.cast(FP128)
+    }
+
+    fn to_float(&self) -> Float {
+        self.clone()
+    }
+}
+
 macro_rules! impl_evaluable_float {
     ($($float:ty),* $(,)?) => {
         $(
-            impl Evaluable for $float {
+            impl ExpressionScalar for $float {
                 fn from_i64(value: i64) -> Self {
                     value as $float
                 }
-                fn from_float(value: Float) -> Self {
-                    value.as_f64() as $float
-                }
-                fn to_float(&self) -> Float {
-                    Float::from_f64(*self as f64).cast(FP128)
-                }
                 fn pow(self, exponent: Self) -> Self { self.powf(exponent) }
                 fn pow_i64(self, exponent: i64) -> Self {
-                    if exponent >= 0 {
-                        self.powi(exponent as i32)
-                    } else {
-                        self.powi(exponent as i32)
-                    }
+                    self.powi(exponent as i32)
                 }
                 fn pow_float(self, exponent: Float) -> Self {
                     self.powf(exponent.as_f64() as $float)
@@ -478,6 +379,15 @@ macro_rules! impl_evaluable_float {
                     self.ln() / (base.as_f64() as $float).ln()
                 }
             }
+
+            impl FloatBridge for $float {
+                fn from_float(value: Float) -> Self {
+                    value.as_f64() as $float
+                }
+                fn to_float(&self) -> Float {
+                    Float::from_f64(*self as f64).cast(FP128)
+                }
+            }
         )*
     };
 }
@@ -487,15 +397,9 @@ impl_evaluable_float!(f64, f32);
 macro_rules! impl_evaluable_int {
     ($($int:ty),* $(,)?) => {
         $(
-            impl Evaluable for $int {
+            impl ExpressionScalar for $int {
                 fn from_i64(value: i64) -> Self {
                     value as $int
-                }
-                fn from_float(value: Float) -> Self {
-                    value.as_f64().round() as $int
-                }
-                fn to_float(&self) -> Float {
-                    Float::from_i64(FP128, *self as i64)
                 }
                 // Integer powers stay integral when the exponent is a
                 // non-negative integer; everything else is rounded through f64.
@@ -511,7 +415,7 @@ macro_rules! impl_evaluable_int {
                     }
                 }
                 fn pow_i64(self, exponent: i64) -> Self {
-                    <Self as Evaluable>::pow(self, exponent as $int)
+                    <Self as ExpressionScalar>::pow(self, exponent as $int)
                 }
                 fn pow_float(self, exponent: Float) -> Self {
                     (self as f64).powf(exponent.as_f64()).round() as $int
@@ -524,6 +428,15 @@ macro_rules! impl_evaluable_int {
                 fn atan(self) -> Self { (self as f64).atan().round() as $int }
                 fn sqrt(self) -> Self { (self as f64).sqrt().round() as $int }
                 fn ln(self) -> Self { (self as f64).ln().round() as $int }
+            }
+
+            impl FloatBridge for $int {
+                fn from_float(value: Float) -> Self {
+                    value.as_f64().round() as $int
+                }
+                fn to_float(&self) -> Float {
+                    Float::from_i64(FP128, *self as i64)
+                }
             }
         )*
     };
@@ -559,18 +472,9 @@ fn rat_from_f64(value: f64) -> crate::algebra::rational::Rat {
     crate::algebra::rational::Rat::from_f64(value).unwrap_or(crate::algebra::rational::Rat::ZERO)
 }
 
-impl Evaluable for crate::algebra::rational::Rat {
+impl ExpressionScalar for crate::algebra::rational::Rat {
     fn from_i64(value: i64) -> Self {
         crate::algebra::rational::Rat::from_i64(value)
-    }
-
-    fn from_float(value: Float) -> Self {
-        crate::algebra::rational::Rat::from_float(&value)
-            .unwrap_or(crate::algebra::rational::Rat::ZERO)
-    }
-
-    fn to_float(&self) -> Float {
-        Float::from_f64(crate::algebra::rational::Rat::to_f64(self))
     }
 
     fn pow(self, exponent: Self) -> Self {
@@ -624,17 +528,20 @@ impl Evaluable for crate::algebra::rational::Rat {
     }
 }
 
-impl Evaluable for crate::algebra::surd::Surd {
-    fn from_i64(value: i64) -> Self {
-        crate::algebra::surd::Surd::rational(crate::algebra::rational::Rat::from_i64(value))
-    }
-
+impl FloatBridge for crate::algebra::rational::Rat {
     fn from_float(value: Float) -> Self {
-        surd_from_f64(value.as_f64())
+        crate::algebra::rational::Rat::from_float(&value)
+            .unwrap_or(crate::algebra::rational::Rat::ZERO)
     }
 
     fn to_float(&self) -> Float {
-        Float::from_f64(crate::algebra::surd::Surd::to_f64(self))
+        Float::from_f64(crate::algebra::rational::Rat::to_f64(self))
+    }
+}
+
+impl ExpressionScalar for crate::algebra::surd::Surd {
+    fn from_i64(value: i64) -> Self {
+        crate::algebra::surd::Surd::rational(crate::algebra::rational::Rat::from_i64(value))
     }
 
     fn pow(self, exponent: Self) -> Self {
@@ -678,6 +585,16 @@ impl Evaluable for crate::algebra::surd::Surd {
     }
 }
 
+impl FloatBridge for crate::algebra::surd::Surd {
+    fn from_float(value: Float) -> Self {
+        surd_from_f64(value.as_f64())
+    }
+
+    fn to_float(&self) -> Float {
+        Float::from_f64(crate::algebra::surd::Surd::to_f64(self))
+    }
+}
+
 /// Build a [`Surd`][crate::algebra::surd::Surd] from an `f64` (best effort).
 fn surd_from_f64(value: f64) -> crate::algebra::surd::Surd {
     crate::algebra::surd::Surd::rational(rat_from_f64(value))
@@ -717,19 +634,11 @@ fn surd_int_pow(base: crate::algebra::surd::Surd, exponent: i64) -> crate::algeb
 }
 
 #[cfg(feature = "algebraic")]
-impl Evaluable for crate::algebra::algebraic::Multiquadratic {
+impl ExpressionScalar for crate::algebra::algebraic::Multiquadratic {
     fn from_i64(value: i64) -> Self {
         crate::algebra::algebraic::Multiquadratic::from_rat(
             crate::algebra::rational::Rat::from_i64(value),
         )
-    }
-
-    fn from_float(value: Float) -> Self {
-        crate::algebra::algebraic::Multiquadratic::from_rat(rat_from_f64(value.as_f64()))
-    }
-
-    fn to_float(&self) -> Float {
-        Float::from_f64(crate::algebra::algebraic::Multiquadratic::to_f64(self))
     }
 
     fn pow(self, exponent: Self) -> Self {
@@ -768,10 +677,21 @@ impl Evaluable for crate::algebra::algebraic::Multiquadratic {
         multiquadratic_from_f64(crate::algebra::algebraic::Multiquadratic::to_f64(&self).atan())
     }
     fn sqrt(self) -> Self {
-        <Self as crate::algebra::linear::Matrixable>::sqrt(self)
+        <Self as crate::numeric::ExactField>::sqrt(self)
     }
     fn ln(self) -> Self {
         multiquadratic_from_f64(crate::algebra::algebraic::Multiquadratic::to_f64(&self).ln())
+    }
+}
+
+#[cfg(feature = "algebraic")]
+impl FloatBridge for crate::algebra::algebraic::Multiquadratic {
+    fn from_float(value: Float) -> Self {
+        crate::algebra::algebraic::Multiquadratic::from_rat(rat_from_f64(value.as_f64()))
+    }
+
+    fn to_float(&self) -> Float {
+        Float::from_f64(crate::algebra::algebraic::Multiquadratic::to_f64(self))
     }
 }
 

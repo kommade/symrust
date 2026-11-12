@@ -2,59 +2,19 @@
 
 use std::{fmt::Display, ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign}};
 
-use arpfloat::Float;
-
 use super::{factorization::{self, linear_factor}, polynomial::Poly, rational::Rat, surd::Surd};
 
-pub trait Matrixable: Clone + Copy + PartialEq + std::fmt::Debug + Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self> + Div<Output = Self> + Neg<Output = Self> + Default {
-    /// It is necessary that T::default() is the additive identity
-    fn additive_identity() -> Self {
-        Self::default()
-    }
-    fn multiplicative_identity() -> Self;
+/// Re-export of the coefficient bound used throughout this module. `Matrixable`
+/// is now a blanket alias for [`ExactField`][crate::numeric::ExactField].
+pub use crate::numeric::Matrixable;
 
-    /// The square root of a non-negative value.
-    ///
-    /// There is no generic way to compute this, so the blanket impl below
-    /// delegates to `f64`. Types that can stay exact (`Rat`, `Surd`) override
-    /// this in their own `impl Matrixable` blocks. 
-    fn sqrt(self) -> Self {
-        Self::from_f64(self.as_f64().sqrt())
-    }
-
-    /// An exact square root, or `None` when the root cannot be represented in
-    /// `Self`.
-    ///
-    /// The default rounds the `f64` root into `Self` and keeps it only when it
-    /// squares back to the input. Exact types override this so that, for
-    /// example, `sqrt 6` stays `sqrt 6` rather than becoming `2.449…`.
-    fn try_sqrt(self) -> Option<Self> {
-        if self.as_f64() < 0.0 {
-            return None;
-        }
-        let candidate = Self::from_f64(self.as_f64().sqrt());
-        (candidate * candidate == self).then_some(candidate)
-    }
-
-    /// Rough conversion used only by the default `sqrt`. Overridden by types
-    /// whose blanket impl would otherwise be impossible to write.
-    fn as_f64(self) -> f64;
-
-    fn from_f64(value: f64) -> Self;
-
-    /// Whether this is a floating-point coefficient type.
-    ///
-    /// True for the blanket-impl float types (`f64`, `f32`, ...) and false for
-    /// the exact types (`Rat`, `Surd`). The numerical SVD fallback rounds
-    /// rotation angles through `f64`, which is harmless for floats but would
-    /// overflow exact integer representations, so it is only used when this is
-    /// `true`.
-    fn is_floating() -> bool {
-        true
-    }
-}
-
-impl <T> Matrixable for T where T: Clone + Copy + PartialEq + std::fmt::Debug + Add<Output = T> + Sub<Output = T> + Mul<Output = T> + Div<Output = T> + Neg<Output = T> + Default + From<f64> + Into<f64> {
+/// Blanket `ExactField` for plain floats: any `Copy` type that converts to and
+/// from `f64` (covers `f32`, `f64`).
+impl<T> crate::numeric::ExactField for T
+where
+    T: Clone + Copy + PartialEq + std::fmt::Debug + Add<Output = T> + Sub<Output = T>
+        + Mul<Output = T> + Div<Output = T> + Neg<Output = T> + Default + From<f64> + Into<f64>,
+{
     fn multiplicative_identity() -> Self {
         1.0.into()
     }
