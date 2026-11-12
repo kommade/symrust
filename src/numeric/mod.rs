@@ -219,3 +219,179 @@ impl<T: ExactField> Matrixable for T {}
 pub trait Evaluable: ExpressionScalar {}
 
 impl<T: ExpressionScalar> Evaluable for T {}
+
+/// The bounds a type must satisfy to serve as the *leaf float type* of the
+/// expression tree (and, eventually, the generic parameter `T` of
+/// `Node<T>`/`Expr<T>`).
+///
+/// It is a superset of [`ExpressionScalar`] (so a `FloatType` can be plugged
+/// into the generic `evaluate`/calculus machinery) plus the float-specific
+/// constructors and predicates the tree uses internally: `zero`/`one`/`neg_one`/
+/// `nan`, sign/normal/infinite/NaN checks, integer and float conversions, and
+/// `powi`.
+///
+/// [`Real`] is the default implementation; `f64`, `f32` and [`arpfloat::Float`]
+/// also implement it. A caller that wants a custom float supplies its own `impl`
+/// and satisfies these bounds.
+pub trait FloatType: ExpressionScalar {
+    /// The value `0`.
+    fn zero() -> Self;
+    /// The value `1`.
+    fn one() -> Self;
+    /// The value `-1`.
+    fn neg_one() -> Self;
+    /// A quiet NaN.
+    fn nan() -> Self;
+
+    /// `true` when the sign bit is set (negative).
+    fn is_negative(&self) -> bool;
+    /// `true` when the value is zero.
+    fn is_zero(&self) -> bool;
+    /// `true` when the value is a NaN.
+    fn is_nan(&self) -> bool;
+    /// `true` when the value is finite and non-zero (neither subnormal, zero,
+    /// infinite nor NaN).
+    fn is_normal(&self) -> bool;
+    /// `true` when the value is +∞ or −∞.
+    fn is_infinite(&self) -> bool;
+    /// `true` when the value is an integer (truncating would not change it).
+    fn is_integer(&self) -> bool;
+    /// `true` when the value is `1` (within tolerance).
+    fn is_one(&self) -> bool;
+    /// `true` when the value is `-1` (within tolerance).
+    fn is_neg_one(&self) -> bool;
+
+    /// `self ^ exponent` for a non-negative integer exponent.
+    fn powi(self, exponent: u64) -> Self;
+    /// The absolute value.
+    fn abs(&self) -> Self;
+    /// Truncate towards zero.
+    fn trunc(&self) -> Self;
+}
+
+impl FloatType for crate::numeric::Real {
+    fn zero() -> Self {
+        Real::zero()
+    }
+    fn one() -> Self {
+        Real::one()
+    }
+    fn neg_one() -> Self {
+        Real::neg_one()
+    }
+    fn nan() -> Self {
+        Real::nan()
+    }
+    fn is_negative(&self) -> bool {
+        Real::is_negative(self)
+    }
+    fn is_zero(&self) -> bool {
+        Real::is_zero(self)
+    }
+    fn is_nan(&self) -> bool {
+        Real::is_nan(self)
+    }
+    fn is_normal(&self) -> bool {
+        Real::is_normal(self)
+    }
+    fn is_infinite(&self) -> bool {
+        Real::is_infinite(self)
+    }
+    fn is_integer(&self) -> bool {
+        Real::is_integer(self)
+    }
+    fn is_one(&self) -> bool {
+        Real::is_one(self)
+    }
+    fn is_neg_one(&self) -> bool {
+        Real::is_neg_one(self)
+    }
+    fn powi(self, exponent: u64) -> Self {
+        Real::powi(self, exponent)
+    }
+    fn abs(&self) -> Self {
+        Real::abs(self)
+    }
+    fn trunc(&self) -> Self {
+        Real::trunc(self)
+    }
+}
+
+impl FloatType for Float {
+    fn zero() -> Self {
+        Float::zero(FP128, false)
+    }
+    fn one() -> Self {
+        Float::one(FP128, false)
+    }
+    fn neg_one() -> Self {
+        Float::one(FP128, true)
+    }
+    fn nan() -> Self {
+        Float::nan(FP128, false)
+    }
+    fn is_negative(&self) -> bool {
+        self.get_sign()
+    }
+    fn is_zero(&self) -> bool {
+        Float::is_zero(self)
+    }
+    fn is_nan(&self) -> bool {
+        Float::is_nan(self)
+    }
+    fn is_normal(&self) -> bool {
+        Float::is_normal(self)
+    }
+    fn is_infinite(&self) -> bool {
+        self.is_inf()
+    }
+    fn is_integer(&self) -> bool {
+        crate::utils::float_math::FloatMath::is_integer(self)
+    }
+    fn is_one(&self) -> bool {
+        crate::utils::float_math::FloatMath::is_one(self)
+    }
+    fn is_neg_one(&self) -> bool {
+        crate::utils::float_math::FloatMath::is_neg_one(self)
+    }
+    fn powi(self, exponent: u64) -> Self {
+        Float::powi(&self, exponent)
+    }
+    fn abs(&self) -> Self {
+        Float::abs(self)
+    }
+    fn trunc(&self) -> Self {
+        Float::trunc(self)
+    }
+}
+
+macro_rules! impl_float_type_for_f {
+    ($($f:ty),* $(,)?) => {
+        $(
+            impl FloatType for $f {
+                fn zero() -> Self { 0.0 }
+                fn one() -> Self { 1.0 }
+                fn neg_one() -> Self { -1.0 }
+                fn nan() -> Self { <$f>::NAN }
+                fn is_negative(&self) -> bool { self.is_sign_negative() }
+                fn is_zero(&self) -> bool { *self == 0.0 }
+                fn is_nan(&self) -> bool { <$f>::is_nan(*self) }
+                fn is_normal(&self) -> bool { <$f>::is_normal(*self) }
+                fn is_infinite(&self) -> bool { <$f>::is_infinite(*self) }
+                fn is_integer(&self) -> bool { self.fract() == 0.0 && self.is_finite() }
+                fn is_one(&self) -> bool { (*self - 1.0).abs() <= 1e-10 }
+                fn is_neg_one(&self) -> bool { (*self + 1.0).abs() <= 1e-10 }
+                fn powi(self, exponent: u64) -> Self {
+                    <$f>::powi(self, i32::try_from(exponent).unwrap_or(i32::MAX))
+                }
+                fn abs(&self) -> Self { <$f>::abs(*self) }
+                fn trunc(&self) -> Self { <$f>::trunc(*self) }
+            }
+        )*
+    };
+}
+
+impl_float_type_for_f!(f64, f32);
+
+/// The default float type used by the expression tree: [`Real`].
+pub type DefaultFloat = crate::numeric::Real;
