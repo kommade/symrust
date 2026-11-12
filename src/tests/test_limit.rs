@@ -80,3 +80,36 @@ fn finite_definite_integral() {
     let value = expr.integrate(Real::from_i64(0), Real::from_i64(3)).unwrap();
     assert_eq!(value, Real::from_i64(9));
 }
+
+#[test]
+fn zero_times_infinity_rewritten() {
+    super::setup();
+    // lim_{x->0+} x ln(x) = 0  (0 · ∞ rewritten to x / (1/ln x)).
+    let expr = create_expr!("x ln(x)").unwrap();
+    assert!(approx(expr.limit('x', Real::from_i64(0)), 0.0));
+}
+
+#[test]
+fn one_to_the_infinity_rewritten() {
+    super::setup();
+    // lim_{x->inf} (1 + 1/x)^x = e  (1^∞ rewritten via exp(g ln f)).
+    let expr = create_expr!("(1 + 1/x)^x").unwrap();
+    assert!(approx(expr.limit('x', Real::infinity()), std::f64::consts::E));
+}
+
+#[test]
+fn zero_to_the_zero_rewritten() {
+    super::setup();
+    // lim_{x->0+} x^x = 1  (0^0 rewritten via exp(g ln f)).
+    let expr = create_expr!("x^x").unwrap();
+    assert!(approx(expr.limit('x', Real::from_i64(0)), 1.0));
+}
+
+#[test]
+fn oscillation_is_reported_as_not_existing() {
+    super::setup();
+    // lim_{x->0} sin(1/x) does not exist (oscillates without a limit).
+    let expr = create_expr!("sin(1/x)").unwrap();
+    assert_eq!(expr.limit('x', Real::from_i64(0)), Limit::DoesNotExist);
+}
+

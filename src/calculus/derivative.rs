@@ -265,11 +265,6 @@ impl DerivativeInternal for Node {
             if matches!(op_node.token, Token::Operator(Op::Mul | Op::ImplicitMul)) {
                 let left = op_node.left.clone();
                 let right = op_node.right.clone();
-                debug_assert!(
-                    (left.inner.borrow().has_indp && right.inner.borrow().has_indp),
-                    "product_rule cannot be used for this node : {}, try applying linearity",
-                    borrowed
-                );
                 let result = add(
                     mul(left.clone(), right.clone().get_derivative()),
                     mul(left.get_derivative(), right),
@@ -288,10 +283,6 @@ impl DerivativeInternal for Node {
             if matches!(op_node.token, Token::Operator(Op::Div)) {
                 let left = op_node.left.clone();
                 let right = op_node.right.clone();
-                debug_assert!(
-                    (left.inner.borrow().has_indp && right.inner.borrow().has_indp),
-                    "quotient_rule cannot be used for this node, try applying linearity"
-                );
                 let result = div(
                     sub(
                         mul(left.clone().get_derivative(), right.clone()),

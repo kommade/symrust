@@ -22,7 +22,8 @@ use std::collections::HashMap;
 use crate::calculus::derivative::Derivative;
 use crate::calculus::expr::{Shape, shape};
 use crate::numeric::{FloatBridge, Real};
-use crate::parse::lexer::{Op, Token};
+use crate::parse::lexer::{Const, Func, Op, Token};
+use crate::structs::node::Node;
 
 use super::Expr;
 
@@ -99,7 +100,16 @@ impl Expr<Real> {
         // 1. Direct substitution.
         let direct = self.substitute_evaluate(var, toward);
         match &direct {
-            Some(value) if value.is_nan() => {}            // indeterminate: go deeper
+            Some(value) if value.is_nan() => {} // indeterminate: go deeper
+            // A directly finite value is normally the answer — *unless* the
+            // expression is a known indeterminate power like `1^∞`, which IEEE
+            // arithmetic silently evaluates to `1`. Fall through to the
+            // power handling below in that case.
+            Some(value)
+                if !value.is_infinite() && !self.is_indeterminate_form(var, toward) =>
+            {
+                return Limit::Finite(value.clone());
+            }
             Some(value) if value.is_infinite() => {
                 // Let L'Hôpital try to resolve forms like ∞-∞ first; otherwise
                 // report the divergence we directly observed.
@@ -114,21 +124,37 @@ impl Expr<Real> {
                     Limit::PosInfinity
                 };
             }
-            Some(value) => return Limit::Finite(value.clone()),
             None => {
                 // Still symbolic after substitution (should not happen once the
                 // variable is bound), fall through to probing.
             }
+            _ => {}
         }
 
-        // 2. L'Hôpital's rule for 0/0 or ∞/∞.
+        // 2. Normalise other indeterminate forms into a quotient, then retry.
+        //    This turns `0 · ∞` into `f / (1/g)` and `∞ − ∞` of fractions into a
+        //    single fraction, so the L'Hôpital step below can decide them.
+        if depth < MAX_LHOPITAL_DEPTH
+            && let Some(rewritten) = self.normalize(var, toward)
+        {
+            return rewritten.limit_inner(var, toward, depth + 1);
+        }
+
+        // 3. Indeterminate powers `f^g` (`0⁰`, `∞⁰`, `1^∞`): `exp(lim g ln f)`.
+        if depth < MAX_LHOPITAL_DEPTH
+            && let Some(result) = self.pow_limit(var, toward, depth)
+        {
+            return result;
+        }
+
+        // 4. L'Hôpital's rule for 0/0 or ∞/∞.
         if depth < MAX_LHOPITAL_DEPTH
             && let Some(result) = self.lhopital(var, toward, depth)
         {
             return result;
         }
 
-        // 3. Numeric probing.
+        // 5. Numeric probing.
         self.probe(var, toward)
     }
 
@@ -137,6 +163,20 @@ impl Expr<Real> {
         let mut values = HashMap::new();
         values.insert(var, toward.clone());
         self.evaluate_with(&values).value()
+    }
+
+    /// Whether `self` is an indeterminate form at the target that IEEE
+    /// arithmetic would mask (specifically the powers `0^0`, `∞^0`, `1^∞`).
+    fn is_indeterminate_form(&self, var: char, toward: &Real) -> bool {
+        let Shape::Operator(Token::Operator(Op::Pow), base, exponent) = shape(&self.tree) else {
+            return false;
+        };
+        let f = form(&Expr::from_node(base), var, toward);
+        let g = form(&Expr::from_node(exponent), var, toward);
+        matches!(
+            (f, g),
+            (Form::Zero, Form::Zero) | (Form::Infinite, Form::Zero) | (Form::One, Form::Infinite)
+        )
     }
 
     /// Apply L'Hôpital's rule if `self` is a `f / g` whose direct limit is
@@ -172,36 +212,79 @@ impl Expr<Real> {
         Some(quotient.limit_inner(var, toward, depth + 1))
     }
 
+    /// Rewrite a non-quotient indeterminate form into an equivalent expression
+    /// that L'Hôpital's rule can handle, or `None` when no rewrite applies.
+    ///
+    /// * `0 · ∞` → `f / (1/g)`
+    /// * `∞ − ∞` of two fractions → a single fraction over a common denominator
+    fn normalize(&self, var: char, toward: &Real) -> Option<Expr<Real>> {
+        use crate::calculus::expr::{div, mul, one, sub as sub_node};
+        match shape(&self.tree) {
+            Shape::Operator(Token::Operator(Op::Mul | Op::ImplicitMul), left, right) => {
+                // `0 · ∞` → `z / (1 / w)` where `z` is the zero factor.
+                let left_form = form(&Expr::from_node(left.clone()), var, toward);
+                let right_form = form(&Expr::from_node(right.clone()), var, toward);
+                let (zero, inf) = match (left_form, right_form) {
+                    (Form::Zero, Form::Infinite) => (left, right),
+                    (Form::Infinite, Form::Zero) => (right, left),
+                    _ => return None,
+                };
+                let reciprocal = div(one(), inf);
+                Some(Expr::from_node(div(zero, reciprocal)))
+            }
+            Shape::Operator(Token::Operator(Op::Sub), left, right) => {
+                // `∞ − ∞` of two fractions → `(p·s − r·q) / (q·s)`.
+                let a = Expr::from_node(left.clone());
+                let b = Expr::from_node(right.clone());
+                if !matches!(form(&a, var, toward), Form::Infinite)
+                    || !matches!(form(&b, var, toward), Form::Infinite)
+                {
+                    return None;
+                }
+                let (p, q) = as_fraction(&a)?;
+                let (r, s) = as_fraction(&b)?;
+                let numerator = sub_node(mul(p, s.clone()), mul(r, q.clone()));
+                let denominator = mul(q, s);
+                Some(Expr::from_node(div(numerator, denominator)))
+            }
+            _ => None,
+        }
+    }
+
     /// Sample a sequence approaching the target and classify the behaviour.
     fn probe(&self, var: char, toward: &Real) -> Limit<Real> {
         if toward.is_infinite() {
             // One sequence growing toward ±∞.
-            let result = self.probe_sequence(var, toward, true);
-            return result;
+            return self
+                .probe_sequence(var, toward, true)
+                .unwrap_or(Limit::DoesNotExist);
         }
-        // Finite target: probe from the right and from the left and require
-        // agreement for a finite two-sided limit.
+        // Finite target: probe from the right and from the left. A side that
+        // is entirely undefined (all NaN, e.g. `ln(x)` as `x -> 0⁻`) is treated
+        // as "no information" so a one-sided limit can still be reported.
         let right = self.probe_sequence(var, toward, false);
         let left = self.probe_left(toward, |point| self.substitute_evaluate(var, &point));
         match (right, left) {
-            (Limit::Finite(a), Limit::Finite(b)) => {
+            (Some(Limit::Finite(a)), Some(Limit::Finite(b))) => {
                 if settled(&a, &b) {
-                    // Prefer the average-ish value; both are close.
                     Limit::Finite(b)
                 } else {
                     Limit::DoesNotExist
                 }
             }
-            (Limit::PosInfinity, Limit::PosInfinity) => Limit::PosInfinity,
-            (Limit::NegInfinity, Limit::NegInfinity) => Limit::NegInfinity,
-            // Matching infinite/one-sided-disagreeing/infinite-vs-finite -> DNE.
+            (Some(Limit::PosInfinity), Some(Limit::PosInfinity)) => Limit::PosInfinity,
+            (Some(Limit::NegInfinity), Some(Limit::NegInfinity)) => Limit::NegInfinity,
+            // One side undefined: accept the other side's verdict.
+            (Some(result), None) | (None, Some(result)) => result,
+            // Both disagree / both undefined.
             _ => Limit::DoesNotExist,
         }
     }
 
     /// Probe with points that approach `toward` from the right (`c + 2^-n`),
-    /// or grow toward `±∞` when `toward` is infinite.
-    fn probe_sequence(&self, var: char, toward: &Real, at_infinity: bool) -> Limit<Real> {
+    /// or grow toward `±∞` when `toward` is infinite. Returns `None` when no
+    /// sample produced a usable (non-NaN) value.
+    fn probe_sequence(&self, var: char, toward: &Real, at_infinity: bool) -> Option<Limit<Real>> {
         let points = if at_infinity {
             growth_points(toward)
         } else {
@@ -215,31 +298,116 @@ impl Expr<Real> {
         &self,
         toward: &Real,
         mut sample: impl FnMut(Real) -> Option<Real>,
-    ) -> Limit<Real> {
+    ) -> Option<Limit<Real>> {
         let points = approach_points_left(toward);
         classify(points.into_iter().filter_map(sample))
+    }
+
+    /// Handle an indeterminate power `f^g` (`0⁰`, `∞⁰`, `1^∞`) exactly by taking
+    /// logarithms: `f^g = e^(g ln f)`, so `lim f^g = exp(lim g·ln f)`.
+    fn pow_limit(&self, var: char, toward: &Real, depth: usize) -> Option<Limit<Real>> {
+        use crate::calculus::expr::{function, mul};
+        let Shape::Operator(Token::Operator(Op::Pow), base, exponent) = shape(&self.tree) else {
+            return None;
+        };
+        let f = form(&Expr::from_node(base.clone()), var, toward);
+        let g = form(&Expr::from_node(exponent.clone()), var, toward);
+        let indeterminate = matches!(
+            (f, g),
+            (Form::Zero, Form::Zero) | (Form::Infinite, Form::Zero) | (Form::One, Form::Infinite)
+        );
+        if !indeterminate {
+            return None;
+        }
+        let logarithm = function(Func::Ln, base);
+        let product = mul(exponent, logarithm);
+        let exponent_limit = Expr::from_node(product).limit_inner(var, toward, depth + 1);
+        Some(match exponent_limit {
+            Limit::Finite(value) => Limit::Finite(value.exp()),
+            // e^(+∞) = +∞, e^(-∞) = 0.
+            Limit::PosInfinity => Limit::PosInfinity,
+            Limit::NegInfinity => Limit::Finite(Real::zero()),
+            Limit::DoesNotExist => Limit::DoesNotExist,
+        })
+    }
+}
+
+/// The class a subexpression's direct limit falls into, used to recognise
+/// indeterminate forms before rewriting them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Form {
+    /// The subexpression tends to `0`.
+    Zero,
+    /// The subexpression tends to `1` (relevant for `1^∞`).
+    One,
+    /// The subexpression tends to `±∞`.
+    Infinite,
+    /// Anything else (a finite non-zero value, or undetermined).
+    Other,
+}
+
+/// Classify the direct limit of `expr` at `var -> toward`.
+fn form(expr: &Expr<Real>, var: char, toward: &Real) -> Form {
+    match expr.substitute_evaluate(var, toward) {
+        Some(value) if value.is_zero() => Form::Zero,
+        Some(value) if value.is_one() => Form::One,
+        Some(value) if value.is_infinite() => Form::Infinite,
+        _ => Form::Other,
+    }
+}
+
+/// Split an expression of the shape `p / q` into its numerator and denominator
+/// nodes; returns `None` when it is not a top-level quotient.
+fn as_fraction(expr: &Expr<Real>) -> Option<(Node, Node)> {
+    match shape(&expr.tree) {
+        Shape::Operator(Token::Operator(Op::Div), numerator, denominator) => {
+            Some((numerator, denominator))
+        }
+        _ => None,
     }
 }
 
 /// Turn a sequence of sampled values (approaching the target) into a [`Limit`].
-fn classify(mut samples: impl Iterator<Item = Real>) -> Limit<Real> {
+///
+/// Tracks the running minimum and maximum magnitude of finite samples so that an
+/// oscillation whose envelope does not shrink (for example `sin(x)` as
+/// `x -> ∞`) is reported as [`Limit::DoesNotExist`] instead of being mistaken for
+/// a converged value. A finite answer is only returned once two consecutive
+/// samples settle; a lone sample is never trusted.
+fn classify(samples: impl Iterator<Item = Real>) -> Option<Limit<Real>> {
     let mut previous: Option<Real> = None;
     let mut growing_sign: Option<bool> = None;
     let mut last: Option<Real> = None;
+    let mut finite_count = 0usize;
+    let mut tail_min: Option<Real> = None;
+    let mut tail_max: Option<Real> = None;
+    let mut saw_any = false;
 
     for value in samples {
         if value.is_nan() {
             continue;
         }
+        saw_any = true;
         if value.is_infinite() {
             let negative = value.is_negative();
             match growing_sign {
-                Some(prev) if prev != negative => return Limit::DoesNotExist,
+                Some(prev) if prev != negative => return Some(Limit::DoesNotExist),
                 _ => growing_sign = Some(negative),
             }
             last = Some(value);
             continue;
         }
+
+        // Track the envelope of finite samples.
+        tail_min = Some(match tail_min {
+            Some(ref min) if min <= &value => min.clone(),
+            _ => value.clone(),
+        });
+        tail_max = Some(match tail_max {
+            Some(ref max) if max >= &value => max.clone(),
+            _ => value.clone(),
+        });
+
         let settled_now = previous.as_ref().is_some_and(|prev| settled(prev, &value));
         if let Some(prev) = &previous
             && !settled_now
@@ -248,36 +416,55 @@ fn classify(mut samples: impl Iterator<Item = Real>) -> Limit<Real> {
             growing_sign = Some(value.is_negative());
         }
         if settled_now {
-            // Converged.
-            return Limit::Finite(value);
+            // Two consecutive samples agree: converged.
+            return Some(Limit::Finite(value));
         }
+        finite_count += 1;
         previous = Some(value.clone());
         last = Some(value);
     }
 
+    if !saw_any {
+        // Every sample was NaN: no information from this side.
+        return None;
+    }
+
     if let Some(value) = last {
         if value.is_infinite() {
-            return if value.is_negative() {
+            return Some(if value.is_negative() {
                 Limit::NegInfinity
             } else {
                 Limit::PosInfinity
-            };
+            });
         }
         if let Some(negative) = growing_sign {
-            return if negative {
+            return Some(if negative {
                 Limit::NegInfinity
             } else {
                 Limit::PosInfinity
-            };
+            });
         }
-        // Only one finite sample and nothing to compare against: accept it.
-        if previous.is_some() {
-            return Limit::Finite(value);
+        // Oscillation detection: if the finite samples never settled and the
+        // envelope of the tail did not shrink, the limit does not exist.
+        if finite_count >= 3
+            && let (Some(min), Some(max)) = (&tail_min, &tail_max)
+            && !envelope_shrank(min, max, &value)
+        {
+            return Some(Limit::DoesNotExist);
         }
     }
 
-    Limit::DoesNotExist
+    Some(Limit::DoesNotExist)
 }
+
+/// Whether the spread between the tail's smallest and largest finite samples is
+/// small relative to their magnitude (i.e. the oscillation is not wide).
+fn envelope_shrank(min: &Real, max: &Real, scale: &Real) -> bool {
+    let spread = (max.clone() - min.clone()).abs();
+    let magnitude = Real::one() + scale.clone().abs();
+    spread <= Real::from_f64(1e-6) * magnitude
+}
+
 
 /// Points growing toward `±∞`: `±1, ±10, ±100, ...`.
 fn growth_points(toward: &Real) -> Vec<Real> {
@@ -292,25 +479,29 @@ fn growth_points(toward: &Real) -> Vec<Real> {
         .collect()
 }
 
-/// Points approaching a finite `toward` from the right: `c + 2^-n`.
+/// Points approaching a finite `toward` from the right: `c + 10^-n`.
+///
+/// Decades (rather than powers of two) keep the samples well separated so
+/// successive values do not coincidentally coincide (for example
+/// `x ln(x)` at `x = 2^-1` and `2^-2`), which would trip the settling test.
 fn approach_points(toward: &Real) -> Vec<Real> {
-    let mut step = 0.5_f64;
+    let mut step = 0.1_f64;
     (0..PROBE_STEPS)
         .map(|_| {
             let value = toward.clone() + Real::from_f64(step);
-            step *= 0.5;
+            step *= 0.1;
             value
         })
         .collect()
 }
 
-/// Points approaching a finite `toward` from the left: `c - 2^-n`.
+/// Points approaching a finite `toward` from the left: `c - 10^-n`.
 fn approach_points_left(toward: &Real) -> Vec<Real> {
-    let mut step = 0.5_f64;
+    let mut step = 0.1_f64;
     (0..PROBE_STEPS)
         .map(|_| {
             let value = toward.clone() - Real::from_f64(step);
-            step *= 0.5;
+            step *= 0.1;
             value
         })
         .collect()
