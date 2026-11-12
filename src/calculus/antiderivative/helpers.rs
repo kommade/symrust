@@ -8,10 +8,12 @@
 //! live in [`crate::calculus::expr`]; they are re-exported here so that the
 //! integration modules can keep talking to `helpers::*`.
 
-use arpfloat::{FP128, Float};
+use std::ops::Neg;
+
 use tracing::{debug, info};
 
 use crate::{
+    numeric::Real,
     parse::lexer::{Func, Op, Token},
     structs::node::{Node, NodeFunctions, NodeInner},
     utils::float_math::FloatMath,
@@ -27,7 +29,7 @@ pub(super) use crate::calculus::expr::*;
 pub(super) const SAMPLES: [f64; 5] = [0.3721, 1.2413, -0.9173, 2.6329, -2.1177];
 
 /// The coefficients `(a, b)` of an expression of the form `a x + b`.
-pub(super) fn linear_coefficients(node: &Node) -> Option<(Float, Float)> {
+pub(super) fn linear_coefficients(node: &Node) -> Option<(Real, Real)> {
     let (slope, intercept) = linear_coefficients_inner(node, 0)?;
     if slope.is_zero() {
         None
@@ -36,12 +38,12 @@ pub(super) fn linear_coefficients(node: &Node) -> Option<(Float, Float)> {
     }
 }
 
-fn linear_coefficients_inner(node: &Node, depth: usize) -> Option<(Float, Float)> {
+fn linear_coefficients_inner(node: &Node, depth: usize) -> Option<(Real, Real)> {
     if depth > 64 {
         return None;
     }
-    let zero_value = Float::zero(FP128, false);
-    let one_value = Float::one(FP128, false);
+    let zero_value = Real::zero();
+    let one_value = Real::one();
     match shape(node) {
         Shape::Operand(Token::Indp(_)) => Some((one_value, zero_value)),
         Shape::Operand(_) => {
@@ -99,11 +101,11 @@ fn linear_coefficients_inner(node: &Node, depth: usize) -> Option<(Float, Float)
 }
 
 /// Replace every occurrence of the independent variable with `value`.
-pub(super) fn substitute(node: &Node, value: &Float) -> Node {
+pub(super) fn substitute(node: &Node, value: &Real) -> Node {
     substitute_inner(node, value, 0)
 }
 
-fn substitute_inner(node: &Node, value: &Float, depth: usize) -> Node {
+fn substitute_inner(node: &Node, value: &Real, depth: usize) -> Node {
     if depth > 256 {
         return node.clone();
     }
@@ -126,7 +128,7 @@ fn substitute_inner(node: &Node, value: &Float, depth: usize) -> Node {
     }
 }
 
-pub(super) fn evaluate_at(node: &Node, value: &Float) -> Option<Float> {
+pub(super) fn evaluate_at(node: &Node, value: &Real) -> Option<Real> {
     numeric_evaluate(&substitute(node, value))
 }
 
@@ -137,12 +139,12 @@ pub(super) fn proportional_to(
     divisors: &[Node],
     skip: Option<usize>,
     target: &Node,
-) -> Option<Float> {
-    let mut ratio: Option<Float> = None;
+) -> Option<Real> {
+    let mut ratio: Option<Real> = None;
     let mut agreements = 0;
     for sample in SAMPLES {
         let point = float_from(sample);
-        let mut value = Float::one(FP128, false);
+        let mut value = Real::one();
         let mut valid = true;
         for (index, factor) in factors.iter().enumerate() {
             if Some(index) == skip {
@@ -310,7 +312,7 @@ fn simplify_deep_inner(node: &Node, depth: usize) -> Node {
             if let Shape::Operator(Token::Operator(Op::Pow), base, exponent) = shape(&simplified) {
                 if let Shape::Operator(Token::Function(Func::Ln), _, argument) = shape(&exponent) {
                     if constant_value(&base)
-                        .is_some_and(|value| value.float_equal(&Float::e(FP128)))
+                        .is_some_and(|value| value.float_equal(&Real::e()))
                     {
                         return argument;
                     }
@@ -323,7 +325,7 @@ fn simplify_deep_inner(node: &Node, depth: usize) -> Node {
 }
 
 /// The value of a node that is a plain numeric literal.
-pub(super) fn numeric_value(node: &Node) -> Option<Float> {
+pub(super) fn numeric_value(node: &Node) -> Option<Real> {
     match shape(node) {
         Shape::Operand(Token::Number(_)) | Shape::Operand(Token::Float(_)) => constant_value(node),
         _ => None,
@@ -336,7 +338,7 @@ fn normalise_product(node: &Node) -> Node {
     if product.numer.len() < 2 && product.denom.is_empty() {
         return node.clone();
     }
-    let mut factor = Float::one(FP128, false);
+    let mut factor = Real::one();
     let mut numer = Vec::new();
     let mut denom = Vec::new();
     for item in product.numer {
@@ -369,7 +371,7 @@ fn normalise_product(node: &Node) -> Node {
 }
 
 /// Split a factor into its numeric coefficient and its symbolic part.
-fn split_numeric(node: &Node) -> (Float, Option<Node>) {
+fn split_numeric(node: &Node) -> (Real, Option<Node>) {
     if let Some(value) = numeric_value(node) {
         return (value, None);
     }
@@ -379,7 +381,7 @@ fn split_numeric(node: &Node) -> (Float, Option<Node>) {
             return (value.neg(), rest);
         }
     }
-    (Float::one(FP128, false), Some(node.clone()))
+    (Real::one(), Some(node.clone()))
 }
 
 /// Check a candidate antiderivative against the integrand.
@@ -411,7 +413,7 @@ pub(super) fn verify(integrand: &Node, candidate: &Node) -> bool {
             continue;
         }
         let difference = (derivative.clone() - expected.clone()).abs();
-        let scale = Float::one(FP128, false) + expected.abs();
+        let scale = Real::one() + expected.abs();
         if difference > tolerance.clone() * scale {
             tracing::Span::current().record("result", String::from("rejected"));
             info!(

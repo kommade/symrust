@@ -827,7 +827,7 @@ impl Poly {
             Shape::Operand(Token::Indp(_)) => Some(Self::variable()),
             Shape::Operand(_) => {
                 let value = helpers::constant_value(node)?;
-                Some(Self::constant(Rat::from_float(&value)?))
+                Some(Self::constant(Rat::from_real(&value)?))
             }
             Shape::Operator(token, left, right) => match token {
                 Token::Operator(Op::Add) => {

@@ -1,11 +1,11 @@
 //! Integration of powers and products of trigonometric functions.
 
-use arpfloat::{FP128, Float};
 use tracing::{debug, info};
 
 use super::Integrator;
 use super::helpers::{self, Shape};
 use crate::algebra::{polynomial::Poly, rational::Rat};
+use crate::numeric::Real;
 use crate::{
     parse::lexer::{Func, Op, Token},
     structs::node::{Node, NodeFunctions},
@@ -103,7 +103,7 @@ fn collect_trig_powers(
 }
 
 fn mul_rat(node: Node, value: Rat) -> Node {
-    helpers::scale(node, value.to_float())
+    helpers::scale(node, value.to_real())
 }
 
 fn poly_in_node(base: &Node, poly: &Poly) -> Node {
@@ -154,7 +154,7 @@ fn integrate_trig(integrator: &mut Integrator, node: &Node) -> Option<Node> {
     }
     let mut powers = Vec::new();
     let mut others = Vec::new();
-    let mut constant = Float::one(FP128, false);
+    let mut constant = Real::one();
     for factor in &product.numer {
         if let Some(value) = helpers::constant_value(factor) {
             constant = constant * value;
@@ -360,7 +360,7 @@ fn integrate_monomials(
     None
 }
 
-fn sin_cos(m: i64, n: i64, arg: &Node, variable: &Node, slope: &Float) -> Option<Node> {
+fn sin_cos(m: i64, n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<Node> {
     if m < 0 || n < 0 {
         return None;
     }
@@ -411,7 +411,7 @@ fn sin_cos(m: i64, n: i64, arg: &Node, variable: &Node, slope: &Float) -> Option
     None
 }
 
-fn tan_power(n: i64, arg: &Node, variable: &Node, slope: &Float) -> Option<Node> {
+fn tan_power(n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<Node> {
     let tangent = helpers::function(Func::Tan, arg.clone());
     match n {
         0 => Some(variable.clone()),
@@ -432,7 +432,7 @@ fn tan_power(n: i64, arg: &Node, variable: &Node, slope: &Float) -> Option<Node>
     }
 }
 
-fn cot_power(n: i64, arg: &Node, variable: &Node, slope: &Float) -> Option<Node> {
+fn cot_power(n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<Node> {
     let cotangent = helpers::function(Func::Cot, arg.clone());
     match n {
         0 => Some(variable.clone()),
@@ -453,7 +453,7 @@ fn cot_power(n: i64, arg: &Node, variable: &Node, slope: &Float) -> Option<Node>
     }
 }
 
-fn sec_power(n: i64, arg: &Node, variable: &Node, slope: &Float) -> Option<Node> {
+fn sec_power(n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<Node> {
     let secant = helpers::function(Func::Sec, arg.clone());
     let tangent = helpers::function(Func::Tan, arg.clone());
     match n {
@@ -481,7 +481,7 @@ fn sec_power(n: i64, arg: &Node, variable: &Node, slope: &Float) -> Option<Node>
     }
 }
 
-fn csc_power(n: i64, arg: &Node, variable: &Node, slope: &Float) -> Option<Node> {
+fn csc_power(n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<Node> {
     let cosecant = helpers::function(Func::Csc, arg.clone());
     let cotangent = helpers::function(Func::Cot, arg.clone());
     match n {
@@ -509,7 +509,7 @@ fn csc_power(n: i64, arg: &Node, variable: &Node, slope: &Float) -> Option<Node>
     }
 }
 
-fn tan_sec(m: i64, n: i64, arg: &Node, variable: &Node, slope: &Float) -> Option<Node> {
+fn tan_sec(m: i64, n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<Node> {
     let tangent = helpers::function(Func::Tan, arg.clone());
     let secant = helpers::function(Func::Sec, arg.clone());
     if n % 2 == 0 {
@@ -544,14 +544,14 @@ fn tan_sec(m: i64, n: i64, arg: &Node, variable: &Node, slope: &Float) -> Option
         }
         let exponent = n + 2 * degree as i64;
         terms.push(mul_rat(
-            sec_power(exponent, arg, variable, &Float::one(FP128, false))?,
+            sec_power(exponent, arg, variable, &Real::one())?,
             *coefficient,
         ));
     }
     Some(helpers::divide_by(helpers::sum(terms), slope.clone()))
 }
 
-fn cot_csc(m: i64, n: i64, arg: &Node, variable: &Node, slope: &Float) -> Option<Node> {
+fn cot_csc(m: i64, n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<Node> {
     let cotangent = helpers::function(Func::Cot, arg.clone());
     let cosecant = helpers::function(Func::Csc, arg.clone());
     if n % 2 == 0 {
@@ -584,7 +584,7 @@ fn cot_csc(m: i64, n: i64, arg: &Node, variable: &Node, slope: &Float) -> Option
         }
         let exponent = n + 2 * degree as i64;
         terms.push(mul_rat(
-            csc_power(exponent, arg, variable, &Float::one(FP128, false))?,
+            csc_power(exponent, arg, variable, &Real::one())?,
             *coefficient,
         ));
     }

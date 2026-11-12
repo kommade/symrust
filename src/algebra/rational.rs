@@ -193,6 +193,11 @@ impl Rat {
         Self::from_f64(value.as_f64())
     }
 
+    /// Recover a rational from the crate's [`Real`](crate::numeric::Real) float type.
+    pub(crate) fn from_real(value: &crate::numeric::Real) -> Option<Self> {
+        Self::from_float(value.as_inner())
+    }
+
     /// Recover a *simple* rational (small denominator) from a float.
     ///
     /// Used for display purposes: `1/3` is nicer than `0.3333333333333333`.
@@ -327,6 +332,11 @@ impl Rat {
 
     pub(crate) fn to_float(&self) -> arpfloat::Float {
         arpfloat::Float::from_f64(self.to_f64()).cast(arpfloat::FP128)
+    }
+
+    /// The value as the crate's [`Real`](crate::numeric::Real) float type.
+    pub(crate) fn to_real(&self) -> crate::numeric::Real {
+        crate::numeric::Real::from_f64(self.to_f64())
     }
 
     /// The square root of this value if it is a perfect square.

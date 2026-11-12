@@ -6,7 +6,7 @@
 //! builders from [`crate::algebra::expr`]. No technique decides what to do
 //! with that structure here.
 
-use arpfloat::{FP128, Float};
+use std::ops::Neg;
 
 use crate::numeric::Real;
 use crate::{
@@ -21,8 +21,8 @@ pub(crate) use crate::algebra::expr::{
     add, div, float, mul, multiply_by_rational, number, one, pow, sqrt as sqrt_arg, sub, sum, zero,
 };
 
-pub(crate) fn float_from(value: f64) -> Float {
-    Float::from_f64(value).cast(FP128)
+pub(crate) fn float_from(value: f64) -> Real {
+    Real::from_f64(value)
 }
 
 pub(crate) fn variable(letter: char) -> Node {
@@ -76,7 +76,7 @@ pub(crate) fn subtract(left: Node, right: Node) -> Node {
 }
 
 /// Divide `node` by a constant, keeping the result readable.
-pub(crate) fn divide_by(node: Node, divisor: Float) -> Node {
+pub(crate) fn divide_by(node: Node, divisor: Real) -> Node {
     if divisor.is_zero() || divisor.is_one() {
         return node;
     }
@@ -86,16 +86,16 @@ pub(crate) fn divide_by(node: Node, divisor: Float) -> Node {
     if divisor.get_sign() {
         return divide_by(node.negate(), divisor.neg());
     }
-    if let Some(value) = crate::algebra::rational::Rat::from_float_simple(&divisor) {
+    if let Some(value) = crate::algebra::rational::Rat::from_float_simple(divisor.as_inner()) {
         if let Some(inverse) = value.recip() {
             return multiply_by_rational(node, inverse);
         }
     }
-    multiply_by(node, Float::one(FP128, false) / divisor)
+    multiply_by(node, Real::one() / divisor)
 }
 
 /// Multiply `node` by a constant, keeping the result readable.
-pub(crate) fn multiply_by(node: Node, factor: Float) -> Node {
+pub(crate) fn multiply_by(node: Node, factor: Real) -> Node {
     if factor.is_zero() {
         return zero();
     }
@@ -105,16 +105,16 @@ pub(crate) fn multiply_by(node: Node, factor: Float) -> Node {
     if factor.is_neg_one() {
         return node.negate();
     }
-    match crate::algebra::rational::Rat::from_float_simple(&factor) {
+    match crate::algebra::rational::Rat::from_float_simple(factor.as_inner()) {
         Some(value) if value.is_one() => node,
         Some(value) if !value.is_zero() => multiply_by_rational(node, value),
-        _ => node.distribute_constant(factor.into(), crate::structs::node::MulType::OpMul),
+        _ => node.distribute_constant(factor, crate::structs::node::MulType::OpMul),
     }
 }
 
 /// Multiply `node` by a constant, folding the constant into any numeric
 /// factor the expression already has.
-pub(crate) fn scale(node: Node, factor: Float) -> Node {
+pub(crate) fn scale(node: Node, factor: Real) -> Node {
     if factor.is_zero() {
         return zero();
     }
@@ -168,7 +168,7 @@ pub(crate) fn is_constant(node: &Node) -> bool {
     !node.inner.borrow().has_indp
 }
 
-pub(crate) fn constant_value(node: &Node) -> Option<Float> {
+pub(crate) fn constant_value(node: &Node) -> Option<Real> {
     if node.inner.borrow().has_indp {
         return None;
     }
@@ -180,20 +180,20 @@ pub(crate) fn constant_value(node: &Node) -> Option<Float> {
 /// [`NodeInner::evaluate`] deliberately leaves functions symbolic so that the
 /// simplifier does not turn `ln(2)` into a float; the calculus techniques need
 /// real numbers for their proportional checks and for verification.
-pub(crate) fn numeric_evaluate(node: &Node) -> Option<Float> {
+pub(crate) fn numeric_evaluate(node: &Node) -> Option<Real> {
     numeric_evaluate_inner(node, 0)
 }
 
-fn numeric_evaluate_inner(node: &Node, depth: usize) -> Option<Float> {
+fn numeric_evaluate_inner(node: &Node, depth: usize) -> Option<Real> {
     if depth > 256 {
         return None;
     }
-    let one = || Float::one(FP128, false);
+    let one = Real::one;
     Some(match shape(node) {
         Shape::Operand(token) => match token {
-            Token::Number(value) => Float::from_i64(FP128, value),
-            Token::Float(value) => value.into(),
-            Token::Constant(constant) => constant.get_value::<Real>().into(),
+            Token::Number(value) => Real::from_i64(value),
+            Token::Float(value) => value,
+            Token::Constant(constant) => constant.get_value::<Real>(),
             _ => return None,
         },
         Shape::Operator(token, left, right) => match token {
@@ -221,8 +221,8 @@ fn numeric_evaluate_inner(node: &Node, depth: usize) -> Option<Float> {
                     Func::Acos => argument.acos(),
                     Func::Atan => argument.atan(),
                     Func::Sqrt => argument.sqrt(),
-                    Func::Ln => argument.log(),
-                    Func::Log(base) => argument.log() / Float::from(base.clone()).log(),
+                    Func::Ln => argument.ln(),
+                    Func::Log(base) => argument.ln() / base.ln(),
                 }
             }
             _ => return None,
@@ -365,12 +365,12 @@ fn collect_terms(node: &Node, negated: bool, terms: &mut Vec<(bool, Node)>, dept
 ///
 /// Returns the constant multiplier (if one was found) and the remaining
 /// expression.
-pub(crate) fn pull_out_constant(node: &Node) -> (Option<Float>, Node) {
+pub(crate) fn pull_out_constant(node: &Node) -> (Option<Real>, Node) {
     let product = flatten_product(node);
     if product.denom.is_empty() && product.numer.len() < 2 && is_constant(node) {
         return (None, node.clone());
     }
-    let mut multiplier = Float::one(FP128, false);
+    let mut multiplier = Real::one();
     let mut found = false;
     let mut numer = Vec::with_capacity(product.numer.len());
     let mut denom = Vec::with_capacity(product.denom.len());

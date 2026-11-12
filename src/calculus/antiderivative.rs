@@ -42,13 +42,14 @@ mod trig;
 use std::{
     error::Error,
     fmt::Display,
+    ops::Neg,
     panic::AssertUnwindSafe,
     time::{Duration, Instant},
 };
 
-use arpfloat::{FP128, Float};
 use tracing::{debug, info};
 
+use crate::numeric::Real;
 use crate::{
     algebra,
     parse::lexer::{Func, Op, Token},
@@ -585,7 +586,7 @@ impl Integrator {
                 describe(&helpers::pow(base.clone(), exponent.clone())),
                 chain_rule_note(&exponent, &slope)
             );
-            let is_e = constant.float_equal(&Float::e(FP128));
+            let is_e = constant.float_equal(&Real::e());
             let current = helpers::pow(base, exponent);
             if is_e {
                 if slope.is_one() {
@@ -614,7 +615,7 @@ impl Integrator {
             );
             return Some(helpers::divide_by(helpers::function(Func::Ln, base), slope));
         }
-        let new_exponent = exponent_value.clone() + Float::one(FP128, false);
+        let new_exponent = exponent_value.clone() + Real::one();
         if new_exponent.is_zero() {
             return None;
         }
@@ -681,7 +682,7 @@ impl Integrator {
                 if !power.float_equal(&float_from(-0.5)) {
                     return None;
                 }
-                (Float::one(FP128, false), base)
+                (Real::one(), base)
             }
             Shape::Operator(Token::Operator(Op::Div), numerator, denominator) => {
                 let coefficient = helpers::constant_value(&numerator)?;
@@ -743,14 +744,14 @@ impl Integrator {
     fn find_quadratic_sqrt(&self, node: &Node) -> Option<Node> {
         let (coefficient, argument) = match helpers::shape(node) {
             Shape::Operator(Token::Function(Func::Sqrt), _, argument) => {
-                (Float::one(FP128, false), argument)
+                (Real::one(), argument)
             }
             Shape::Operator(Token::Operator(Op::Pow), base, exponent) => {
                 let power = helpers::constant_value(&exponent)?;
                 if !power.float_equal(&float_from(0.5)) {
                     return None;
                 }
-                (Float::one(FP128, false), base)
+                (Real::one(), base)
             }
             _ => return None,
         };
@@ -836,7 +837,7 @@ impl Integrator {
         if slope.is_zero() {
             return None;
         }
-        let denominator = Float::one(FP128, false) + slope.clone() * slope.clone();
+        let denominator = Real::one() + slope.clone() * slope.clone();
         if denominator.is_zero() {
             return None;
         }
@@ -863,8 +864,8 @@ impl Integrator {
         if !product.denom.is_empty() {
             return None;
         }
-        let mut exponential: Option<(Node, Float)> = None;
-        let mut trigonometric: Option<(Func, Node, Float, Float)> = None;
+        let mut exponential: Option<(Node, Real)> = None;
+        let mut trigonometric: Option<(Func, Node, Real, Real)> = None;
         for factor in &product.numer {
             if helpers::is_constant(factor) {
                 continue;
@@ -879,7 +880,7 @@ impl Integrator {
                     if exponential.is_some() {
                         return None;
                     }
-                    exponential = Some((factor.clone(), slope * constant.log()));
+                    exponential = Some((factor.clone(), slope * constant.ln()));
                 }
                 Shape::Operator(Token::Function(func), _, arg)
                     if matches!(func, Func::Sin | Func::Cos) =>
@@ -977,7 +978,7 @@ impl Integrator {
                         }
                         if let (Some(inner), is_e) = (
                             helpers::differentiate(&exponent),
-                            constant.float_equal(&Float::e(FP128)),
+                            constant.float_equal(&Real::e()),
                         ) {
                             if let Some(ratio) = ratio_of(&inner) {
                                 let antiderivative = if is_e {
@@ -1003,7 +1004,7 @@ impl Integrator {
                             let antiderivative = if exponent_value.is_neg_one() {
                                 helpers::function(Func::Ln, base)
                             } else {
-                                let new_exponent = exponent_value + Float::one(FP128, false);
+                                let new_exponent = exponent_value + Real::one();
                                 if new_exponent.is_zero() {
                                     continue;
                                 }
@@ -1313,7 +1314,7 @@ fn record_option(result: Option<&Node>) -> bool {
 
 /// The ` with u = ... and du = ... dx` suffix used when a linear argument
 /// requires the chain rule.
-fn chain_rule_note(argument: &Node, slope: &Float) -> String {
+fn chain_rule_note(argument: &Node, slope: &Real) -> String {
     if slope.is_one() {
         String::new()
     } else {
@@ -1342,7 +1343,7 @@ fn describe_signed(node: &Node) -> String {
 ///
 /// Handles `ln(x)`, `k ln(x)`, `a ln(x) + b`, `a ln(x) - b`, `b + a ln(x)`,
 /// and negations thereof. Returns `None` for any other shape.
-fn log_argument_slope(node: &Node, depth: usize) -> Option<Float> {
+fn log_argument_slope(node: &Node, depth: usize) -> Option<Real> {
     if depth > 64 {
         return None;
     }
@@ -1350,7 +1351,7 @@ fn log_argument_slope(node: &Node, depth: usize) -> Option<Float> {
         // `ln(x)` on its own contributes a slope of 1.
         Shape::Operator(Token::Function(Func::Ln), _, argument) => {
             if matches!(helpers::shape(&argument), Shape::Operand(Token::Indp(_))) {
-                Some(Float::one(FP128, false))
+                Some(Real::one())
             } else {
                 None
             }
@@ -1395,7 +1396,8 @@ fn log_argument_slope(node: &Node, depth: usize) -> Option<Float> {
 
 /// Format a constant for the logs, preferring exact fractions over the long
 /// decimal expansion of a float.
-fn describe_number(value: &Float) -> String {    if let Some(rational) = algebra::rational::Rat::from_float_simple(value) {
+fn describe_number(value: &Real) -> String {
+    if let Some(rational) = algebra::rational::Rat::from_float_simple(value.as_inner()) {
         let (numerator, denominator) = rational.parts();
         if denominator == 1 {
             return numerator.to_string();
