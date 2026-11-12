@@ -7,6 +7,7 @@ pub mod algebra;
 pub mod calculus;
 pub mod evaluate;
 pub mod parse;
+pub mod real;
 pub mod structs;
 #[cfg(test)]
 mod tests;
