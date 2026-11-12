@@ -47,6 +47,133 @@ impl<T> Node<T> {
     }
 }
 
+/// Public constructors for building an expression tree over an arbitrary leaf
+/// float type `T`.
+///
+/// These are thin, safe wrappers over the crate's internal node constructors and
+/// form the supported way for external callers to build a `Node<T>` (and, via
+/// [`Expr<T>`][crate::structs::expr::Expr], an expression) of their chosen
+/// number type. `T` must satisfy [`FloatType`] so the tree can be displayed and
+/// (where applicable) evaluated.
+impl<T: FloatType + Display> Node<T> {
+    /// An empty (placeholder) node.
+    #[must_use]
+    pub fn empty() -> Self {
+        NodeInner::empty()
+    }
+    /// The constant `0` node.
+    #[must_use]
+    pub fn zero() -> Self {
+        NodeInner::zero()
+    }
+    /// The constant `1` node.
+    #[must_use]
+    pub fn one() -> Self {
+        NodeInner::one()
+    }
+    /// A float-literal leaf, e.g. `3.5`.
+    #[must_use]
+    pub fn from_float(value: T) -> Self {
+        NodeInner::from_float(value).wrap()
+    }
+    /// An integer-literal leaf, e.g. `3`.
+    #[must_use]
+    pub fn from_number(value: i64) -> Self {
+        NodeInner::from_number(value).wrap()
+    }
+    /// A named-constant leaf (`π` or `e`).
+    #[must_use]
+    pub fn from_constant(constant: Const) -> Self {
+        NodeInner::from_constant(constant).wrap()
+    }
+    /// A free-variable leaf such as `y`.
+    #[must_use]
+    pub fn var(name: char) -> Self {
+        NodeInner::operand(Token::from_var(name)).wrap()
+    }
+    /// The independent-variable leaf (defaults to `x`).
+    #[must_use]
+    pub fn independent(name: char) -> Self {
+        NodeInner::operand(Token::Indp(name)).wrap()
+    }
+    /// A binary operation node, e.g. `left + right`.
+    #[must_use]
+    pub fn operate(op: Op, left: Self, right: Self) -> Self {
+        NodeInner::from_operation(op, left, right)
+    }
+    /// A function-application node, e.g. `sin(node)`.
+    #[must_use]
+    pub fn apply(func: Func<T>, node: Self) -> Self {
+        NodeInner::from_function(func, node)
+    }
+    /// `true` when this node is a binary operation of the given kind.
+    #[must_use]
+    pub fn is_operator_type(&self, op: Op) -> bool {
+        self.inner.borrow().is_operator_type(op)
+    }
+    /// `true` when this node is an empty placeholder.
+    #[must_use]
+    pub fn is_empty_node(&self) -> bool {
+        self.inner.borrow().is_empty()
+    }
+    /// `true` when this node is a leaf operand (number, float, variable, …).
+    #[must_use]
+    pub fn is_operand(&self) -> bool {
+        self.inner.borrow().is_operand()
+    }
+}
+
+impl<T: FloatType + Display> Node<T> {
+    /// Convert a concrete `Node<Real>` (as produced by the parser) into a
+    /// `Node<T>` by re-typing every float leaf (`Token::Float` and
+    /// `Func::Log`) through [`FloatBridge`]. Symbolic structure is preserved
+    /// exactly; only the numeric leaves change type.
+    ///
+    /// This is what lets [`Expr::<T>::parse`][crate::structs::expr::Expr::parse]
+    /// build a tree of a caller-chosen number type from a string.
+    #[must_use]
+    pub fn from_real(node: &Node<Real>) -> Self {
+        /// Re-type a Real-valued token into this tree's leaf type `T`.
+        fn convert_token<T: FloatType + Display>(token: &Token<Real>) -> Token<T> {
+            use crate::numeric::FloatBridge;
+            match token {
+                Token::Function(func) => Token::Function(match func {
+                    Func::Sin => Func::Sin,
+                    Func::Cos => Func::Cos,
+                    Func::Tan => Func::Tan,
+                    Func::Sec => Func::Sec,
+                    Func::Csc => Func::Csc,
+                    Func::Cot => Func::Cot,
+                    Func::Asin => Func::Asin,
+                    Func::Acos => Func::Acos,
+                    Func::Atan => Func::Atan,
+                    Func::Sqrt => Func::Sqrt,
+                    Func::Ln => Func::Ln,
+                    Func::Log(base) => Func::Log(T::from_float(base.clone().into())),
+                }),
+                Token::Operator(op) => Token::Operator(op.clone()),
+                Token::Constant(c) => Token::Constant(c.clone()),
+                Token::Number(n) => Token::Number(*n),
+                Token::Float(value) => Token::Float(T::from_float(value.clone().into())),
+                Token::Indp(c) => Token::Indp(*c),
+                Token::Var(c) => Token::Var(*c),
+                Token::LPar => Token::LPar,
+                Token::RPar => Token::RPar,
+            }
+        }
+        let borrow = node.inner.borrow();
+        match &borrow.value {
+            NodeValue::Operand(token) => NodeInner::operand(convert_token::<T>(token)).wrap(),
+            NodeValue::Operator(op_node) => {
+                let left = Self::from_real(&op_node.left);
+                let right = Self::from_real(&op_node.right);
+                NodeInner::operator(convert_token::<T>(&op_node.token), left, right).wrap()
+            }
+            NodeValue::Empty => NodeInner::empty(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum NodeError {
     NotOperator,
@@ -106,6 +233,43 @@ impl<T: FloatType + Display> NodeInner<T> {
     }
     pub(crate) const fn is_empty(&self) -> bool {
         matches!(&self.value, NodeValue::Empty)
+    }
+    pub(crate) const fn is_op_node(&self) -> bool {
+        matches!(&self.value, NodeValue::Operator(_))
+    }
+    pub(crate) const fn is_operator(&self) -> bool {
+        if let NodeValue::Operator(op_node) = &self.value {
+            matches!(op_node.token, Token::Operator(_))
+        } else {
+            false
+        }
+    }
+    /// Whether this node is a binary operation of the given kind.
+    pub fn is_operator_type(&self, op: Op) -> bool {
+        if let NodeValue::Operator(op_node) = &self.value {
+            if let Token::Operator(token) = &op_node.token {
+                *token == op
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
+    pub(crate) const fn is_operand(&self) -> bool {
+        matches!(&self.value, NodeValue::Operand(_))
+    }
+    pub(crate) fn is_log(&self) -> bool {
+        match &self.value {
+            NodeValue::Operator(op_node) => {
+                if let Token::Function(func) = &op_node.token {
+                    matches!(func, Func::Log(_))
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
     }
 }
 
@@ -1019,42 +1183,6 @@ impl NodeInner {
         Some(result)
     }
 
-    pub(crate) const fn is_op_node(&self) -> bool {
-        matches!(&self.value, NodeValue::Operator(_))
-    }
-    pub(crate) const fn is_operator(&self) -> bool {
-        if let NodeValue::Operator(op_node) = &self.value {
-            matches!(op_node.token, Token::Operator(_))
-        } else {
-            false
-        }
-    }
-    pub fn is_operator_type(&self, op: Op) -> bool {
-        if let NodeValue::Operator(op_node) = &self.value {
-            if let Token::Operator(token) = &op_node.token {
-                *token == op
-            } else {
-                false
-            }
-        } else {
-            false
-        }
-    }
-    pub(crate) const fn is_operand(&self) -> bool {
-        matches!(&self.value, NodeValue::Operand(_))
-    }
-    pub(crate) const fn is_log(&self) -> bool {
-        match &self.value {
-            NodeValue::Operator(op_node) => {
-                if let Token::Function(func) = &op_node.token {
-                    matches!(func, Func::Log(_))
-                } else {
-                    false
-                }
-            }
-            _ => false,
-        }
-    }
     pub(crate) fn is_fn(&self) -> bool {
         match &self.value {
             NodeValue::Operator(op_node) => match op_node.token {
@@ -1203,62 +1331,62 @@ where
     //fn substitute(self, value: Real) -> Real;
 }
 
-impl NodeOperations<Self> for Node {
+impl<T: FloatType + Display> NodeOperations<Self> for Node<T> {
     fn add(self, other: Self) -> Self {
-        NodeInner::<Real>::from_operation(Op::Add, self, other)
+        NodeInner::from_operation(Op::Add, self, other)
     }
     fn sub(self, other: Self) -> Self {
-        NodeInner::<Real>::from_operation(Op::Sub, self, other)
+        NodeInner::from_operation(Op::Sub, self, other)
     }
     fn mul(self, other: Self) -> Self {
-        NodeInner::<Real>::from_operation(Op::Mul, self, other)
+        NodeInner::from_operation(Op::Mul, self, other)
     }
     fn impl_mul(self, other: Self) -> Self {
-        NodeInner::<Real>::from_operation(Op::ImplicitMul, self, other)
+        NodeInner::from_operation(Op::ImplicitMul, self, other)
     }
     fn div(self, other: Self) -> Self {
-        NodeInner::<Real>::from_operation(Op::Div, self, other)
+        NodeInner::from_operation(Op::Div, self, other)
     }
     fn pow(self, other: Self) -> Self {
-        NodeInner::<Real>::from_operation(Op::Pow, self, other)
+        NodeInner::from_operation(Op::Pow, self, other)
     }
 }
 
-impl NodeOperations<i64> for Node {
+impl<T: FloatType + Display> NodeOperations<i64> for Node<T> {
     fn add(self, other: i64) -> Self {
         if other == 0 {
             self
         } else if other == 1 {
-            self.add(NodeInner::<Real>::one())
+            self.add(NodeInner::one())
         } else {
-            self.add(NodeInner::<Real>::from_number(other).wrap())
+            self.add(NodeInner::from_number(other).wrap())
         }
     }
     fn sub(self, other: i64) -> Self {
         if other == 0 {
             self
         } else if other == 1 {
-            self.sub(NodeInner::<Real>::one())
+            self.sub(NodeInner::one())
         } else {
-            self.sub(NodeInner::<Real>::from_number(other).wrap())
+            self.sub(NodeInner::from_number(other).wrap())
         }
     }
     fn mul(self, other: i64) -> Self {
         if other == 0 {
-            NodeInner::<Real>::zero()
+            NodeInner::zero()
         } else if other == 1 {
             self
         } else {
-            NodeInner::<Real>::from_number(other).wrap().mul(self)
+            NodeInner::from_number(other).wrap().mul(self)
         }
     }
     fn impl_mul(self, other: i64) -> Self {
         if other == 0 {
-            NodeInner::<Real>::zero()
+            NodeInner::zero()
         } else if other == 1 {
             self
         } else {
-            NodeInner::<Real>::from_number(other).wrap().impl_mul(self)
+            NodeInner::from_number(other).wrap().impl_mul(self)
         }
     }
     fn div(self, other: i64) -> Self {
@@ -1267,16 +1395,16 @@ impl NodeOperations<i64> for Node {
         } else if other == 1 {
             self
         } else {
-            NodeInner::<Real>::from_number(other).wrap().div(self)
+            NodeInner::from_number(other).wrap().div(self)
         }
     }
     fn pow(self, other: i64) -> Self {
         if other == 0 {
-            NodeInner::<Real>::one()
+            NodeInner::one()
         } else if other == 1 {
             self
         } else {
-            self.pow(NodeInner::<Real>::from_number(other).wrap())
+            self.pow(NodeInner::from_number(other).wrap())
         }
     }
 }

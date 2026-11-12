@@ -26,14 +26,45 @@ mod utils;
 /// let expr = create_expr!("2x^2 +");
 /// debug_assert!(expr.is_err());
 /// ```
+///
+/// # Choosing the number type
+///
+/// The expression tree is generic over its leaf float type, which defaults to
+/// [`Real`][crate::numeric::Real]. To build an expression of a *different* float
+/// type, supply the type after a `;`. The string is parsed as [`Real`] and then
+/// re-typed into `T`:
+///
+/// ```
+/// use rust_calculus::create_expr;
+/// let expr = create_expr!("2x^2"; f64).unwrap();
+/// let _: rust_calculus::structs::expr::Expr<f64> = expr;
+/// ```
+///
+/// With an independent variable as well:
+///
+/// ```
+/// use rust_calculus::create_expr;
+/// let expr = create_expr!("2t^2", 't'; f32).unwrap();
+/// let _: rust_calculus::structs::expr::Expr<f32> = expr;
+/// ```
 
 #[macro_export]
 macro_rules! create_expr {
+    // Default float type (Real), no independent variable.
     ($e:expr) => {
-        Expr::new($e.to_string(), None)
+        $crate::structs::expr::Expr::new($e.to_string(), None)
     };
+    // Default float type (Real), explicit independent variable.
     ($e:expr, $indp:expr) => {
-        Expr::new($e.to_string(), Some($indp))
+        $crate::structs::expr::Expr::new($e.to_string(), Some($indp))
+    };
+    // Caller-chosen float type `T`, no independent variable.
+    ($e:expr; $ty:ty) => {
+        $crate::structs::expr::Expr::<$ty>::parse($e.to_string(), None)
+    };
+    // Caller-chosen float type `T`, explicit independent variable.
+    ($e:expr, $indp:expr; $ty:ty) => {
+        $crate::structs::expr::Expr::<$ty>::parse($e.to_string(), Some($indp))
     };
 }
 

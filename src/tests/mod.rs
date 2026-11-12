@@ -4,6 +4,7 @@ mod test_diagonalization_svd;
 mod test_dynamic_matrix;
 mod test_expr;
 mod test_evaluate;
+mod test_generic_tree;
 mod test_float_gcd;
 mod test_float_math;
 mod test_linear;
