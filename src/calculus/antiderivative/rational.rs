@@ -29,7 +29,7 @@ use crate::{
         factorization::{
             Factor, Factorization, factorise, split_quartic, surd_poly, surd_shift, surd_zero,
         },
-        linear::{RatMatrix, RatVector, SurdMatrix, SurdVector},
+        linear::{Matrix, SurdMatrix, SurdVector, Vector},
         polynomial::{
             Poly, describe_linear, describe_polynomial, describe_quadratic, poly_to_node,
         },
@@ -257,27 +257,26 @@ impl RationalFunction {
 }
 
 /// Solve the square system `columns * coefficients = numerator` for the partial
-/// fraction coefficients, padding the system to a fixed size supported by
-/// [`RatMatrix`].
+/// fraction coefficients.
+///
+/// The system is built as a runtime-sized [`Matrix`] (one row per power of `x`,
+/// one column per unknown), so there is no fixed upper bound on the denominator
+/// degree.
 fn solve_partial_fractions(columns: &[Poly], numerator: &Poly) -> Option<Vec<Rat>> {
-    const MAX_SIZE: usize = 8;
     let size = columns.len();
-    if size > MAX_SIZE {
+    if size == 0 {
         return None;
     }
-    info!(
-        "Solving a {size}x{size} linear system to find the partial fraction coefficients"
-    );
-    let mut matrix = RatMatrix::<MAX_SIZE, MAX_SIZE>::default();
-    let mut rhs = RatVector::<MAX_SIZE>::default();
+    info!("Solving a {size}x{size} linear system to find the partial fraction coefficients");
+    let mut matrix = Matrix::<Rat>::new(size, size);
     for row in 0..size {
         for column in 0..size {
             matrix[row][column] = columns[column].coeff(row);
         }
-        rhs[row][0] = numerator.coeff(row);
     }
+    let rhs = Vector::<Rat>::from_fn(size, |row| numerator.coeff(row));
     let solution = matrix.solve_system(&rhs)?;
-    Some((0..size).map(|row| solution[row]).collect())
+    Some(solution.iter().collect())
 }
 
 /// Turn `coefficient / (x - root)^power` into a node.
