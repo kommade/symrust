@@ -4,7 +4,10 @@
 //! Everything uses checked integer arithmetic so that pathological inputs make
 //! the integrator give up instead of overflowing.
 
+use std::fmt::Display;
+
 use super::expr;
+use crate::algebra::linear::Matrixable;
 use crate::structs::node::Node;
 use crate::utils::gcd_u128;
 
@@ -70,6 +73,90 @@ pub(crate) fn square_root_of(value: Rat) -> Node {
 pub(crate) struct Rat {
     num: i128,
     den: i128,
+}
+
+impl Default for Rat {
+    fn default() -> Self {
+        Self::ZERO
+    }
+}
+
+impl std::ops::Add for Rat {
+    type Output = Rat;
+
+    fn add(self, rhs: Rat) -> Rat {
+        Rat::add(self, rhs).expect("rational addition overflowed")
+    }
+}
+
+impl std::ops::Sub for Rat {
+    type Output = Rat;
+
+    fn sub(self, rhs: Rat) -> Rat {
+        Rat::sub(self, rhs).expect("rational subtraction overflowed")
+    }
+}
+
+impl std::ops::Mul for Rat {
+    type Output = Rat;
+
+    fn mul(self, rhs: Rat) -> Rat {
+        Rat::mul(self, rhs).expect("rational multiplication overflowed")
+    }
+}
+
+impl std::ops::Div for Rat {
+    type Output = Rat;
+
+    fn div(self, rhs: Rat) -> Rat {
+        Rat::div(self, rhs).expect("rational division overflowed or divided by zero")
+    }
+}
+
+impl std::ops::Neg for Rat {
+    type Output = Rat;
+
+    fn neg(self) -> Rat {
+        Self { num: -self.num, den: self.den }
+    }
+}
+
+impl Matrixable for Rat {
+    fn multiplicative_identity() -> Self {
+        Self::ONE
+    }
+
+    fn as_f64(self) -> f64 {
+        self.to_f64()
+    }
+
+    fn from_f64(value: f64) -> Self {
+        Rat::from_f64(value).unwrap_or(Rat::ZERO)
+    }
+
+    fn sqrt(self) -> Self {
+        self.sqrt_exact().expect("square root is not a rational")
+    }
+
+    /// Exact rational square root, or `None` when it is not a perfect square.
+    fn try_sqrt(self) -> Option<Self> {
+        self.sqrt_exact()
+    }
+
+    /// `Rat` is exact, so the numerical SVD fallback must not run on it.
+    fn is_floating() -> bool {
+        false
+    }
+}
+
+impl Display for Rat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.den == 1 {
+            write!(f, "{}", self.num)
+        } else {
+            write!(f, "{}/{}", self.num, self.den)
+        }
+    }
 }
 
 impl Rat {

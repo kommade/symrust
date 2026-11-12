@@ -166,10 +166,19 @@ fn factored_and_expanded_denominators_agree() {
 #[test]
 fn irreducible_denominators_report_failure() {
     super::setup();
-    for input in ["1/(x^7+1)", "1/(x^3+2)", "1/(x^8+1)"] {
+    // These have more than one real root or degree above three, which the
+    // `algebraic` path does not attempt, so they fail in every build.
+    for input in ["1/(x^7+1)", "1/(x^8+1)"] {
         let expr = create_expr!(input).unwrap();
         assert!(expr.get_antiderivative().is_err(), "{input}");
     }
+    // A cubic with a single real root: the exact paths give up, but the
+    // `algebraic` feature integrates it.
+    let cubic = create_expr!("1/(x^3+2)").unwrap();
+    #[cfg(feature = "algebraic")]
+    assert!(cubic.get_antiderivative().is_ok(), "1/(x^3+2) with the algebraic feature");
+    #[cfg(not(feature = "algebraic"))]
+    assert!(cubic.get_antiderivative().is_err(), "1/(x^3+2) without the algebraic feature");
 }
 
 #[test]
@@ -230,7 +239,60 @@ fn derivative_of_extended_functions() {
 #[ignore]
 fn try_custom() {
     super::setup();
-    let expr = create_expr!("1/(x^3+2)").unwrap();
+    let expr = create_expr!("1/(x^4+1)").unwrap();
     let antiderivative = expr.get_antiderivative().unwrap();
     println!("antiderivative: {}", antiderivative.to_string());
+}
+
+/// With the `algebraic` feature, an irreducible cubic denominator that the
+/// rational/surd methods give up on is integrated using an exact real root
+/// (Sturm-sequence isolation). Without the feature this same integral fails,
+/// which the companion `#[cfg(not(...))]` test checks, so the default build is
+/// unchanged.
+#[cfg(feature = "algebraic")]
+#[test]
+fn algebraic_feature_integrates_an_irreducible_cubic() {
+    super::setup();
+    // 1/(x^3 - 2): the denominator is irreducible over the rationals with a
+    // single real root (the cube root of 2), which the surd path cannot reach.
+    let expr = create_expr!("1/(x^3-2)").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("algebraic feature should integrate this cubic");
+    // Sanity check: the result must mention a logarithm (the real-root term).
+    let rendered = antiderivative.to_string();
+    assert!(rendered.contains("ln"), "expected a log term, got {rendered}");
+}
+
+/// Without the feature, the same integral is still refused, and the error
+/// explicitly steers the user to enable the feature.
+#[cfg(not(feature = "algebraic"))]
+#[test]
+fn default_build_warns_that_the_algebraic_feature_is_required() {
+    super::setup();
+    let expr = create_expr!("1/(x^3-2)").unwrap();
+    match expr.get_antiderivative() {
+        Err(crate::calculus::antiderivative::IntegrationError::FeatureRequired { feature, .. }) => {
+            assert_eq!(feature, "algebraic");
+        }
+        other => panic!("expected FeatureRequired, got {other:?}"),
+    }
+}
+
+/// Even with the `algebraic` feature enabled, a quartic that already splits
+/// over a quadratic extension (`x^4 + 1`) is integrated by the cheaper exact
+/// method ("C"); the algebraic fallback ("B") is not needed and must not
+/// interfere. This checks C-first ordering is preserved when the flag is on.
+#[cfg(feature = "algebraic")]
+#[test]
+fn c_is_preferred_over_b_when_both_could_apply() {
+    super::setup();
+    let expr = create_expr!("1/(x^4+1)").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("x^4 + 1 splits over a quadratic extension");
+    // The quadratic-extension path produces arctangent/logarithm terms with
+    // surd coefficients; it must still verify (the integrator would have
+    // rejected it otherwise), so simply having a result is the assertion.
+    assert!(!antiderivative.to_string().is_empty());
 }

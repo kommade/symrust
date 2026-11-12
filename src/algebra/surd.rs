@@ -5,8 +5,10 @@
 //! coefficients in `a + b sqrt(k)` form lets the polynomial routines work with
 //! those factors exactly.
 
+use std::fmt::Display;
+
 use super::{expr, rational::Rat};
-use crate::structs::node::Node;
+use crate::{algebra::linear::Matrixable, structs::node::Node};
 
 /// `a + b sqrt(k)` with a squarefree `k`. A rational is stored with `k = 0`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -16,7 +18,102 @@ pub(crate) struct Surd {
     b: Rat,
 }
 
+impl Default for Surd {
+    fn default() -> Self {
+        Self::rational(Rat::ZERO)
+    }
+}
+
+impl std::ops::Add for Surd {
+    type Output = Surd;
+
+    fn add(self, rhs: Surd) -> Surd {
+        Surd::add(self, rhs).expect("surds live in different quadratic fields")
+    }
+}
+
+impl std::ops::Sub for Surd {
+    type Output = Surd;
+
+    fn sub(self, rhs: Surd) -> Surd {
+        Surd::sub(self, rhs).expect("surds live in different quadratic fields")
+    }
+}
+
+impl std::ops::Mul for Surd {
+    type Output = Surd;
+
+    fn mul(self, rhs: Surd) -> Surd {
+        Surd::mul(self, rhs).expect("surds live in different quadratic fields")
+    }
+}
+
+impl std::ops::Div for Surd {
+    type Output = Surd;
+
+    fn div(self, rhs: Surd) -> Surd {
+        Surd::div(self, rhs)
+            .expect("surds live in different quadratic fields or the divisor is zero")
+    }
+}
+
+impl std::ops::Neg for Surd {
+    type Output = Surd;
+
+    fn neg(self) -> Surd {
+        Surd::neg(self)
+    }
+}
+
+impl Matrixable for Surd {
+    fn multiplicative_identity() -> Self {
+        Self::rational(Rat::ONE)
+    }
+
+    fn as_f64(self) -> f64 {
+        self.a.to_f64() + self.b.to_f64() * (self.k as f64).sqrt()
+    }
+
+    fn from_f64(value: f64) -> Self {
+        Surd::rational(Rat::from_f64(value).unwrap_or(Rat::ZERO))
+    }
+
+    /// Conservative: returns `self` unchanged when the root leaves the field,
+    /// since `Matrixable::sqrt` cannot report failure.
+    fn sqrt(self) -> Self {
+        Surd::sqrt(self).expect("The square root leaves the quadratic field")
+    }
+
+    /// Exact surd square root, or `None` when it leaves the quadratic field.
+    fn try_sqrt(self) -> Option<Self> {
+        Surd::sqrt(self)
+    }
+
+    /// `Surd` is exact, so the numerical SVD fallback must not run on it.
+    fn is_floating() -> bool {
+        false
+    }
+}
+
+impl Display for Surd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.b.is_zero() {
+            write!(f, "{}", self.a)
+        } else if self.a.is_zero() {
+            write!(f, "{} sqrt({})", self.b, self.k)
+        } else {
+            write!(f, "{} + {} sqrt({})", self.a, self.b, self.k)
+        }
+    }
+}
+
 impl Surd {
+    pub const SQRT_TWO: Surd = Surd {
+        k: 2,
+        a: Rat::ZERO,
+        b: Rat::ONE,
+    };
+
     pub(crate) const fn rational(value: Rat) -> Self {
         Self {
             k: 0,
@@ -113,6 +210,13 @@ impl Surd {
         numerator.scale(norm.recip()?)
     }
 
+    pub(crate) fn recip(self) -> Option<Self> {
+        let k = self.k;
+        let conjugate = self.neg_conjugate();
+        let norm = denominator_norm(self, k)?;
+        conjugate.scale(norm.recip()?)
+    }
+
     fn neg_conjugate(self) -> Self {
         Self {
             k: self.k,
@@ -138,7 +242,7 @@ impl Surd {
             return sqrt_rational(self.a);
         }
         if self.a.is_zero() {
-            return None;
+            return Some(Surd::SQRT_TWO);
         }
         // sqrt(a + b sqrt(k)) = sqrt((a + n)/2) +- sqrt((a - n)/2), where
         // n^2 = a^2 - k b^2 is the norm.

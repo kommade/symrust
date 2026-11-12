@@ -1,7 +1,27 @@
 //! Integration of rational functions: partial fractions and the elementary
 //! integrals of the resulting terms.
 
+use std::cell::Cell;
+
 use tracing::{debug, info};
+
+thread_local! {
+    /// Set by the algebraic fallback when a factor needs the `algebraic`
+    /// feature but it is compiled out. Read and cleared by the integrator so it
+    /// can turn a plain "unsupported" into a helpful "feature required" error.
+    static ALGEBRAIC_NEEDED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether, since the last reset, an integral was blocked only by the disabled
+/// `algebraic` feature.
+pub(super) fn algebraic_was_needed() -> bool {
+    ALGEBRAIC_NEEDED.with(|flag| flag.get())
+}
+
+/// Clear the "algebraic feature needed" flag before an integration attempt.
+pub(super) fn reset_algebraic_needed() {
+    ALGEBRAIC_NEEDED.with(|flag| flag.set(false));
+}
 
 use super::helpers::{self, Shape};
 use crate::{
@@ -9,7 +29,7 @@ use crate::{
         factorization::{
             Factor, Factorization, factorise, split_quartic, surd_poly, surd_shift, surd_zero,
         },
-        linear::{solve_linear_system, solve_surd_system},
+        linear::{RatMatrix, RatVector, SurdMatrix, SurdVector},
         polynomial::{
             Poly, describe_linear, describe_polynomial, describe_quadratic, poly_to_node,
         },
@@ -152,21 +172,7 @@ impl RationalFunction {
             return None;
         }
 
-        let mut matrix = vec![vec![Rat::ZERO; columns.len()]; denominator_degree];
-        let mut rhs = Vec::with_capacity(denominator_degree);
-        for degree in 0..denominator_degree {
-            for (column_index, column) in columns.iter().enumerate() {
-                matrix[degree][column_index] = column.coeff(degree);
-            }
-            rhs.push(numerator.coeff(degree));
-        }
-
-        info!(
-            "Solving a {}x{} linear system to find the partial fraction coefficients",
-            denominator_degree,
-            columns.len()
-        );
-        let solution = solve_linear_system(matrix, rhs)?;
+        let solution: Vec<Rat> = solve_partial_fractions(&columns, &numerator)?;
         debug!(
             "Partial fraction coefficients: {}",
             solution
@@ -250,6 +256,30 @@ impl RationalFunction {
     }
 }
 
+/// Solve the square system `columns * coefficients = numerator` for the partial
+/// fraction coefficients, padding the system to a fixed size supported by
+/// [`RatMatrix`].
+fn solve_partial_fractions(columns: &[Poly], numerator: &Poly) -> Option<Vec<Rat>> {
+    const MAX_SIZE: usize = 8;
+    let size = columns.len();
+    if size > MAX_SIZE {
+        return None;
+    }
+    info!(
+        "Solving a {size}x{size} linear system to find the partial fraction coefficients"
+    );
+    let mut matrix = RatMatrix::<MAX_SIZE, MAX_SIZE>::default();
+    let mut rhs = RatVector::<MAX_SIZE>::default();
+    for row in 0..size {
+        for column in 0..size {
+            matrix[row][column] = columns[column].coeff(row);
+        }
+        rhs[row][0] = numerator.coeff(row);
+    }
+    let solution = matrix.solve_system(&rhs)?;
+    Some((0..size).map(|row| solution[row]).collect())
+}
+
 /// Turn `coefficient / (x - root)^power` into a node.
 fn linear_term(coefficient: Rat, root: Rat, power: usize, variable: &Node) -> Node {
     if coefficient.is_zero() {
@@ -320,11 +350,155 @@ fn quadratic_term(
 
 /// Integrate a partial fraction term whose denominator is an irreducible
 /// factor of degree three or more.
+///
+/// The order is deliberate: the cheaper exact/quadratic-extension method ("C")
+/// always runs first, and the general algebraic method ("B") is only tried as a
+/// fallback when C cannot resolve the factor.
 fn general_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
-    match factor.degree() {
-        Some(4) => quartic_term(coefficients, factor, variable),
-        _ => None,
+    // C first: a quartic that splits over a quadratic extension.
+    if factor.degree() == Some(4) {
+        if let Some(term) = quartic_term(coefficients, factor, variable) {
+            return Some(term);
+        }
     }
+    // B as the fallback (feature-gated; warns when the feature is off).
+    general_term_algebraic(coefficients, factor, variable)
+}
+
+/// Degree-three-and-higher irreducible factors.
+///
+/// The exact/quadratic-extension ("C") path runs first, in [`general_term`];
+/// only when it cannot resolve the factor is this called. With the `algebraic`
+/// feature on it peels off a real root using Sturm-sequence isolation and
+/// integrates the resulting term. With the feature off it emits a warning
+/// explaining that enabling the feature would let this integral proceed,
+/// instead of failing silently.
+fn general_term_algebraic(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
+    #[cfg(feature = "algebraic")]
+    {
+        crate::calculus::antiderivative::rational::algebraic_factor_term(
+            coefficients,
+            factor,
+            variable,
+        )
+    }
+    #[cfg(not(feature = "algebraic"))]
+    {
+        let _ = (coefficients, variable);
+        // An irreducible factor left over after the exact paths have run is one
+        // the general algebraic method ("B") could handle. Tell the user why the
+        // integration stopped and how to enable it.
+        if factor.degree() == Some(3) {
+            ALGEBRAIC_NEEDED.with(|flag| flag.set(true));
+            tracing::warn!(
+                "cannot integrate the irreducible cube factor {} without the `algebraic` \
+                 feature; enable it (cargo build --features algebraic) to integrate \
+                 factors of degree three or more",
+                describe_polynomial(factor)
+            );
+        }
+        None
+    }
+}
+
+#[cfg(feature = "algebraic")]
+fn algebraic_factor_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
+    use crate::algebra::algebraic::real_roots;
+    use crate::calculus::expr::float_from;
+
+    let degree = factor.degree()?;
+    let roots = real_roots(factor);
+
+    // Handle the case the exact paths cannot: a cubic with a single real root.
+    // The partial fraction is `A/(x - r) + (B x + C)/(x^2 + p x + q)`; the
+    // numerator `N(x)` is split accordingly. `A, B, C` are found by matching
+    // coefficients, and each part integrates to the usual ln/atan combination.
+    if degree != 3 || roots.len() != 1 {
+        return None;
+    }
+
+    let r = roots.first()?.to_f64();
+    let a2 = factor.coeff(2).to_f64();
+    let a1 = factor.coeff(1).to_f64();
+    let a0 = factor.coeff(0).to_f64();
+    let p = a2 + r;
+    let q = a1 + r * p;
+    if (a0 + r * q).abs() > 1e-9 {
+        return None;
+    }
+
+    // Numerator polynomial `N(x) = c2 x^2 + c1 x + c0` from the supplied
+    // partial-fraction coefficients (lowest degree first).
+    let c = |index: usize| coefficients.get(index).map(|value| value.to_f64()).unwrap_or(0.0);
+    let (n2, n1, n0) = (c(2), c(1), c(0));
+
+    // Solve `A (x^2 + p x + q) + (B x + C)(x - r) = N(x)` by matching powers:
+    //   x^2: A + B            = n2
+    //   x^1: A p + C - B r    = n1
+    //   x^0: A q - C r        = n0
+    // From the last row C = (A q - n0)/r; substitute into the middle row to get
+    // a 2x2 system in (A, B).
+    if r.abs() < 1e-12 {
+        return None;
+    }
+    // Middle row becomes: A p + (A q - n0)/r - B r = n1
+    //   => A (p + q/r) - B r = n1 + n0/r
+    // With row 1: A + B = n2  => B = n2 - A.
+    //   A (p + q/r) - (n2 - A) r = n1 + n0/r
+    //   A (p + q/r + r)          = n1 + n0/r + n2 r
+    let a_denominator = p + q / r + r;
+    if a_denominator.abs() < 1e-12 {
+        return None;
+    }
+    let a_value = (n1 + n0 / r + n2 * r) / a_denominator;
+    let b_value = n2 - a_value;
+    let c_value = (a_value * q - n0) / r;
+
+    let mut terms: Vec<Node> = Vec::new();
+
+    // A/(x - r) integrates to A ln|x - r|.
+    if a_value.abs() > 1e-12 {
+        let base = helpers::sub(variable.clone(), helpers::float(float_from(r)));
+        terms.push(helpers::multiply_by(
+            helpers::function(Func::Ln, base),
+            float_from(a_value),
+        ));
+    }
+
+    // (B x + C)/(x^2 + p x + q): B/2 times the logarithmic part from the
+    // quadratic's derivative, plus the arctangent remainder.
+    if b_value.abs() > 1e-12 || c_value.abs() > 1e-12 {
+        let quadratic_node = helpers::add(
+            helpers::add(
+                helpers::pow(variable.clone(), helpers::number(2)),
+                helpers::multiply_by(variable.clone(), float_from(p)),
+            ),
+            helpers::float(float_from(q)),
+        );
+        if b_value.abs() > 1e-12 {
+            terms.push(helpers::multiply_by(
+                helpers::function(Func::Ln, quadratic_node),
+                float_from(b_value / 2.0),
+            ));
+        }
+        let remainder = c_value - b_value * p / 2.0;
+        if remainder.abs() > 1e-12 {
+            let discriminant = 4.0 * q - p * p;
+            if discriminant <= 0.0 {
+                return None;
+            }
+            let sqrt_d = discriminant.sqrt();
+            let centre = helpers::add(variable.clone(), helpers::float(float_from(p / 2.0)));
+            let scaled = helpers::div(
+                helpers::mul(centre, helpers::float(float_from(2.0))),
+                helpers::float(float_from(sqrt_d)),
+            );
+            let atan = helpers::function(Func::Atan, scaled);
+            terms.push(helpers::multiply_by(atan, float_from(remainder * 2.0 / sqrt_d)));
+        }
+    }
+
+    Some(helpers::sum(terms))
 }
 
 fn quartic_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
@@ -347,8 +521,8 @@ fn quartic_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<
         first_poly.to_vec(),
     ];
     let size = 4;
-    let mut matrix = vec![vec![surd_zero(); size]; size];
-    let mut rhs = Vec::with_capacity(size);
+    let mut matrix = SurdMatrix::<4, 4>::default();
+    let mut rhs = SurdVector::<4>::default();
     for degree in 0..size {
         for column in 0..size {
             matrix[degree][column] = columns[column]
@@ -356,11 +530,9 @@ fn quartic_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<
                 .copied()
                 .unwrap_or_else(surd_zero);
         }
-        rhs.push(Surd::rational(
-            coefficients.get(degree).copied().unwrap_or(Rat::ZERO),
-        ));
+        rhs[degree][0] = Surd::rational(coefficients.get(degree).copied().unwrap_or(Rat::ZERO));
     }
-    let solution = solve_surd_system(matrix, rhs)?;
+    let solution = matrix.solve_system(&rhs)?;
     let first_term = quadratic_surd_term(
         solution[0],
         solution[1],

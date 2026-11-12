@@ -1,0 +1,814 @@
+//! Evaluate an [`Expr`][crate::structs::expr::Expr] at concrete values.
+//!
+//! The public entry points are [`Expr::evaluate`][crate::structs::expr::Expr::evaluate]
+//! and [`Expr::evaluate_with`][crate::structs::expr::Expr::evaluate_with]. Both
+//! work over *any* numeric type `T` that implements [`Evaluable`]: a type that
+//! can represent every operation and function an expression may contain
+//! (the ones listed in [`Token`][crate::parse::lexer::Token]) and that knows how
+//! to mix in plain `i64` and [`Float`] values.
+//!
+//! The result is an [`Evaluated`]: either the fully-collapsed value `T` (when
+//! nothing but the substituted variables were left) or a symbolic expression
+//! that still mentions the other variables.
+
+use std::collections::HashMap;
+use std::ops::{Add, Div, Mul, Sub};
+
+use arpfloat::{FP128, Float};
+
+use crate::parse::lexer::{Const, Func, Op, Token};
+use crate::structs::expr::Expr;
+use crate::structs::node::Node;
+use crate::utils::float_math::FloatMath;
+
+/// The numeric types an [`Expr`] can be evaluated into.
+///
+/// A type implementing this trait promises to support every operation and
+/// function that can appear in an expression:
+///
+/// * the operators [`Op::Add`], [`Op::Sub`], [`Op::Mul`], [`Op::ImplicitMul`],
+///   [`Op::Div`] and [`Op::Pow`] — the first four come from the
+///   [`Add`]/[`Sub`]/[`Mul`]/[`Div`] supertraits, and [`pow`](Self::pow)
+///   supplies the fifth (there is no standard `Pow` trait);
+/// * the functions stored in [`Func`] (`sin`, `cos`, `tan`, `sec`, `csc`, `cot`,
+///   `asin`, `acos`, `atan`, `sqrt`, `ln` and `log_base`);
+/// * the constants stored in [`Const`] (`π` and `e`);
+/// * mixing with plain `i64` and [`arpfloat::Float`] values, which expressions
+///   spell as `Token::Number` / `Token::Float` leaves.
+///
+/// Only [`from_i64`](Self::from_i64), [`from_float`](Self::from_float),
+/// [`to_float`](Self::to_float), [`pow`](Self::pow) and the functions are
+/// required; everything with a sensible fallback is a default method.
+pub trait Evaluable:
+    Clone
+    + Sized
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + Mul<Output = Self>
+    + Div<Output = Self>
+{
+    /// Build the value from an integer (a `Token::Number` leaf).
+    fn from_i64(value: i64) -> Self;
+
+    /// Build the value from an [`arpfloat::Float`] (a `Token::Float` leaf).
+    fn from_float(value: Float) -> Self;
+
+    /// A best-effort conversion back to a float, used when the value has to be
+    /// embedded into a still-symbolic result and for the float fallbacks.
+    fn to_float(&self) -> Float;
+
+    /// `self ^ exponent` where the exponent is itself a value of this type.
+    fn pow(self, exponent: Self) -> Self;
+
+    /// `self ^ exponent` for an integer exponent (a `Token::Number` power).
+    /// Defaults to raising to the equivalent `Self` exponent.
+    fn pow_i64(self, exponent: i64) -> Self {
+        self.pow(Self::from_i64(exponent))
+    }
+
+    /// `self ^ exponent` for a float exponent (a `Token::Float` power).
+    /// Defaults to raising to the equivalent `Self` exponent.
+    fn pow_float(self, exponent: Float) -> Self {
+        self.pow(Self::from_float(exponent))
+    }
+
+    // --- functions ------------------------------------------------------
+
+    fn sin(self) -> Self;
+    fn cos(self) -> Self;
+    fn tan(self) -> Self;
+
+    /// `sec(self) = 1 / cos(self)`.
+    fn sec(self) -> Self {
+        Self::from_i64(1) / self.cos()
+    }
+    /// `csc(self) = 1 / sin(self)`.
+    fn csc(self) -> Self {
+        Self::from_i64(1) / self.sin()
+    }
+    /// `cot(self) = 1 / tan(self)`.
+    fn cot(self) -> Self {
+        Self::from_i64(1) / self.tan()
+    }
+
+    fn asin(self) -> Self;
+    fn acos(self) -> Self;
+    fn atan(self) -> Self;
+
+    fn sqrt(self) -> Self;
+
+    /// The natural logarithm.
+    fn ln(self) -> Self;
+
+    /// `log_base(self)`, defaulting to `ln(self) / ln(base)`.
+    fn log(self, base: Float) -> Self {
+        self.ln() / Self::from_float(base).ln()
+    }
+
+    /// The constant `π`.
+    fn pi() -> Self {
+        Self::from_float(Float::pi(FP128))
+    }
+
+    /// The constant `e`.
+    fn e() -> Self {
+        Self::from_float(Float::e(FP128))
+    }
+}
+
+/// The outcome of [evaluating][crate::structs::expr::Expr::evaluate] an
+/// expression.
+///
+/// * [`Evaluated::Value`] — the expression collapsed to a single value because,
+///   after substitution, only the chosen variable(s) appeared.
+/// * [`Evaluated::Expression`] — some variables were left untouched, so the
+///   fully-evaluated parts were folded and the rest is returned symbolically.
+#[derive(Debug, Clone)]
+pub enum Evaluated<T> {
+    /// A fully evaluated value.
+    Value(T),
+    /// A symbolic expression in terms of the variables that were not
+    /// substituted.
+    Expression(Expr),
+}
+
+impl<T> Evaluated<T> {
+    /// The value, if the expression collapsed completely.
+    #[must_use]
+    pub fn value(self) -> Option<T> {
+        match self {
+            Self::Value(value) => Some(value),
+            Self::Expression(_) => None,
+        }
+    }
+
+    /// The symbolic expression, if any variables remain.
+    #[must_use]
+    pub fn expression(self) -> Option<Expr> {
+        match self {
+            Self::Value(_) => None,
+            Self::Expression(expr) => Some(expr),
+        }
+    }
+
+    /// Whether the expression collapsed to a concrete value.
+    #[must_use]
+    pub const fn is_value(&self) -> bool {
+        matches!(self, Self::Value(_))
+    }
+}
+
+/// A single step of the traversal: either the collapsed value together with the
+/// (variable-substituted) node it corresponds to, or `None` for the value when
+/// an unsubstituted variable remains.
+struct Step<T> {
+    value: Option<T>,
+    node: Node,
+}
+
+/// Evaluate the tree `node`, substituting variables through `lookup`.
+///
+/// `lookup` returns the concrete value for a one-letter variable, or `None`
+/// when that variable should be left symbolic.
+fn evaluate_node<T: Evaluable>(node: &Node, lookup: &dyn Fn(char) -> Option<T>) -> Step<T> {
+    let shape = crate::calculus::expr::shape(node);
+    match shape {
+        crate::calculus::expr::Shape::Empty => Step {
+            value: None,
+            node: node.clone(),
+        },
+        crate::calculus::expr::Shape::Operand(token) => evaluate_operand(&token, lookup),
+        crate::calculus::expr::Shape::Operator(token, left, right) => {
+            evaluate_operator(&token, &left, &right, lookup)
+        }
+    }
+}
+
+fn evaluate_operand<T: Evaluable>(token: &Token, lookup: &dyn Fn(char) -> Option<T>) -> Step<T> {
+    match token {
+        Token::Number(number) => Step {
+            value: Some(T::from_i64(*number)),
+            node: crate::structs::node::NodeInner::from_number(*number).wrap(),
+        },
+        Token::Float(float) => Step {
+            value: Some(T::from_float(float.clone())),
+            node: crate::structs::node::NodeInner::from_float(float.clone()).wrap(),
+        },
+        Token::Constant(constant) => Step {
+            value: Some(constant_value(constant)),
+            node: node_for_token(token),
+        },
+        Token::Indp(letter) | Token::Var(letter) => match lookup(*letter) {
+            Some(value) => {
+                // Embed the concrete value as a float leaf in the substituted
+                // node so a partial result stays a valid expression.
+                let float = value.to_float();
+                Step {
+                    value: Some(value),
+                    node: crate::structs::node::NodeInner::from_float(float).wrap(),
+                }
+            }
+            None => Step {
+                value: None,
+                node: node_for_token(token),
+            },
+        },
+        _ => Step {
+            value: None,
+            node: node_for_token(token),
+        },
+    }
+}
+
+fn constant_value<T: Evaluable>(constant: &Const) -> T {
+    match constant {
+        Const::Pi => T::pi(),
+        Const::E => T::e(),
+    }
+}
+
+fn node_for_token(token: &Token) -> Node {
+    crate::structs::node::NodeInner::operand(token.clone()).wrap()
+}
+
+fn evaluate_operator<T: Evaluable>(
+    token: &Token,
+    left: &Node,
+    right: &Node,
+    lookup: &dyn Fn(char) -> Option<T>,
+) -> Step<T> {
+    let left_step = evaluate_node(left, lookup);
+    let right_step = evaluate_node(right, lookup);
+
+    // Rebuild the substituted node first, keeping the exact same structure.
+    let node = match token {
+        Token::Operator(op) => crate::structs::node::NodeInner::from_operation(
+            op.clone(),
+            left_step.node.clone(),
+            right_step.node.clone(),
+        ),
+        Token::Function(func) => {
+            crate::structs::node::NodeInner::from_function(func.clone(), right_step.node.clone())
+        }
+        _ => node_for_token(token),
+    };
+
+    let value = match token {
+        Token::Operator(op) => match (left_step.value.clone(), right_step.value.clone()) {
+            (Some(left_value), Some(right_value)) => {
+                Some(apply_operator(op, left_value, &right_step, right_value))
+            }
+            _ => None,
+        },
+        Token::Function(func) => right_step
+            .value
+            .clone()
+            .map(|argument| apply_function(func, argument)),
+        _ => None,
+    };
+
+    Step { value, node }
+}
+
+fn apply_operator<T: Evaluable>(op: &Op, left: T, right_step: &Step<T>, right: T) -> T {
+    match op {
+        Op::Add => left + right,
+        Op::Sub => left - right,
+        Op::Mul | Op::ImplicitMul => left * right,
+        Op::Div => left / right,
+        Op::Pow => match &right_step.node.inner.borrow().value {
+            // Prefer the exact integer/float specialisations when the exponent
+            // is literally a number, so exact types keep their precision.
+            crate::structs::node::NodeValue::Operand(Token::Number(exponent)) => {
+                left.pow_i64(*exponent)
+            }
+            crate::structs::node::NodeValue::Operand(Token::Float(exponent)) => {
+                left.pow_float(exponent.clone())
+            }
+            _ => left.pow(right),
+        },
+    }
+}
+
+fn apply_function<T: Evaluable>(func: &Func, argument: T) -> T {
+    match func {
+        Func::Sin => argument.sin(),
+        Func::Cos => argument.cos(),
+        Func::Tan => argument.tan(),
+        Func::Sec => argument.sec(),
+        Func::Csc => argument.csc(),
+        Func::Cot => argument.cot(),
+        Func::Asin => argument.asin(),
+        Func::Acos => argument.acos(),
+        Func::Atan => argument.atan(),
+        Func::Sqrt => argument.sqrt(),
+        Func::Ln => argument.ln(),
+        Func::Log(base) => argument.log(base.clone()),
+    }
+}
+
+impl Expr {
+    /// Substitute the independent variable with `value` and evaluate.
+    ///
+    /// If the expression only depends on the independent variable, the result
+    /// is [`Evaluated::Value`] holding the collapsed numeric value. If other
+    /// variables remain, the substituted parts are folded and the result is an
+    /// [`Evaluated::Expression`] in terms of those remaining variables.
+    ///
+    /// # Examples
+    /// ```
+    /// use rust_calculus::create_expr;
+    /// use rust_calculus::evaluate::Evaluated;
+    /// use rust_calculus::structs::expr::Expr;
+    ///
+    /// let expr = create_expr!("2x^2 + 3").unwrap();
+    /// let result = expr.evaluate(4.0_f64);
+    /// assert_eq!(result.value(), Some(35.0));
+    /// ```
+    #[must_use]
+    pub fn evaluate<T: Evaluable>(&self, value: T) -> Evaluated<T> {
+        let indp = independent_variable(&self.tree);
+        let lookup = move |letter: char| {
+            if letter == indp {
+                Some(value.clone())
+            } else {
+                None
+            }
+        };
+        finish(evaluate_node(&self.tree, &lookup))
+    }
+
+    /// Substitute the given variables with their values and evaluate.
+    ///
+    /// Any variable *not* present in `values` is left symbolic; the result is
+    /// then an [`Evaluated::Expression`]. When every variable is provided, the
+    /// result is an [`Evaluated::Value`].
+    ///
+    /// # Examples
+    /// ```
+    /// use std::collections::HashMap;
+    /// use rust_calculus::create_expr;
+    /// use rust_calculus::structs::expr::Expr;
+    ///
+    /// let expr = create_expr!("a^2 + b^2").unwrap();
+    /// let mut values = HashMap::new();
+    /// values.insert('a', 3.0_f64);
+    /// values.insert('b', 4.0_f64);
+    /// assert_eq!(expr.evaluate_with(&values).value(), Some(25.0));
+    /// ```
+    #[must_use]
+    pub fn evaluate_with<T: Evaluable>(&self, values: &HashMap<char, T>) -> Evaluated<T> {
+        let lookup = move |letter: char| values.get(&letter).cloned();
+        finish(evaluate_node(&self.tree, &lookup))
+    }
+}
+
+fn finish<T: Evaluable>(step: Step<T>) -> Evaluated<T> {
+    match step.value {
+        Some(value) => Evaluated::Value(value),
+        None => Evaluated::Expression(Expr::from_node(step.node)),
+    }
+}
+
+/// The one-letter variable that the expression treats as independent (the
+/// default is `x`).
+fn independent_variable(node: &Node) -> char {
+    crate::calculus::expr::independent_variable(node)
+}
+
+// ---------------------------------------------------------------------------
+// Concrete implementations
+// ---------------------------------------------------------------------------
+
+impl Evaluable for Float {
+    fn from_i64(value: i64) -> Self {
+        Float::from_i64(FP128, value)
+    }
+
+    fn from_float(value: Float) -> Self {
+        value.cast(FP128)
+    }
+
+    fn to_float(&self) -> Float {
+        self.clone()
+    }
+
+    fn pow(self, exponent: Self) -> Self {
+        Float::pow(&self, &exponent)
+    }
+    fn pow_i64(self, exponent: i64) -> Self {
+        if exponent < 0 {
+            Float::one(FP128, false) / Float::powi(&self, exponent.unsigned_abs())
+        } else {
+            Float::powi(&self, exponent.unsigned_abs())
+        }
+    }
+    fn pow_float(self, exponent: Float) -> Self {
+        Float::pow(&self, &exponent.cast(FP128))
+    }
+
+    fn sin(self) -> Self {
+        Float::sin(&self)
+    }
+    fn cos(self) -> Self {
+        Float::cos(&self)
+    }
+    fn tan(self) -> Self {
+        Float::tan(&self)
+    }
+    fn asin(self) -> Self {
+        FloatMath::asin(&self)
+    }
+    fn acos(self) -> Self {
+        FloatMath::acos(&self)
+    }
+    fn atan(self) -> Self {
+        FloatMath::atan(&self)
+    }
+    fn sqrt(self) -> Self {
+        Float::sqrt(&self)
+    }
+    fn ln(self) -> Self {
+        Float::log(&self)
+    }
+    fn log(self, base: Float) -> Self {
+        Float::log(&self) / Float::log(&base.cast(FP128))
+    }
+    fn pi() -> Self {
+        Float::pi(FP128)
+    }
+    fn e() -> Self {
+        Float::e(FP128)
+    }
+}
+
+macro_rules! impl_evaluable_float {
+    ($($float:ty),* $(,)?) => {
+        $(
+            impl Evaluable for $float {
+                fn from_i64(value: i64) -> Self {
+                    value as $float
+                }
+                fn from_float(value: Float) -> Self {
+                    value.as_f64() as $float
+                }
+                fn to_float(&self) -> Float {
+                    Float::from_f64(*self as f64).cast(FP128)
+                }
+                fn pow(self, exponent: Self) -> Self { self.powf(exponent) }
+                fn pow_i64(self, exponent: i64) -> Self {
+                    if exponent >= 0 {
+                        self.powi(exponent as i32)
+                    } else {
+                        self.powi(exponent as i32)
+                    }
+                }
+                fn pow_float(self, exponent: Float) -> Self {
+                    self.powf(exponent.as_f64() as $float)
+                }
+                fn sin(self) -> Self { self.sin() }
+                fn cos(self) -> Self { self.cos() }
+                fn tan(self) -> Self { self.tan() }
+                fn asin(self) -> Self { self.asin() }
+                fn acos(self) -> Self { self.acos() }
+                fn atan(self) -> Self { self.atan() }
+                fn sqrt(self) -> Self { self.sqrt() }
+                fn ln(self) -> Self { self.ln() }
+                fn log(self, base: Float) -> Self {
+                    self.ln() / (base.as_f64() as $float).ln()
+                }
+            }
+        )*
+    };
+}
+
+impl_evaluable_float!(f64, f32);
+
+macro_rules! impl_evaluable_int {
+    ($($int:ty),* $(,)?) => {
+        $(
+            impl Evaluable for $int {
+                fn from_i64(value: i64) -> Self {
+                    value as $int
+                }
+                fn from_float(value: Float) -> Self {
+                    value.as_f64().round() as $int
+                }
+                fn to_float(&self) -> Float {
+                    Float::from_i64(FP128, *self as i64)
+                }
+                // Integer powers stay integral when the exponent is a
+                // non-negative integer; everything else is rounded through f64.
+                fn pow(self, exponent: Self) -> Self {
+                    if exponent >= 0 {
+                        (self as i128).checked_pow(exponent.try_into().unwrap_or(u32::MAX))
+                            .map_or_else(
+                                || (self as f64).powf(exponent as f64).round() as $int,
+                                |value| value as $int,
+                            )
+                    } else {
+                        (self as f64).powf(exponent as f64).round() as $int
+                    }
+                }
+                fn pow_i64(self, exponent: i64) -> Self {
+                    <Self as Evaluable>::pow(self, exponent as $int)
+                }
+                fn pow_float(self, exponent: Float) -> Self {
+                    (self as f64).powf(exponent.as_f64()).round() as $int
+                }
+                fn sin(self) -> Self { (self as f64).sin().round() as $int }
+                fn cos(self) -> Self { (self as f64).cos().round() as $int }
+                fn tan(self) -> Self { (self as f64).tan().round() as $int }
+                fn asin(self) -> Self { (self as f64).asin().round() as $int }
+                fn acos(self) -> Self { (self as f64).acos().round() as $int }
+                fn atan(self) -> Self { (self as f64).atan().round() as $int }
+                fn sqrt(self) -> Self { (self as f64).sqrt().round() as $int }
+                fn ln(self) -> Self { (self as f64).ln().round() as $int }
+            }
+        )*
+    };
+}
+
+impl_evaluable_int!(i64, i32);
+
+// ---------------------------------------------------------------------------
+// Exact algebraic number types
+// ---------------------------------------------------------------------------
+//
+// These live in `algebra` and are exact where the requested operation stays
+// inside their field. Anything outside it (transcendental functions, roots that
+// leave the field, fractional powers) falls back to an `f64` round-trip, which
+// is the best a purely algebraic value can do. The helper functions below avoid
+// the inherent-method / trait-method name clash (`Rat::from_float` returns
+// `Option<Rat>` while `Evaluable::from_float` returns `Rat`, etc.).
+
+/// `f64` raised to an integer power, tolerating negative exponents.
+fn f64_powi(base: f64, exponent: i64) -> f64 {
+    if exponent >= 0 {
+        base.powi(i32::try_from(exponent).unwrap_or(i32::MAX))
+    } else if base == 0.0 {
+        f64::INFINITY
+    } else {
+        let magnitude = exponent.unsigned_abs();
+        1.0 / base.powi(i32::try_from(magnitude).unwrap_or(i32::MAX))
+    }
+}
+
+/// Build a [`Rat`][crate::algebra::rational::Rat] from an `f64` (best effort).
+fn rat_from_f64(value: f64) -> crate::algebra::rational::Rat {
+    crate::algebra::rational::Rat::from_f64(value).unwrap_or(crate::algebra::rational::Rat::ZERO)
+}
+
+impl Evaluable for crate::algebra::rational::Rat {
+    fn from_i64(value: i64) -> Self {
+        crate::algebra::rational::Rat::from_i64(value)
+    }
+
+    fn from_float(value: Float) -> Self {
+        crate::algebra::rational::Rat::from_float(&value)
+            .unwrap_or(crate::algebra::rational::Rat::ZERO)
+    }
+
+    fn to_float(&self) -> Float {
+        Float::from_f64(crate::algebra::rational::Rat::to_f64(self))
+    }
+
+    fn pow(self, exponent: Self) -> Self {
+        let (numerator, denominator) = crate::algebra::rational::Rat::parts(&exponent);
+        if denominator == 1
+            && let Ok(power) = i64::try_from(numerator)
+            && let Some(exact) = crate::algebra::rational::Rat::pow(self, power)
+        {
+            return exact;
+        }
+        rat_from_f64(
+            crate::algebra::rational::Rat::to_f64(&self)
+                .powf(crate::algebra::rational::Rat::to_f64(&exponent)),
+        )
+    }
+    fn pow_i64(self, exponent: i64) -> Self {
+        crate::algebra::rational::Rat::pow(self, exponent).unwrap_or_else(|| {
+            rat_from_f64(f64_powi(
+                crate::algebra::rational::Rat::to_f64(&self),
+                exponent,
+            ))
+        })
+    }
+
+    fn sin(self) -> Self {
+        rat_from_f64(crate::algebra::rational::Rat::to_f64(&self).sin())
+    }
+    fn cos(self) -> Self {
+        rat_from_f64(crate::algebra::rational::Rat::to_f64(&self).cos())
+    }
+    fn tan(self) -> Self {
+        rat_from_f64(crate::algebra::rational::Rat::to_f64(&self).tan())
+    }
+    fn asin(self) -> Self {
+        rat_from_f64(crate::algebra::rational::Rat::to_f64(&self).asin())
+    }
+    fn acos(self) -> Self {
+        rat_from_f64(crate::algebra::rational::Rat::to_f64(&self).acos())
+    }
+    fn atan(self) -> Self {
+        rat_from_f64(crate::algebra::rational::Rat::to_f64(&self).atan())
+    }
+    fn sqrt(self) -> Self {
+        match crate::algebra::rational::Rat::sqrt_exact(&self) {
+            Some(root) => root,
+            None => rat_from_f64(crate::algebra::rational::Rat::to_f64(&self).sqrt()),
+        }
+    }
+    fn ln(self) -> Self {
+        rat_from_f64(crate::algebra::rational::Rat::to_f64(&self).ln())
+    }
+}
+
+impl Evaluable for crate::algebra::surd::Surd {
+    fn from_i64(value: i64) -> Self {
+        crate::algebra::surd::Surd::rational(crate::algebra::rational::Rat::from_i64(value))
+    }
+
+    fn from_float(value: Float) -> Self {
+        surd_from_f64(value.as_f64())
+    }
+
+    fn to_float(&self) -> Float {
+        Float::from_f64(crate::algebra::surd::Surd::to_f64(self))
+    }
+
+    fn pow(self, exponent: Self) -> Self {
+        let exponent_value = crate::algebra::surd::Surd::to_f64(&exponent);
+        match crate::algebra::rational::Rat::from_f64(exponent_value) {
+            Some(value) if crate::algebra::rational::Rat::parts(&value).1 == 1 => {
+                if let Ok(power) = i64::try_from(crate::algebra::rational::Rat::parts(&value).0) {
+                    return surd_int_pow(self, power);
+                }
+                surd_from_f64(crate::algebra::surd::Surd::to_f64(&self).powf(exponent_value))
+            }
+            _ => surd_from_f64(crate::algebra::surd::Surd::to_f64(&self).powf(exponent_value)),
+        }
+    }
+
+    fn sin(self) -> Self {
+        surd_from_f64(crate::algebra::surd::Surd::to_f64(&self).sin())
+    }
+    fn cos(self) -> Self {
+        surd_from_f64(crate::algebra::surd::Surd::to_f64(&self).cos())
+    }
+    fn tan(self) -> Self {
+        surd_from_f64(crate::algebra::surd::Surd::to_f64(&self).tan())
+    }
+    fn asin(self) -> Self {
+        surd_from_f64(crate::algebra::surd::Surd::to_f64(&self).asin())
+    }
+    fn acos(self) -> Self {
+        surd_from_f64(crate::algebra::surd::Surd::to_f64(&self).acos())
+    }
+    fn atan(self) -> Self {
+        surd_from_f64(crate::algebra::surd::Surd::to_f64(&self).atan())
+    }
+    fn sqrt(self) -> Self {
+        crate::algebra::surd::Surd::sqrt(self).unwrap_or_else(|| {
+            surd_from_f64(crate::algebra::surd::Surd::to_f64(&self).max(0.0).sqrt())
+        })
+    }
+    fn ln(self) -> Self {
+        surd_from_f64(crate::algebra::surd::Surd::to_f64(&self).ln())
+    }
+}
+
+/// Build a [`Surd`][crate::algebra::surd::Surd] from an `f64` (best effort).
+fn surd_from_f64(value: f64) -> crate::algebra::surd::Surd {
+    crate::algebra::surd::Surd::rational(rat_from_f64(value))
+}
+
+/// Integer power of a surd by repeated squaring, falling back to float when the
+/// value leaves the quadratic field.
+fn surd_int_pow(base: crate::algebra::surd::Surd, exponent: i64) -> crate::algebra::surd::Surd {
+    use crate::algebra::surd::Surd;
+    if exponent == 0 {
+        return surd_from_f64(1.0);
+    }
+    let fallback = || surd_from_f64(Surd::to_f64(&base).powf(exponent as f64));
+    let mut result = surd_from_f64(1.0);
+    let mut power = base;
+    let mut remaining = exponent.unsigned_abs();
+    while remaining > 0 {
+        if remaining & 1 == 1 {
+            match Surd::mul(result, power) {
+                Some(product) => result = product,
+                None => return fallback(),
+            }
+        }
+        remaining >>= 1;
+        if remaining > 0 {
+            match Surd::mul(power, power) {
+                Some(square) => power = square,
+                None => return fallback(),
+            }
+        }
+    }
+    if exponent < 0 {
+        Surd::recip(result).unwrap_or_else(fallback)
+    } else {
+        result
+    }
+}
+
+#[cfg(feature = "algebraic")]
+impl Evaluable for crate::algebra::algebraic::Multiquadratic {
+    fn from_i64(value: i64) -> Self {
+        crate::algebra::algebraic::Multiquadratic::from_rat(
+            crate::algebra::rational::Rat::from_i64(value),
+        )
+    }
+
+    fn from_float(value: Float) -> Self {
+        crate::algebra::algebraic::Multiquadratic::from_rat(rat_from_f64(value.as_f64()))
+    }
+
+    fn to_float(&self) -> Float {
+        Float::from_f64(crate::algebra::algebraic::Multiquadratic::to_f64(self))
+    }
+
+    fn pow(self, exponent: Self) -> Self {
+        let exponent_value = crate::algebra::algebraic::Multiquadratic::to_f64(&exponent);
+        match crate::algebra::rational::Rat::from_f64(exponent_value) {
+            Some(value) if crate::algebra::rational::Rat::parts(&value).1 == 1 => {
+                if let Ok(power) = i64::try_from(crate::algebra::rational::Rat::parts(&value).0) {
+                    return multiquadratic_int_pow(self, power);
+                }
+                multiquadratic_from_f64(
+                    crate::algebra::algebraic::Multiquadratic::to_f64(&self).powf(exponent_value),
+                )
+            }
+            _ => multiquadratic_from_f64(
+                crate::algebra::algebraic::Multiquadratic::to_f64(&self).powf(exponent_value),
+            ),
+        }
+    }
+
+    fn sin(self) -> Self {
+        multiquadratic_from_f64(crate::algebra::algebraic::Multiquadratic::to_f64(&self).sin())
+    }
+    fn cos(self) -> Self {
+        multiquadratic_from_f64(crate::algebra::algebraic::Multiquadratic::to_f64(&self).cos())
+    }
+    fn tan(self) -> Self {
+        multiquadratic_from_f64(crate::algebra::algebraic::Multiquadratic::to_f64(&self).tan())
+    }
+    fn asin(self) -> Self {
+        multiquadratic_from_f64(crate::algebra::algebraic::Multiquadratic::to_f64(&self).asin())
+    }
+    fn acos(self) -> Self {
+        multiquadratic_from_f64(crate::algebra::algebraic::Multiquadratic::to_f64(&self).acos())
+    }
+    fn atan(self) -> Self {
+        multiquadratic_from_f64(crate::algebra::algebraic::Multiquadratic::to_f64(&self).atan())
+    }
+    fn sqrt(self) -> Self {
+        <Self as crate::algebra::linear::Matrixable>::sqrt(self)
+    }
+    fn ln(self) -> Self {
+        multiquadratic_from_f64(crate::algebra::algebraic::Multiquadratic::to_f64(&self).ln())
+    }
+}
+
+/// Build a [`Multiquadratic`][crate::algebra::algebraic::Multiquadratic] from an
+/// `f64` (rational approximation, best effort).
+#[cfg(feature = "algebraic")]
+#[allow(dead_code)] // reached through the `Evaluable` impl, which lib code has not exercised yet
+fn multiquadratic_from_f64(value: f64) -> crate::algebra::algebraic::Multiquadratic {
+    crate::algebra::algebraic::Multiquadratic::from_rat(rat_from_f64(value))
+}
+
+/// Integer power of a multiquadratic value by repeated squaring.
+#[cfg(feature = "algebraic")]
+#[allow(dead_code)] // reached through the `Evaluable` impl, which lib code has not exercised yet
+fn multiquadratic_int_pow(
+    base: crate::algebra::algebraic::Multiquadratic,
+    exponent: i64,
+) -> crate::algebra::algebraic::Multiquadratic {
+    use crate::algebra::algebraic::Multiquadratic;
+    if exponent == 0 {
+        return Multiquadratic::from_i64(1);
+    }
+    let mut result = Multiquadratic::from_i64(1);
+    let mut power = base;
+    let mut remaining = exponent.unsigned_abs();
+    while remaining > 0 {
+        if remaining & 1 == 1 {
+            result = result * power;
+        }
+        remaining >>= 1;
+        if remaining > 0 {
+            power = power * power;
+        }
+    }
+    if exponent < 0 {
+        Multiquadratic::from_i64(1) / result
+    } else {
+        result
+    }
+}

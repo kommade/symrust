@@ -1,8 +1,15 @@
 mod test_antiderivative;
 mod test_derivative;
+mod test_diagonalization_svd;
+mod test_dynamic_matrix;
 mod test_expr;
+mod test_evaluate;
 mod test_float_gcd;
 mod test_float_math;
+mod test_linear;
+mod test_matrixable_sqrt;
+mod test_eigen;
+mod test_vector;
 
 static INIT: std::sync::Once = std::sync::Once::new();
 

@@ -80,6 +80,14 @@ pub enum IntegrationError {
     Unsupported(String),
     /// The search used up its time or step budget.
     Timeout,
+    /// The integral needs the general algebraic method, which is compiled out
+    /// unless the `algebraic` feature is enabled.
+    FeatureRequired {
+        /// The integrand that needed the feature.
+        expression: String,
+        /// The feature that must be enabled.
+        feature: &'static str,
+    },
 }
 
 impl Display for IntegrationError {
@@ -92,6 +100,12 @@ impl Display for IntegrationError {
             Self::Timeout => write!(
                 f,
                 "timed out while looking for an antiderivative; the function may not have an elementary one"
+            ),
+            Self::FeatureRequired { expression, feature } => write!(
+                f,
+                "could not find an elementary antiderivative for {expression} without the \
+                 `{feature}` feature; enable it (cargo build --features {feature}) to integrate \
+                 factors of degree three or more"
             ),
         }
     }
@@ -441,10 +455,19 @@ impl Integrator {
             return Ok(result);
         }
         // Rational functions (including plain polynomials).
-        if let Some(rational) = RationalFunction::from_node(node) {
+        if let Some(function) = RationalFunction::from_node(node) {
             debug!("Trying partial fractions on {}", describe(node));
-            if let Some(result) = rational.integrate(&self.variable_node()) {
+            self::rational::reset_algebraic_needed();
+            if let Some(result) = function.integrate(&self.variable_node()) {
                 return Ok(result);
+            }
+            // If the only thing in the way was the disabled `algebraic` feature,
+            // say so explicitly instead of a bare "unsupported".
+            if self::rational::algebraic_was_needed() {
+                return Err(IntegrationError::FeatureRequired {
+                    expression: describe(node),
+                    feature: "algebraic",
+                });
             }
             debug!(
                 "The partial fraction decomposition failed for {}",

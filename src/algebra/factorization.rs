@@ -303,7 +303,7 @@ fn factor_even(poly: &Poly) -> Option<Vec<(Factor, usize)>> {
     }
 }
 
-fn find_rational_root(poly: &Poly) -> Option<Rat> {
+pub(crate) fn find_rational_root(poly: &Poly) -> Option<Rat> {
     let degree = poly.degree()?;
     if degree < 1 {
         return None;

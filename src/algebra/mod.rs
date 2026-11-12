@@ -17,3 +17,8 @@ pub(crate) mod linear;
 pub(crate) mod polynomial;
 pub(crate) mod rational;
 pub(crate) mod surd;
+
+/// General algebraic-number support (Option B). Compiled only with the
+/// `algebraic` feature so the default build pays nothing for it.
+#[cfg(feature = "algebraic")]
+pub(crate) mod algebraic;

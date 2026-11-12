@@ -1211,7 +1211,6 @@ where
     fn distribute_expr(self, other: Self, mul_type: MulType) -> Self;
     fn remove_constants(self) -> Float;
     fn simplify(self, expand: bool, combine_fns: bool) -> Self;
-    fn is_polynomial(self) -> bool;
     fn factorise(self) -> Self;
     //fn substitute(self, value: Float) -> Float;
 }
@@ -1872,32 +1871,6 @@ impl NodeFunctions<Float> for Node {
                 }
             }
             _ => unreachable!(),
-        }
-    }
-    fn is_polynomial(self) -> bool {
-        let node = self.inner.borrow();
-        match &node.value {
-            NodeValue::Operator(op_node) => {
-                let left = op_node.left.clone();
-                let right = op_node.right.clone();
-                match &op_node.token {
-                    Token::Operator(op) => {
-                        if op.is_mul() || op == &Op::Add || op == &Op::Sub {
-                            if left.is_polynomial() && right.is_polynomial() {
-                                return true;
-                            }
-                        } else if op == &Op::Pow {
-                            if let Some(power) = right.inner.borrow().evaluate() {
-                                return power.is_integer() && !power.get_sign();
-                            }
-                        }
-                        return false;
-                    }
-                    _ => return false,
-                }
-            }
-            NodeValue::Operand(_) => return true,
-            _ => return false,
         }
     }
     fn factorise(self) -> Self {

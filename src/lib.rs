@@ -1,8 +1,12 @@
+#![feature(generic_const_exprs)]
+#![allow(incomplete_features)]
+
 use tracing::Subscriber;
 
-pub(crate) mod algebra;
+pub mod algebra;
 pub mod calculus;
-mod parse;
+pub mod evaluate;
+pub mod parse;
 pub mod structs;
 #[cfg(test)]
 mod tests;
