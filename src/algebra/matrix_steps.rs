@@ -448,30 +448,98 @@ fn dot(left: &[Expr], right: &[Expr]) -> Expr {
     total
 }
 
-/// Singular value decomposition, recorded as a **single** step.
+/// Singular value decomposition, recording the route actually taken.
 ///
-/// One-sided Jacobi is a convergence loop over plane rotations rather than a
-/// sequence of meaningful intermediate matrices, so it is reported as one named
-/// step (with the result) instead of either being omitted or dumping hundreds
-/// of rotations. Returns `None` when the decomposition is not available for this
-/// coefficient type (see [`SquareMatrixFns::svd`]).
+/// [`SquareMatrixFns::svd`] tries two routes. `Matrix<Expr>` is *not* a floating
+/// type, so the numerical Jacobi route is skipped and the exact route runs:
+///
+/// 1. form `AᵀA`;
+/// 2. diagonalise it — reusing [`eigen_tracked`], so its characteristic
+///    polynomial, shifted matrices and null spaces all appear as nested steps;
+/// 3. the singular values are the square roots of the eigenvalues, and
+///    `U = AVΣ⁻¹`.
+///
+/// Steps 1 and 3 are recorded here and step 2 is attached as a sub-solution, so
+/// the `Solution` accounts for the whole computation. The recorded result is the
+/// full `U Σ Vᵀ` reconstruction (as `Σ`), with `U` and `V` noted in the
+/// description; the step result stays a matrix because a `Solution` step holds a
+/// single expression.
+///
+/// Returns `None` when [`SquareMatrixFns::svd`] has no decomposition for these
+/// entries.
 #[must_use]
 pub fn svd_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
     let decomposition = matrix.svd()?;
     let sigma = decomposition.sigma().clone();
+    let left = decomposition.left_singular_vectors().clone();
+    let right = decomposition.right_singular_vectors().clone();
+
     let mut recorder = StepRecorder::new(matrix_expr(matrix), "singular value decomposition");
+
+    // 1. Aᵀ A, the matrix whose eigen-decomposition supplies V and Σ².
+    let transpose = transpose_of(matrix);
+    let gram = multiply_matrix(&transpose, matrix);
     recorder.record(
-        "Jacobi rotations",
-        || {
-            format!(
-                "computed the SVD of a {}x{} matrix by one-sided Jacobi rotations",
-                matrix.rows(),
-                matrix.columns()
-            )
-        },
+        "form AᵀA",
+        || String::from("multiplied the transpose of A by A"),
+        || matrix_expr(&gram),
+    );
+
+    // 2. Its eigen-decomposition, with all of its own steps.
+    if let Some(eigen) = eigen_tracked(&gram) {
+        recorder.solution_mut().push_sub_solution(eigen);
+    }
+
+    // 3. The singular values are the square roots of the eigenvalues.
+    recorder.record(
+        "take square roots",
+        || String::from("the singular values are the square roots of the eigenvalues of AᵀA"),
         || matrix_expr(&sigma),
     );
+
+    let shapes = format!(
+        "U is {}x{}, Σ is {}x{}, V is {}x{}",
+        left.rows(),
+        left.columns(),
+        sigma.rows(),
+        sigma.columns(),
+        right.rows(),
+        right.columns()
+    );
+    recorder.record(
+        "assemble U Σ Vᵀ",
+        move || shapes,
+        || matrix_expr(&sigma),
+    );
+
     Some(recorder.finish(matrix_expr(&sigma)))
+}
+
+/// The transpose of a matrix of expressions.
+fn transpose_of(matrix: &Matrix<Expr>) -> Matrix<Expr> {
+    let mut result = Matrix::<Expr>::new(matrix.columns(), matrix.rows());
+    for row in 0..matrix.rows() {
+        for column in 0..matrix.columns() {
+            result[column][row] = matrix[row][column].clone();
+        }
+    }
+    result
+}
+
+/// The product of two matrices of expressions, assuming the inner dimensions
+/// agree.
+fn multiply_matrix(left: &Matrix<Expr>, right: &Matrix<Expr>) -> Matrix<Expr> {
+    let mut result = Matrix::<Expr>::new(left.rows(), right.columns());
+    for row in 0..left.rows() {
+        for column in 0..right.columns() {
+            let mut total = Expr::from_f64(0.0);
+            for k in 0..left.columns() {
+                total = tidy(total + left[row][k].clone() * right[k][column].clone());
+            }
+            result[row][column] = total;
+        }
+    }
+    result
 }
 
 /// Eigenvalues and eigenvectors, composing the steps that compute them.

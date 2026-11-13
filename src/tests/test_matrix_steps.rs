@@ -194,49 +194,65 @@ fn qr_rejects_dependent_columns() {
     assert!(qr_tracked(&source).is_none());
 }
 
-/// SVD is reported as exactly one step, since Jacobi cannot be decomposed.
-///
-/// `Matrix<Expr>` is an *exact* coefficient type, so the decomposition only
-/// exists when it stays exactly representable. Whatever `svd()` decides, the
-/// tracked wrapper must agree: one step when it succeeds, nothing when it does
-/// not.
+/// The SVD is recorded through the route that `Matrix<Expr>` actually takes —
+/// the exact one, since `Expr` is not a floating type. That means `AᵀA` is
+/// formed, its eigen-decomposition is attached as a nested sub-solution, and the
+/// square roots of the eigenvalues are taken. It is emphatically *not* a single
+/// "Jacobi rotations" step.
 #[test]
-fn svd_is_at_most_one_step() {
+fn svd_records_the_exact_route() {
+    super::setup();
+    let source = matrix(&[&["1", "0"], &["0", "1"]]);
+    let solution = svd_tracked(&source).expect("the identity decomposes exactly");
+
+    assert_eq!(solution.problem_type(), "singular value decomposition");
+
+    let names: Vec<&str> = solution
+        .steps()
+        .iter()
+        .filter_map(|step| match step {
+            SolutionStep::Elementary(step) => Some(step.step_name.as_str()),
+            SolutionStep::SubSolution(_) => None,
+        })
+        .collect();
+    assert!(
+        names.contains(&"form AᵀA"),
+        "expected the AᵀA product step, got {names:?}"
+    );
+    assert!(
+        names.contains(&"take square roots"),
+        "expected the square-root step, got {names:?}"
+    );
+    assert!(
+        !names.contains(&"Jacobi rotations"),
+        "Expr does not use the Jacobi route, but got {names:?}"
+    );
+
+    // The eigen-decomposition of AᵀA must appear as a nested solution.
+    let nested = solution
+        .steps()
+        .iter()
+        .filter(|step| matches!(step, SolutionStep::SubSolution(_)))
+        .count();
+    assert_eq!(nested, 1, "expected one nested eigen sub-solution");
+}
+
+/// Whatever `svd()` decides, `svd_tracked` agrees.
+#[test]
+fn svd_agrees_with_untracked() {
     super::setup();
     for source in [
         matrix(&[&["1", "0"], &["0", "1"]]),
         matrix(&[&["4", "0"], &["0", "9"]]),
         matrix(&[&["1", "0"], &["0", "2"]]),
+        matrix(&[&["x", "0"], &["0", "1"]]),
     ] {
-        let untracked = source.svd().is_some();
-        match svd_tracked(&source) {
-            None => assert!(!untracked, "svd succeeded but svd_tracked did not"),
-            Some(solution) => {
-                assert!(untracked, "svd_tracked succeeded but svd did not");
-                assert_eq!(solution.problem_type(), "singular value decomposition");
-                let elementary = solution
-                    .steps()
-                    .iter()
-                    .filter(|step| matches!(step, SolutionStep::Elementary(_)))
-                    .count();
-                assert_eq!(elementary, 1, "SVD must be one step, got {elementary}");
-            }
-        }
+        assert_eq!(
+            source.svd().is_some(),
+            svd_tracked(&source).is_some(),
+            "svd and svd_tracked disagree"
+        );
     }
-}
-
-/// The identity has an exact SVD, so the single-step path is exercised.
-///
-/// Note: `svd()` on `Matrix<Expr>` currently yields `None` for every input,
-/// because `Expr` is an exact coefficient type and the exact path needs exact
-/// pivoting that a symbolic entry cannot guarantee. This test therefore asserts
-/// the *contract* — whichever way `svd()` decides, `svd_tracked` agrees and uses
-/// at most one step — rather than assuming success.
-#[test]
-fn svd_agrees_with_untracked_on_identity() {
-    super::setup();
-    let source = matrix(&[&["1", "0"], &["0", "1"]]);
-    assert_eq!(source.svd().is_some(), svd_tracked(&source).is_some());
 }
 
 /// Known limitation: `diagonalize()`/`svd()` on `Matrix<Expr>` currently return
