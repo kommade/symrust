@@ -403,22 +403,176 @@ fn general_term_algebraic(coefficients: &[Rat], factor: &Poly, variable: &Node) 
     }
 }
 
+/// Closed-form, exact integration of a binomial cubic factor `x^3 + c`.
+///
+/// `x^3 + c = (x − r)(x^2 + r·x + r^2)` with the real root `r = −∛c` (for
+/// `c > 0`) or `r = ∛|c|` (for `c < 0`). For the piece `N(x)/(x^3+c)` the partial
+/// fraction is `A/(x−r) + (B·x+C)/(x^2+r·x+r^2)` where, writing the quadratic as
+/// `q = x^2 + r·x + r^2`,
+///   `A = N(r)/(3r^2)`, `B = N'(0)|const − A·r = (n1 − A·r)`,
+///   `C = N(0) − A·r^2 = (n0 − A·r^2)`.
+/// Everything is built from the symbolic radicals `r`, `r^2`, and `√3`, so the
+/// answer carries no decimals (e.g. `∛2`, `∛4`). The result is passed through the
+/// numeric verifier; if it does not check out, `None` is returned so the caller
+/// can fall back.
+#[cfg(feature = "algebraic")]
+fn exact_cubic_binomial_term(
+    coefficients: &[Rat],
+    factor: &Poly,
+    variable: &Node,
+) -> Option<Node> {
+    let degree = factor.degree()?;
+    if degree != 3 {
+        return None;
+    }
+    // Binomial `x^3 + c`: the x^2 and x coefficients must vanish.
+    if !factor.coeff(2).is_zero() || !factor.coeff(1).is_zero() {
+        return None;
+    }
+    let leading = factor.leading()?;
+    if !leading.is_one() {
+        return None;
+    }
+    let c = factor.coeff(0);
+    if c.is_zero() {
+        return None;
+    }
+    let x = Node::clone(variable);
+
+    // `r = −∛c` (c > 0) or `r = ∛|c|` (c < 0). Build the third root symbolically.
+    let (c_num, c_den) = c.parts();
+    let magnitude = if c_num < 0 { -c_num } else { c_num };
+    let abs_c = Rat::new(magnitude, c_den)?;
+    // root3 = |c|^(1/3) as a node.
+    let abs_c_node = rational_node(abs_c);
+    let one_third = helpers::div(helpers::one(), helpers::number(3));
+    let root3 = helpers::pow(abs_c_node, one_third);
+    let r = if c_num > 0 {
+        helpers::negate(root3.clone())
+    } else {
+        root3.clone()
+    };
+    // `r^2 = |c|^(2/3)` — built from the positive `root3` so it never raises a
+    // negative base to a power (which goes through `ln` and yields NaN).
+    let r_squared = helpers::pow(root3, helpers::number(2));
+
+    // Numerator `N(x) = n2 x^2 + n1 x + n0` (low-to-high coefficients).
+    let coefficient = |power: usize| coefficients.get(power).copied().unwrap_or(Rat::from_i64(0));
+    let (n0, n1, n2) = (coefficient(0), coefficient(1), coefficient(2));
+
+    // `N(r) = n0 + n1 r + n2 r^2`, as an exact node.
+    let n_at_r = helpers::sum([
+        rational_node(n0),
+        multiply_rational(r.clone(), n1),
+        multiply_rational(r_squared.clone(), n2),
+    ]);
+    // `A = N(r) / (3 r^2)`. Because `r^3 = −c`, `1/(3 r^2) = (−r)/(3c)`, so
+    // `A = N(r) · (−r)/(3c)` — an exact `N(r)` times a rational multiple of `r`.
+    // Building it this way avoids ever forming `1/r^2` (an extra `∛` that the
+    // simplifier would fold to a float).
+    let neg_r_over_3c = {
+        // −1/(3c) where c = c_num/c_den:  −c_den / (3·c_num).
+        let factor = Rat::new(-c_den, 3 * c_num)?;
+        multiply_rational(r.clone(), factor)
+    };
+    let a_value = helpers::mul(n_at_r, neg_r_over_3c);
+    // `B = n2 − A`, `C = n1 + (B − A)·r` (from matching powers of x).
+    let b_value = helpers::sub(rational_node(n2), a_value.clone());
+    let c_value = helpers::add(
+        rational_node(n1),
+        helpers::mul(helpers::sub(b_value.clone(), a_value.clone()), r.clone()),
+    );
+
+    let mut terms: Vec<Node> = Vec::new();
+
+    // A / (x − r)  →  A ln|x − r|.
+    let linear = helpers::sub(x.clone(), r.clone());
+    terms.push(helpers::mul(a_value, helpers::function(Func::Ln, linear)));
+
+    // (B x + C)/(x² + r x + r²): write Bx+C = (B/2)(2x+r) + (C − B r/2).
+    let quadratic = helpers::add(
+        helpers::add(helpers::pow(x.clone(), helpers::number(2)), helpers::mul(r.clone(), x.clone())),
+        r_squared.clone(),
+    );
+    let half_b = multiply_rational(b_value.clone(), Rat::new(1, 2)?);
+    terms.push(helpers::mul(half_b.clone(), helpers::function(Func::Ln, quadratic)));
+
+    let atan_remainder = helpers::sub(c_value, helpers::div(helpers::mul(b_value, r.clone()), helpers::number(2)));
+    // √(4·1·r² − r²·... ) — completing the square gives √(3 r²) = |r|·√3.
+    let sqrt_neg_delta = helpers::sqrt_arg(multiply_rational(r_squared, Rat::from_i64(3)));
+    let centre = helpers::add(helpers::mul(helpers::number(2), x), r.clone());
+    let atan_arg = helpers::div(centre, sqrt_neg_delta.clone());
+    let atan_coefficient = helpers::div(
+        helpers::mul(helpers::number(2), atan_remainder),
+        sqrt_neg_delta,
+    );
+    terms.push(helpers::mul(
+        helpers::function(Func::Atan, atan_arg),
+        atan_coefficient,
+    ));
+
+    let result = helpers::sum(terms);
+
+    // Guard: only accept if it numerically differentiates back to N(x)/(x^3+c).
+    let x_check = Node::clone(variable);
+    let integrand = helpers::div(
+        poly_to_node(&Poly::new(coefficients.to_vec()), &x_check),
+        poly_to_node(factor, &x_check),
+    );
+    // Reject a result that evaluates to NaN (the numeric verifier treats NaN as
+    // inconclusive and would otherwise accept it).
+    let finite = helpers::evaluate_at(&result, &crate::numeric::Real::from_f64(0.3721))
+        .is_some_and(|value| value.is_normal());
+    if finite && helpers::verify(&integrand, &result) {
+        Some(result)
+    } else {
+        None
+    }
+}
+
+/// Build a node for an exact rational number.
+#[cfg(feature = "algebraic")]
+fn rational_node(value: Rat) -> Node {
+    let (num, den) = value.parts();
+    let numerator = Rat::integer_node(num);
+    if den == 1 {
+        numerator
+    } else {
+        helpers::div(numerator, Rat::integer_node(den))
+    }
+}
+
+/// Multiply a node by an exact rational.
+#[cfg(feature = "algebraic")]
+fn multiply_rational(node: Node, value: Rat) -> Node {
+    crate::algebra::expr::multiply_by_rational(node, value)
+}
+
 #[cfg(feature = "algebraic")]
 fn algebraic_factor_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
     use crate::algebra::algebraic::real_roots;
     use crate::calculus::expr::float_from;
 
-    // Prefer the exact formal root sum `Σ_{Z: p(Z)=0} N_p(Z) ln|x − Z| / p'(Z)`.
-    // This keeps the answer exact (no decimals): the unknown roots `Z` stay
-    // symbolic, and the coefficients are exact rationals. It also gives the
-    // cleanest form for the "irreducible over the reals" cases such as
-    // `1/(x^3+2)`, `1/(x^3-3x+1)`, `1/(x^7+1)` and `1/(x^8+1)`.
-    if let Some(term) = root_sum_term(coefficients, factor, variable) {
+    let degree = factor.degree()?;
+    let roots = real_roots(factor);
+
+    // A binomial factor `x^3 + c` factors over the reals as
+    // `(x − r)(x^2 + r·x + r^2)` with the (exact) real root `r = −∛c`, so it is
+    // NOT handled by a root sum: integrate it in closed form with the exact
+    // radicals `∛c`, `∛c^2`, `√3` kept symbolic. Guarded by the numeric verifier
+    // so a mis-derived form falls back rather than producing a wrong answer.
+    if let Some(term) = exact_cubic_binomial_term(coefficients, factor, variable) {
         return Some(term);
     }
 
-    let degree = factor.degree()?;
-    let roots = real_roots(factor);
+    // The denominator has no real-radical factorisation (a casus-irreducibilis
+    // cubic or a higher-degree factor): express the integral as an exact formal
+    // root sum over the roots `Z`. (Binomial cubics were handled above.)
+    if degree >= 3 {
+        if let Some(term) = root_sum_term(coefficients, factor, variable) {
+            return Some(term);
+        }
+    }
 
     // Any factor that is not the classic "cubic with a single real root" is
     // handed to the general real-root peeler, which handles any degree that

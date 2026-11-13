@@ -1323,7 +1323,20 @@ impl NodeInner {
                                 Op::Sub => Some(left - right),
                                 Op::Mul | Op::ImplicitMul => Some(left * right),
                                 Op::Div => Some(left / right),
-                                Op::Pow => Some(left.pow(&right)),
+                                Op::Pow => {
+                                    // Keep fractional powers of a constant base
+                                    // symbolic, e.g. `2^(1/3)` (a cube root) and
+                                    // `2^(2/3)`, instead of folding them to a
+                                    // decimal. Integer powers still fold. This is
+                                    // what lets the display show exact radicals;
+                                    // the numeric evaluator (`evaluate_operator`)
+                                    // still computes a decimal value on demand.
+                                    if !right.is_integer() {
+                                        None
+                                    } else {
+                                        Some(left.pow(&right))
+                                    }
+                                }
                             }
                         }
                         // Function values are not folded back into floats: the
