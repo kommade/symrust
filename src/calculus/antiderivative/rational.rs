@@ -524,7 +524,10 @@ fn higher_degree_term(
 ) -> Option<Node> {
     let degree = factor.degree()?;
     if degree.saturating_sub(roots.len()) > 2 {
-        return None;
+        // The real roots leave a cubic-or-higher complex remainder. Factor it
+        // numerically into real linears and irreducible quadratics and integrate
+        // in the splitting field (decimal coefficients).
+        return numeric_factor_term(coefficients, factor, variable);
     }
 
     let denom: Vec<f64> = (0..=degree).map(|i| factor.coeff(i).to_f64()).collect();
@@ -702,6 +705,237 @@ fn quadratic_node(a: f64, b: f64, e: f64, variable: &Node) -> Node {
         ),
         helpers::float(float_from(e)),
     )
+}
+
+/// Numeric integration of `N(x)/D(x)` for a denominator that has no real-surd
+/// factorisation, by splitting `D` over the complex numbers into real linear and
+/// irreducible-quadratic factors (decimal coefficients) and integrating each
+/// factor of the resulting partial-fraction decomposition.
+///
+/// This covers the "irreducible over square roots" cases such as `1/(x^7+1)` and
+/// `1/(x^8+1)`: their conjugate root pairs give real quadratics with real
+/// coefficients (for example `x^2 - 2 cos(2 pi / 7) x + 1`), which the standard
+/// `ln`/`atan` formulas integrate. The coefficients are decimal approximations;
+/// the numeric verifier confirms the result.
+#[cfg(feature = "algebraic")]
+fn numeric_factor_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
+    let degree = factor.degree()?;
+    if degree < 1 {
+        return None;
+    }
+    let leading = factor.leading()?.to_f64();
+    if leading.abs() < 1e-30 {
+        return None;
+    }
+    // Monic denominator coefficients (low-to-high), then numerator scaled by the
+    // leading coefficient so `N(x)/D(x) = (N/leading) / (D/leading)`.
+    let monic: Vec<f64> = (0..=degree).map(|i| factor.coeff(i).to_f64() / leading).collect();
+    if (monic[degree] - 1.0).abs() > 1e-9 {
+        return None;
+    }
+    let numer: Vec<f64> = {
+        let mut n: Vec<f64> = coefficients.iter().map(|value| value.to_f64() / leading).collect();
+        n.resize(degree.max(n.len()), 0.0);
+        n
+    };
+
+    let roots = complex_roots(&monic)?;
+
+    // Group into real linears (imag ~ 0) and conjugate-pair quadratics
+    // `x^2 - 2 Re(z) x + |z|^2`.
+    let mut factors: Vec<Vec<f64>> = Vec::new(); // each is low-to-high coefficients
+    let mut consumed = vec![false; roots.len()];
+    for i in 0..roots.len() {
+        if consumed[i] {
+            continue;
+        }
+        let z = roots[i];
+        if z.1.abs() < 1e-7 {
+            consumed[i] = true;
+            // real root r
+            factors.push(vec![-z.0, 1.0]);
+        } else {
+            consumed[i] = true;
+            // find the conjugate
+            let mut partner = None;
+            for j in (i + 1)..roots.len() {
+                if !consumed[j] && (roots[j].0 - z.0).abs() < 1e-6 && (roots[j].1 + z.1).abs() < 1e-6 {
+                    partner = Some(j);
+                    break;
+                }
+            }
+            let j = partner?;
+            consumed[j] = true;
+            let real = z.0;
+            let modulus_sq = z.0 * z.0 + z.1 * z.1;
+            factors.push(vec![modulus_sq, -2.0 * real, 1.0]);
+        }
+    }
+
+    // Sum of degrees must equal the denominator degree for a complete split.
+    let total: usize = factors.iter().map(|f| f.len() - 1).sum();
+    if total != degree {
+        return None;
+    }
+
+    // Numeric partial fractions: N = sum_i C_i(x) * (D / Q_i), where C_i has
+    // degree < deg(Q_i). Solve the small linear system by matching coefficients.
+    let coefficients_solution = solve_numeric_partial_fractions(&numer, &factors)?;
+
+    let mut terms: Vec<Node> = Vec::new();
+    let mut index = 0;
+    for factor_poly in &factors {
+        let fdeg = factor_poly.len() - 1;
+        let piece: Vec<f64> = coefficients_solution[index..index + fdeg].to_vec();
+        index += fdeg;
+        // piece is the numerator over this factor; integrate it.
+        terms.push(integrate_low_degree(&piece, factor_poly, variable)?);
+    }
+    Some(helpers::sum(terms))
+}
+
+/// All complex roots of a monic polynomial (low-to-high coefficients) via
+/// Durand–Kerner iteration, as `(re, im)` pairs.
+#[cfg(feature = "algebraic")]
+fn complex_roots(monic: &[f64]) -> Option<Vec<(f64, f64)>> {
+    let n = monic.len().checked_sub(1)?;
+    if n == 0 {
+        return Some(Vec::new());
+    }
+    let eval = |z: (f64, f64)| -> (f64, f64) {
+        // Horner over complex z for low-to-high coefficients.
+        let mut acc = (0.0, 0.0);
+        for coefficient in monic.iter().rev() {
+            // acc = acc * z + coefficient
+            let re = acc.0 * z.0 - acc.1 * z.1 + coefficient;
+            let im = acc.0 * z.1 + acc.1 * z.0;
+            acc = (re, im);
+        }
+        acc
+    };
+    // Seed on a circle of radius r = 1 + max|a_i|.
+    let radius = 1.0 + monic[..n].iter().fold(0.0_f64, |m, a| m.max(a.abs()));
+    let mut roots: Vec<(f64, f64)> = (0..n)
+        .map(|k| {
+            let angle = 2.0 * std::f64::consts::PI * k as f64 / n as f64 + 0.4;
+            (radius * angle.cos(), radius * angle.sin())
+        })
+        .collect();
+
+    for _ in 0..500 {
+        let mut max_delta = 0.0_f64;
+        for i in 0..n {
+            let zi = roots[i];
+            let (mut re, mut im) = eval(zi);
+            // Divide by prod_{j != i} (zi - zj).
+            for j in 0..n {
+                if j == i {
+                    continue;
+                }
+                let dr = zi.0 - roots[j].0;
+                let di = zi.1 - roots[j].1;
+                let den = dr * dr + di * di;
+                if den < 1e-300 {
+                    break;
+                }
+                // (re + i im) / (dr + i di)
+                let nr = (re * dr + im * di) / den;
+                let ni = (im * dr - re * di) / den;
+                re = nr;
+                im = ni;
+            }
+            let new = (zi.0 - re, zi.1 - im);
+            let delta = re.abs() + im.abs();
+            max_delta = max_delta.max(delta);
+            roots[i] = new;
+        }
+        if max_delta < 1e-14 {
+            break;
+        }
+    }
+    Some(roots)
+}
+
+/// Solve `N(x) = sum_i C_i(x) * (D(x)/Q_i(x))` for the `C_i` (each of degree
+/// `deg Q_i - 1`) by a dense linear solve on the coefficient vectors.
+#[cfg(feature = "algebraic")]
+fn solve_numeric_partial_fractions(numer: &[f64], factors: &[Vec<f64>]) -> Option<Vec<f64>> {
+    let degree = numer.len();
+    if degree == 0 {
+        return Some(Vec::new());
+    }
+    // Build the columns: for each factor, for each basis power x^b (b < deg Q_i),
+    // the column is (D/Q_i) * x^b, as a length-`degree` coefficient vector.
+    let mut columns: Vec<Vec<f64>> = Vec::new();
+    for (i, qi) in factors.iter().enumerate() {
+        let cofactor = poly_exact_div(factors, i)?;
+        let fdeg = qi.len() - 1;
+        for basis in 0..fdeg {
+            let mut column = vec![0.0; degree];
+            for (p, c) in cofactor.iter().enumerate() {
+                let idx = p + basis;
+                if idx < degree {
+                    column[idx] += c;
+                }
+            }
+            columns.push(column);
+        }
+    }
+    if columns.len() != degree {
+        return None;
+    }
+    // Gaussian elimination on the square system columns * coeffs = numer.
+    let n = degree;
+    let mut matrix: Vec<Vec<f64>> = (0..n)
+        .map(|row| (0..n).map(|col| columns[col].get(row).copied().unwrap_or(0.0)).collect())
+        .collect();
+    let mut rhs: Vec<f64> = numer.to_vec();
+    for pivot in 0..n {
+        // Partial pivot.
+        let mut best = pivot;
+        for r in (pivot + 1)..n {
+            if matrix[r][pivot].abs() > matrix[best][pivot].abs() {
+                best = r;
+            }
+        }
+        if matrix[best][pivot].abs() < 1e-12 {
+            return None;
+        }
+        matrix.swap(pivot, best);
+        rhs.swap(pivot, best);
+        let pivot_value = matrix[pivot][pivot];
+        for r in 0..n {
+            if r == pivot {
+                continue;
+            }
+            let ratio = matrix[r][pivot] / pivot_value;
+            for c in pivot..n {
+                matrix[r][c] -= ratio * matrix[pivot][c];
+            }
+            rhs[r] -= ratio * rhs[pivot];
+        }
+    }
+    Some((0..n).map(|i| rhs[i] / matrix[i][i]).collect())
+}
+
+/// The product of all factor polynomials except the `skip`-th, as a low-to-high
+/// coefficient vector (the cofactor `D / Q_skip`).
+#[cfg(feature = "algebraic")]
+fn poly_exact_div(factors: &[Vec<f64>], skip: usize) -> Option<Vec<f64>> {
+    let mut product = vec![1.0];
+    for (i, factor) in factors.iter().enumerate() {
+        if i == skip {
+            continue;
+        }
+        let mut next = vec![0.0; product.len() + factor.len() - 1];
+        for (a, ca) in product.iter().enumerate() {
+            for (b, cb) in factor.iter().enumerate() {
+                next[a + b] += ca * cb;
+            }
+        }
+        product = next;
+    }
+    Some(product)
 }
 
 fn quartic_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {

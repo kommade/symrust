@@ -169,11 +169,16 @@ fn factored_and_expanded_denominators_agree() {
 #[test]
 fn irreducible_denominators_report_failure() {
     super::setup();
-    // These have more than one real root or degree above three, which the
-    // `algebraic` path does not attempt, so they fail in every build.
+    // x^7+1 and x^8+1 have cyclotomic factors that do not reduce to quadratics
+    // over a single square-root extension. Without the `algebraic` feature they
+    // are refused; with it they integrate numerically by splitting over the
+    // complex roots (decimal coefficients).
     for input in ["1/(x^7+1)", "1/(x^8+1)"] {
         let expr = create_expr!(input).unwrap();
-        assert!(expr.get_antiderivative().is_err(), "{input}");
+        #[cfg(feature = "algebraic")]
+        assert!(expr.get_antiderivative().is_ok(), "{input} with the algebraic feature");
+        #[cfg(not(feature = "algebraic"))]
+        assert!(expr.get_antiderivative().is_err(), "{input} without the algebraic feature");
     }
     // A cubic with a single real root: the exact paths give up, but the
     // `algebraic` feature integrates it.
