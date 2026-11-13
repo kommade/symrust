@@ -2,6 +2,101 @@ use std::{error::Error, fmt::Display};
 
 use crate::numeric::{FloatType, Real};
 
+/// A formal sum over the (unknown, generally complex) roots of a polynomial.
+///
+/// The antiderivative of a rational function whose denominator has an
+/// irreducible-over-ℝ factor `p(x)` can be written exactly in terms of the
+/// roots `Z` of `p`:
+///
+/// ```text
+/// Σ_{Z : p(Z) = 0}  N(Z) · ln|x − Z| / p'(Z)
+/// ```
+///
+/// This leaf node renders exactly that sum, so the answer no longer has to be
+/// expanded into decimal `atan`/`cos` terms. The polynomial coefficients are
+/// stored exactly (as [`Rat`]s), so the display is exact and the value can also
+/// be evaluated numerically for verification.
+#[derive(Debug, Clone)]
+pub struct RootSumData {
+    /// The root symbol the sum is taken over, e.g. `Z`.
+    pub root_symbol: char,
+    /// The integration variable appearing inside `ln|variable − Z|`, e.g. `x`.
+    pub variable: char,
+    /// The polynomial whose roots are summed over, coefficients low-to-high.
+    pub(crate) modulus: Vec<crate::algebra::rational::Rat>,
+    /// The numerator `N(root)`, coefficients low-to-high.
+    pub(crate) numerator: Vec<crate::algebra::rational::Rat>,
+}
+
+impl Display for RootSumData {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "Σ_{{{r}: {p} = 0}} ({n}) ln|{v} - {r}| / ({d})",
+            r = self.root_symbol,
+            p = poly_text(&self.modulus, self.root_symbol),
+            n = poly_text(&self.numerator, self.root_symbol),
+            v = self.variable,
+            d = poly_text(&poly_derivative(&self.modulus), self.root_symbol),
+        )
+    }
+}
+
+/// Derivative of a polynomial (low-to-high coefficients).
+pub(crate) fn poly_derivative(
+    coefficients: &[crate::algebra::rational::Rat],
+) -> Vec<crate::algebra::rational::Rat> {
+    coefficients
+        .iter()
+        .enumerate()
+        .skip(1)
+        .map(|(power, coefficient)| {
+            coefficient
+                .mul(crate::algebra::rational::Rat::from_i64(power as i64))
+                .unwrap_or_else(|| crate::algebra::rational::Rat::from_i64(0))
+        })
+        .collect()
+}
+
+/// Render a polynomial (low-to-high coefficients) exactly in the given symbol.
+pub(crate) fn poly_text(coefficients: &[crate::algebra::rational::Rat], symbol: char) -> String {
+    let mut terms: Vec<String> = Vec::new();
+    for power in (0..coefficients.len()).rev() {
+        let coefficient = coefficients[power];
+        if coefficient.is_zero() {
+            continue;
+        }
+        let negative = coefficient.is_negative();
+        let magnitude = if negative { coefficient.neg() } else { coefficient };
+        let (num, den) = magnitude.parts();
+        let coeff_str = if den == 1 {
+            format!("{num}")
+        } else {
+            format!("{num}/{den}")
+        };
+        let is_unit = num == 1 && den == 1;
+        let term = match power {
+            0 => coeff_str,
+            1 if is_unit => format!("{symbol}"),
+            1 => format!("{coeff_str} {symbol}"),
+            _ if is_unit => format!("{symbol}^{power}"),
+            _ => format!("{coeff_str} {symbol}^{power}"),
+        };
+        if terms.is_empty() {
+            terms.push(if negative { format!("-{term}") } else { term });
+        } else if negative {
+            terms.push(format!("- {term}"));
+        } else {
+            terms.push(format!("+ {term}"));
+        }
+    }
+    if terms.is_empty() {
+        String::from("0")
+    } else {
+        terms.join(" ")
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Func<T = Real> {
     Sin,
@@ -107,6 +202,8 @@ pub enum Token<T = Real> {
     Float(T),
     Indp(char),
     Var(char),
+    /// A formal `Σ_{Z : p(Z) = 0}` root sum (see [`RootSumData`]).
+    RootSum(RootSumData),
     LPar,
     RPar,
 }
@@ -120,6 +217,7 @@ impl<T: FloatType + Display> Display for Token<T> {
             Self::Number(n) => write!(f, "{n}"),
             Self::Float(n) => write!(f, "{n}"),
             Self::Indp(c) | Self::Var(c) => write!(f, "{c}"),
+            Self::RootSum(data) => write!(f, "{data}"),
             Self::LPar => write!(f, "("),
             Self::RPar => write!(f, ")"),
         }
@@ -154,6 +252,7 @@ impl<T> Token<T> {
                 | Self::RPar
                 | Self::Indp(_)
                 | Self::Function(_)
+                | Self::RootSum(_)
                 | Self::LPar
         )
     }

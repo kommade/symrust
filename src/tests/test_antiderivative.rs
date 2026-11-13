@@ -171,9 +171,9 @@ fn irreducible_denominators_report_failure() {
     super::setup();
     // x^7+1 and x^8+1 have cyclotomic factors (Phi_14, Phi_16) that do not
     // reduce to quadratics over a square-root extension. Without the `algebraic`
-    // feature they are refused; with it they integrate numerically over the
-    // complex roots. With `complex` as well, they integrate exactly in terms of
-    // roots of unity, so the angles appear as `cos(π / k)` rather than decimals.
+    // feature they are refused; with it they integrate exactly as a formal sum
+    // over the unknown roots `Z` of the irreducible factor:
+    //   Σ_{Z: p(Z)=0} N_p(Z) ln|x − Z| / p'(Z).
     for input in ["1/(x^7+1)", "1/(x^8+1)"] {
         let expr = create_expr!(input).unwrap();
         #[cfg(feature = "algebraic")]
@@ -183,14 +183,8 @@ fn irreducible_denominators_report_failure() {
                 .unwrap_or_else(|error| panic!("{input} with the algebraic feature: {error}"));
             let text = antiderivative.to_string();
             assert!(
-                text.contains("ln(") || text.contains("atan("),
-                "{input} should produce log/atan terms, got {text}"
-            );
-            // With the root-of-unity path the angles stay symbolic.
-            #[cfg(feature = "complex")]
-            assert!(
-                text.contains("cos(π"),
-                "{input} should carry exact roots-of-unity angles like `cos(π / k)`, got {text}"
+                text.contains('Σ') && text.contains("ln|x - Z|"),
+                "{input} should integrate as a root sum over Z, got {text}"
             );
         }
         #[cfg(not(feature = "algebraic"))]

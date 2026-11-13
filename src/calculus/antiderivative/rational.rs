@@ -938,18 +938,58 @@ fn gcd(a: i64, b: i64) -> i64 {
     a
 }
 
+/// Build the exact formal root-sum term for an irreducible factor `p`.
+///
+/// With `p(x)` a factor that has no real (or surd) factorisation, the integral
+/// of the partial-fraction piece `N_p(x)/p(x)` is, over the roots `Z` of `p`:
+///
+/// ```text
+/// Σ_{Z : p(Z) = 0}  N_p(Z) · ln|x − Z| / p'(Z)
+/// ```
+///
+/// This returns exactly that as a single [`RootSumData`] leaf (times nothing —
+/// the residue `N_p(Z)/p'(Z)` is carried inside the sum). It needs only exact
+/// rational arithmetic, so it works whenever `algebraic` alone is enabled.
+#[cfg(feature = "algebraic")]
+fn root_sum_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
+    let degree = factor.degree()?;
+    if degree < 1 {
+        return None;
+    }
+    let variable = helpers::independent_variable(variable);
+    let modulus: Vec<Rat> = (0..=degree).map(|power| factor.coeff(power)).collect();
+    // The piece numerator, padded to the denominator degree (low-to-high).
+    let mut numerator: Vec<Rat> = coefficients.to_vec();
+    numerator.resize(degree, Rat::from_i64(0));
+    let data = crate::parse::lexer::RootSumData {
+        root_symbol: 'Z',
+        variable,
+        modulus,
+        numerator,
+    };
+    Some(Node::root_sum(data))
+}
+
 /// Numeric integration of `N(x)/D(x)` for a denominator that has no real-surd
 /// factorisation, by splitting `D` over the complex numbers into real linear and
 /// irreducible-quadratic factors (decimal coefficients) and integrating each
 /// factor of the resulting partial-fraction decomposition.
 ///
 /// This covers the "irreducible over square roots" cases such as `1/(x^7+1)` and
-/// `1/(x^8+1)`: their conjugate root pairs give real quadratics with real
-/// coefficients (for example `x^2 - 2 cos(2 pi / 7) x + 1`), which the standard
-/// `ln`/`atan` formulas integrate. The coefficients are decimal approximations;
-/// the numeric verifier confirms the result.
+/// `1/(x^8+1)` as a fallback; the exact root-sum form (see [`root_sum_term`]) is
+/// preferred and normally succeeds first.
 #[cfg(feature = "algebraic")]
 fn numeric_factor_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
+    // Exact closed form: write the integral over the (unknown) roots `Z` of the
+    // irreducible factor as a formal root sum
+    //   Σ_{Z: p(Z)=0} N_p(Z) ln|x − Z| / p'(Z),
+    // with the exact partial-fraction numerator `N_p` and denominator p. This is
+    // the cleanest exact answer for a factor that does not split over the reals
+    // (e.g. Φ₁₄ for `1/(x^7+1)`, Φ₁₆ for `1/(x^8+1)`).
+    if let Some(term) = root_sum_term(coefficients, factor, variable) {
+        return Some(term);
+    }
+
     // Exact path: a cyclotomic factor `x^n ± 1` has roots on the unit circle,
     // so its integral can be written exactly in terms of roots of unity — the
     // real quadratics then carry symbolic `cos(2πk/n)` / `sin(2πk/n)`

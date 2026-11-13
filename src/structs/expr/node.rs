@@ -96,6 +96,11 @@ impl<T: FloatType + Display> Node<T> {
     pub fn independent(name: char) -> Self {
         NodeInner::operand(Token::Indp(name)).wrap()
     }
+    /// A formal `Σ_{Z : p(Z) = 0}` root-sum leaf (see [`RootSumData`]).
+    #[must_use]
+    pub fn root_sum(data: crate::parse::lexer::RootSumData) -> Self {
+        NodeInner::operand(Token::RootSum(data)).wrap()
+    }
     /// A binary operation node, e.g. `left + right`.
     #[must_use]
     pub fn operate(op: Op, left: Self, right: Self) -> Self {
@@ -157,6 +162,7 @@ impl<T: FloatType + Display> Node<T> {
                 Token::Float(value) => Token::Float(T::from_float(value.clone().into())),
                 Token::Indp(c) => Token::Indp(*c),
                 Token::Var(c) => Token::Var(*c),
+                Token::RootSum(data) => Token::RootSum(data.clone()),
                 Token::LPar => Token::LPar,
                 Token::RPar => Token::RPar,
             }
@@ -295,6 +301,17 @@ impl NodeInner {
                 },
                 Token::Var(var) => Ok(format!("{var}")),
                 Token::Indp(indp) => Ok(format!("{indp}")),
+                Token::RootSum(data) => Ok(format!(
+                    r"\sum_{{{r}:\ {p}=0}} \frac{{({n})\ \ln\left|{v}-{r}\right|}}{{{d}}}",
+                    r = data.root_symbol,
+                    p = crate::parse::lexer::poly_text(&data.modulus, data.root_symbol),
+                    n = crate::parse::lexer::poly_text(&data.numerator, data.root_symbol),
+                    v = data.variable,
+                    d = crate::parse::lexer::poly_text(
+                        &crate::parse::lexer::poly_derivative(&data.modulus),
+                        data.root_symbol,
+                    ),
+                )),
                 _ => Err(NodeError::WrongToken("operand".to_string())),
             },
             NodeValue::Operator(op_node) => {
@@ -596,6 +613,8 @@ impl<T: FloatType + Display> NodeInner<T> {
         let (has_indp, has_const, has_func) = match token {
             Token::Indp(_) => (true, false, false),
             Token::Constant(_) | Token::Var(_) => (false, true, false),
+            // A root sum contains the integration variable inside `ln|x − Z|`.
+            Token::RootSum(_) => (true, false, false),
             Token::Operator(_) | Token::Function(_) | Token::LPar | Token::RPar => {
                 panic!("Invalid token for operand: {token}")
             }

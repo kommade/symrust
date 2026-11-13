@@ -59,6 +59,7 @@ impl<T: FloatType + Display> Parser<T> {
                 | Token::Float(_)
                 | Token::Constant(_)
                 | Token::Var(_)
+                | Token::RootSum(_)
                 | Token::Indp(_) => {
                     output.push(token);
                     continue;
