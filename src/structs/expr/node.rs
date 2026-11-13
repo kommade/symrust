@@ -462,6 +462,32 @@ impl Display for NodeInner<Real> {
                     Token::Operator(op) => {
                         match op {
                             Op::Pow => {
+                                // `a ^ (b / c)` is displayed as the `c`-th root
+                                // `rt_c(a ^ b)` (and `rt_c(a)` when `b = 1`),
+                                // which reads as an exact radical rather than a
+                                // fractional exponent.
+                                if let Some((base, index, power)) =
+                                    NodeInner::<Real>::root_power_parts(&op_node.left, &op_node.right)
+                                {
+                                    let base_str = if base.inner.borrow().is_operator() {
+                                        format!("({})", base.inner.borrow())
+                                    } else {
+                                        format!("{}", base.inner.borrow())
+                                    };
+                                    let radicand = match power {
+                                        Some(power) => {
+                                            let power_str = format!("{}", power.inner.borrow());
+                                            let power_str = if power.inner.borrow().is_operator() {
+                                                format!("({power_str})")
+                                            } else {
+                                                power_str
+                                            };
+                                            format!("{base_str} ^ {power_str}")
+                                        }
+                                        None => base_str,
+                                    };
+                                    return write!(f, "rt_{index}({radicand})");
+                                }
                                 if left.is_operator() {
                                     left_str = format!("({left_str})");
                                 }
@@ -714,6 +740,43 @@ impl<T: FloatType + Display> NodeInner<T> {
 impl NodeInner {
     fn is_constant_node(node: &Node) -> bool {
         !node.inner.borrow().has_indp
+    }
+
+    /// If `exponent` is a fraction `b / c` with `c` a positive integer, return
+    /// `(base, "c", Some(b))` (or `None` for `b` when `b == 1`) so that
+    /// `base ^ (b/c)` can be displayed as the root `rt_c(base ^ b)`.
+    fn root_power_parts(base: &Node, exponent: &Node) -> Option<(Node, String, Option<Node>)> {
+        let borrow = exponent.inner.borrow();
+        let NodeValue::Operator(op_node) = &borrow.value else {
+            return None;
+        };
+        if !matches!(op_node.token, Token::Operator(Op::Div)) {
+            return None;
+        }
+        let numerator = op_node.left.clone();
+        let denominator = op_node.right.clone();
+        drop(borrow);
+        // The denominator must be a positive integer constant.
+        let index = denominator.inner.borrow().evaluate()?;
+        if !index.is_integer() || index.is_negative() || index.is_zero() {
+            return None;
+        }
+        // The numerator must be a (non-zero) integer constant.
+        let power_value = numerator.inner.borrow().evaluate()?;
+        if !power_value.is_integer() || power_value.is_zero() {
+            return None;
+        }
+        // `rt_c(x)` when the numerator is `1`, else `rt_c(base ^ b)`.
+        let power = if power_value.is_one() {
+            None
+        } else {
+            Some(numerator)
+        };
+        let index_str = {
+            let repr = index.to_string();
+            repr.strip_suffix('.').unwrap_or(&repr).to_string()
+        };
+        Some((base.clone(), index_str, power))
     }
 
     /// `true` when the subtree contains a named constant such as `π` or `e`.
@@ -1945,8 +2008,18 @@ impl NodeFunctions<Real> for Node {
                                     {
                                         if let Some(den_val) = den_const.inner.borrow().evaluate() {
                                             if !den_val.is_zero() {
+                                                let result_val = num_val / den_val;
+                                                // Keep a non-integer quotient symbolic so it
+                                                // displays as an exact fraction (`1 / 3`)
+                                                // instead of a long decimal (`.333…`). Only
+                                                // an integer quotient is folded to a float.
+                                                if !result_val.is_integer() {
+                                                    return NodeInner::<Real>::from_operation(
+                                                        Op::Div, left, right,
+                                                    );
+                                                }
                                                 let new_numerator =
-                                                    NodeInner::<Real>::from_float(num_val / den_val).wrap();
+                                                    NodeInner::<Real>::from_float(result_val).wrap();
                                                 if den_rest.inner.borrow().is_one() {
                                                     return new_numerator;
                                                 } else {

@@ -282,7 +282,7 @@ fn derivative_of_extended_functions() {
         ("asin(x)", "1 / sqrt(1 - x ^ 2)"),
         ("acos(x)", "-1 / sqrt(1 - x ^ 2)"),
         ("atan(x)", "1 / (x ^ 2 + 1)"),
-        ("sqrt(x)", ".5 / sqrt(x)"),
+        ("sqrt(x)", "1 / (2 sqrt(x))"),
         ("asin(2x)", "2 / sqrt(1 - (2 x) ^ 2)"),
     ];
     for (input, expected) in cases {
@@ -294,9 +294,11 @@ fn derivative_of_extended_functions() {
 #[test]
 fn try_custom() {
     super::setup();
-    let expr = create_expr!("cos(ln(x))").unwrap();
-    let antiderivative = expr.get_antiderivative().unwrap();
-    println!("antiderivative: {}", antiderivative.to_string());
+    let expr = create_expr!("2x*sqrt(1-x) + sqrt(1-x)^3/3").unwrap();
+    match expr.get_antiderivative() {
+        Ok(antiderivative) => println!("antiderivative: {}", antiderivative.to_string()),
+        Err(error) => println!("no antiderivative: {error}"),
+    }
 }
 
 /// With the `algebraic` feature, an irreducible cubic denominator that the
@@ -336,10 +338,10 @@ fn binomial_cubic_uses_exact_radicals() {
             !rendered.contains('Σ'),
             "{input} should not use a root sum, got {rendered}"
         );
-        // The cube root appears as the fractional power `2 ^ (1/3)` (rendered
-        // `2 ^ .333…`), and the long decimal forms must be gone.
+        // The cube root appears as the root form `rt_3(2)` (the `c`-th root of
+        // `a^b`), and the long decimal forms must be gone.
         assert!(
-            rendered.contains("2 ^ .333"),
+            rendered.contains("rt_3(2)"),
             "{input}: expected the symbolic cube root of 2, got {rendered}"
         );
         assert!(
