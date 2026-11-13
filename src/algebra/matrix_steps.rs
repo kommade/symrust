@@ -497,22 +497,26 @@ pub fn svd_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
         || matrix_expr(&sigma),
     );
 
-    let shapes = format!(
-        "U is {}x{}, Σ is {}x{}, V is {}x{}",
-        left.rows(),
-        left.columns(),
-        sigma.rows(),
-        sigma.columns(),
-        right.rows(),
-        right.columns()
-    );
+    // 4. Assemble U Σ Vᵀ, which must reconstruct A.
+    let right_transpose = transpose_of(&right);
+    let reconstructed = multiply_matrix(&multiply_matrix(&left, &sigma), &right_transpose);
     recorder.record(
         "assemble U Σ Vᵀ",
-        move || shapes,
-        || matrix_expr(&sigma),
+        || format!(
+            "U is {}x{}, Σ is {}x{}, V is {}x{}; the product reconstructs A",
+            left.rows(),
+            left.columns(),
+            sigma.rows(),
+            sigma.columns(),
+            right.rows(),
+            right.columns()
+        ),
+        || matrix_expr(&reconstructed),
     );
 
-    Some(recorder.finish(matrix_expr(&sigma)))
+    // The answer is the reconstruction, which is A again — recording Σ as the
+    // result would lose U and V entirely.
+    Some(recorder.finish(matrix_expr(&reconstructed)))
 }
 
 /// The transpose of a matrix of expressions.

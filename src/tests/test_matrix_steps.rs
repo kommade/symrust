@@ -235,6 +235,22 @@ fn svd_records_the_exact_route() {
         .filter(|step| matches!(step, SolutionStep::SubSolution(_)))
         .count();
     assert_eq!(nested, 1, "expected one nested eigen sub-solution");
+
+    // The answer must be the reconstruction U Σ Vᵀ, which is A again — not just
+    // the singular-value matrix.
+    let reconstructed = matrix_of_result(&solution);
+    for (row, want_row) in [[1.0, 0.0], [0.0, 1.0]].iter().enumerate() {
+        for (column, want) in want_row.iter().enumerate() {
+            let got = reconstructed[row][column]
+                .evaluate(0.0_f64)
+                .value()
+                .unwrap_or_else(|| panic!("entry {row},{column} is not numeric"));
+            assert!(
+                (got - want).abs() < 1e-9,
+                "U Σ Vᵀ should reconstruct A: entry {row},{column} is {got}, want {want}"
+            );
+        }
+    }
 }
 
 /// Whatever `svd()` decides, `svd_tracked` agrees.
