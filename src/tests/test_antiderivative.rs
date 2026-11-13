@@ -319,32 +319,34 @@ fn algebraic_feature_integrates_an_irreducible_cubic() {
     assert!(rendered.contains("ln"), "expected a log term, got {rendered}");
 }
 
-/// A binomial cubic `x^3 + c` (here `c = 2 > 0`) factors over the reals, so it is
-/// integrated in closed form with the exact radicals `∛2`, `∛4`, `√3` kept
-/// symbolic — not as a `Σ_Z` root sum, and with no long decimals.
+/// A binomial cubic `x^3 + c` factors over the reals, so it is integrated in
+/// closed form with the exact radicals `∛|c|`, `∛|c|^2`, `√3` kept symbolic — not
+/// as a `Σ_Z` root sum, and with no long decimals. Covers both `c > 0` and `c < 0`.
 #[cfg(feature = "algebraic")]
 #[test]
 fn binomial_cubic_uses_exact_radicals() {
     super::setup();
-    let expr = create_expr!("1/(x^3+2)").unwrap();
-    let antiderivative = expr
-        .get_antiderivative()
-        .expect("binomial cubic should integrate in closed form");
-    let rendered = antiderivative.to_string();
-    assert!(
-        !rendered.contains('Σ'),
-        "binomial cubic should not use a root sum, got {rendered}"
-    );
-    // The cube root appears as the fractional power `2 ^ (1/3)` (rendered
-    // `2 ^ .333…`), and the long decimal forms must be gone.
-    assert!(
-        rendered.contains("2 ^ .333"),
-        "expected the symbolic cube root of 2, got {rendered}"
-    );
-    assert!(
-        !rendered.contains(".20998") && !rendered.contains("1.2599"),
-        "expected exact radicals, not decimals, got {rendered}"
-    );
+    for input in ["1/(x^3+2)", "1/(x^3-2)"] {
+        let expr = create_expr!(input).unwrap();
+        let antiderivative = expr
+            .get_antiderivative()
+            .unwrap_or_else(|error| panic!("{input}: {error}"));
+        let rendered = antiderivative.to_string();
+        assert!(
+            !rendered.contains('Σ'),
+            "{input} should not use a root sum, got {rendered}"
+        );
+        // The cube root appears as the fractional power `2 ^ (1/3)` (rendered
+        // `2 ^ .333…`), and the long decimal forms must be gone.
+        assert!(
+            rendered.contains("2 ^ .333"),
+            "{input}: expected the symbolic cube root of 2, got {rendered}"
+        );
+        assert!(
+            !rendered.contains(".20998") && !rendered.contains("1.2599"),
+            "{input}: expected exact radicals, not decimals, got {rendered}"
+        );
+    }
 }
 
 /// Without the feature, the same integral is still refused, and the error

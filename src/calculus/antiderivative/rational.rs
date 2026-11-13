@@ -525,16 +525,20 @@ fn exact_cubic_binomial_term(
 
     let result = helpers::sum(terms);
 
-    // Guard: only accept if it numerically differentiates back to N(x)/(x^3+c).
+    // Guard: only accept if it evaluates to a finite value somewhere (the
+    // numeric verifier treats NaN as inconclusive and would otherwise accept it),
+    // and numerically differentiates back to N(x)/(x^3+c). Several sample points
+    // are tried because a real root may sit between some of them, making
+    // `ln|x − r|` undefined there (NaN) for the negative-`c` branch.
     let x_check = Node::clone(variable);
     let integrand = helpers::div(
         poly_to_node(&Poly::new(coefficients.to_vec()), &x_check),
         poly_to_node(factor, &x_check),
     );
-    // Reject a result that evaluates to NaN (the numeric verifier treats NaN as
-    // inconclusive and would otherwise accept it).
-    let finite = helpers::evaluate_at(&result, &crate::numeric::Real::from_f64(0.3721))
-        .is_some_and(|value| value.is_normal());
+    let finite = [0.3721_f64, 2.6329, -2.1177, 5.0].iter().any(|sample| {
+        helpers::evaluate_at(&result, &crate::numeric::Real::from_f64(*sample))
+            .is_some_and(|value| value.is_normal())
+    });
     if finite && helpers::verify(&integrand, &result) {
         Some(result)
     } else {
