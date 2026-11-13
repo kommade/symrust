@@ -205,6 +205,14 @@ impl Antiderivative for Expr {
         let mut recorder = StepRecorder::new(self.clone(), "antiderivative");
         let result =
             antiderivative_with_context(self, IntegratorContext::default(), &mut recorder)?;
+        if result.contains_root_sum() {
+            recorder.solution_mut().set_result_comment(
+                "written as a formal sum over the roots Z of an irreducible factor; \
+                 the integrand has no antiderivative expressible in real radicals, so \
+                 the roots are left symbolic rather than expanded into decimals. The \
+                 constant of integration is omitted.",
+            );
+        }
         Ok(recorder.finish(result))
     }
 

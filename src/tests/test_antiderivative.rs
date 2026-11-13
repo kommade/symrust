@@ -403,3 +403,35 @@ fn c_is_preferred_over_b_when_both_could_apply() {
     // rejected it otherwise), so simply having a result is the assertion.
     assert!(!antiderivative.to_string().is_empty());
 }
+
+/// When the only available form is a formal root sum, the tracked solution
+/// carries a result comment explaining the `Σ_{Z : p(Z) = 0}` notation, while
+/// the plain answer-only path stays comment-free.
+#[cfg(feature = "algebraic")]
+#[test]
+fn root_sum_result_carries_explanatory_comment() {
+    super::setup();
+    // `x^3 - 3x + 1` is irreducible over the rationals with three real,
+    // non-radical roots, so the integrator falls back to a root sum.
+    let solution = create_expr!("1/(x^3-3x+1)")
+        .unwrap()
+        .get_antiderivative_solution()
+        .expect("root-sum fallback should produce a solution");
+
+    assert!(
+        solution.result().contains_root_sum(),
+        "expected a root-sum result, got {}",
+        solution.result()
+    );
+    let comment = solution.result_comment();
+    assert!(!comment.is_empty(), "root-sum result needs a comment");
+    let lower = comment.to_lowercase();
+    assert!(
+        lower.contains("root") || lower.contains("z"),
+        "comment should explain the root sum, got: {comment}"
+    );
+
+    // The answer-only path stays identical in value and carries no comment.
+    let plain = create_expr!("1/(x^3-3x+1)").unwrap().get_antiderivative().unwrap();
+    assert_eq!(plain.to_string(), solution.result().to_string());
+}

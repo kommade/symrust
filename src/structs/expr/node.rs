@@ -102,6 +102,22 @@ impl<T: FloatType + Display> Node<T> {
     pub fn root_sum(data: crate::parse::lexer::RootSumData) -> Self {
         NodeInner::operand(Token::RootSum(data)).wrap()
     }
+    /// Whether this tree contains a formal root sum (`Σ_{Z: p(Z)=0} …`).
+    ///
+    /// Used to explain, in a [`Solution`][crate::structs::solution::Solution]'s
+    /// result comment, that the answer is written over the roots of an
+    /// irreducible factor rather than expanded into decimals.
+    #[must_use]
+    pub fn contains_root_sum(&self) -> bool {
+        let borrow = self.inner.borrow();
+        match &borrow.value {
+            NodeValue::Operand(Token::RootSum(_)) => true,
+            NodeValue::Operand(_) | NodeValue::Empty => false,
+            NodeValue::Operator(op_node) => {
+                op_node.left.contains_root_sum() || op_node.right.contains_root_sum()
+            }
+        }
+    }
     /// A matrix-literal leaf, e.g. `[[1, 2], [3, 4]]`.
     ///
     /// Matrices are stored as [`Token::Matrix`] operands, which is what lets a

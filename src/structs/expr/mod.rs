@@ -207,6 +207,16 @@ impl Expr<Real> {
     pub fn has_independent(&self) -> bool {
         self.tree.inner.borrow().has_indp
     }
+
+    /// Whether the expression contains a formal root sum (`Σ_{Z: p(Z)=0} …`).
+    ///
+    /// A root sum is the exact antiderivative form used when an irreducible
+    /// factor has no real-surd factorisation: the answer is written over the
+    /// roots of that factor rather than approximated with decimals.
+    #[must_use]
+    pub fn contains_root_sum(&self) -> bool {
+        self.tree.contains_root_sum()
+    }
     /// Returns the LaTeX representation of the expression.
     #[must_use]
     pub fn to_latex(&self) -> Result<String, NodeError> {
