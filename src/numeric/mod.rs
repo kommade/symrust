@@ -36,8 +36,10 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 
 use arpfloat::{FP128, Float};
 
+#[cfg(feature = "complex")]
 pub mod complex;
 pub mod real;
+#[cfg(feature = "complex")]
 pub use complex::Complex;
 pub use real::Real;
 

@@ -37,10 +37,11 @@ use crate::{
         surd::{Surd, surd_quadratic_node, surd_sqrt_node},
     },
     calculus::expr::float_from,
-    numeric::Complex,
     parse::lexer::{Func, Op, Token},
     structs::node::Node,
 };
+#[cfg(feature = "complex")]
+use crate::numeric::Complex;
 
 /// A rational function `numerator / denominator`.
 pub(super) struct RationalFunction {
