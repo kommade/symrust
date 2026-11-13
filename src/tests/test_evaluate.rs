@@ -145,7 +145,7 @@ fn evaluate_multiquadratic_exact() {
     super::setup();
     // x^2 at x = sqrt(2) is exactly 2.
     let expr = create_expr!("x^2").unwrap();
-    let root_two = Multiquadratic::sqrt_of(2).unwrap();
+    let root_two = Multiquadratic::<1>::sqrt_of(2).unwrap();
     let value = expr.evaluate(root_two).value().unwrap();
     assert_eq!(value.to_f64(), 2.0);
 }

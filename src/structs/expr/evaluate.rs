@@ -634,7 +634,7 @@ fn surd_int_pow(base: crate::algebra::surd::Surd, exponent: i64) -> crate::algeb
 }
 
 #[cfg(feature = "algebraic")]
-impl ExpressionScalar for crate::algebra::algebraic::Multiquadratic {
+impl<const N: usize> ExpressionScalar for crate::algebra::algebraic::Multiquadratic<N> where [(); 1 << N]: Sized {
     fn from_i64(value: i64) -> Self {
         crate::algebra::algebraic::Multiquadratic::from_rat(
             crate::algebra::rational::Rat::from_i64(value),
@@ -685,7 +685,7 @@ impl ExpressionScalar for crate::algebra::algebraic::Multiquadratic {
 }
 
 #[cfg(feature = "algebraic")]
-impl FloatBridge for crate::algebra::algebraic::Multiquadratic {
+impl<const N: usize> FloatBridge for crate::algebra::algebraic::Multiquadratic<N> where [(); 1 << N]: Sized {
     fn from_float(value: Float) -> Self {
         crate::algebra::algebraic::Multiquadratic::from_rat(rat_from_f64(value.as_f64()))
     }
@@ -699,17 +699,17 @@ impl FloatBridge for crate::algebra::algebraic::Multiquadratic {
 /// `f64` (rational approximation, best effort).
 #[cfg(feature = "algebraic")]
 #[allow(dead_code)] // reached through the `Evaluable` impl, which lib code has not exercised yet
-fn multiquadratic_from_f64(value: f64) -> crate::algebra::algebraic::Multiquadratic {
+fn multiquadratic_from_f64<const N: usize>(value: f64) -> crate::algebra::algebraic::Multiquadratic<N> where [(); 1 << N]: Sized {
     crate::algebra::algebraic::Multiquadratic::from_rat(rat_from_f64(value))
 }
 
 /// Integer power of a multiquadratic value by repeated squaring.
 #[cfg(feature = "algebraic")]
 #[allow(dead_code)] // reached through the `Evaluable` impl, which lib code has not exercised yet
-fn multiquadratic_int_pow(
-    base: crate::algebra::algebraic::Multiquadratic,
+fn multiquadratic_int_pow<const N: usize>(
+    base: crate::algebra::algebraic::Multiquadratic<N>,
     exponent: i64,
-) -> crate::algebra::algebraic::Multiquadratic {
+) -> crate::algebra::algebraic::Multiquadratic<N> where [(); 1 << N]: Sized {
     use crate::algebra::algebraic::Multiquadratic;
     if exponent == 0 {
         return Multiquadratic::from_i64(1);

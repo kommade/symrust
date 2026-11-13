@@ -236,13 +236,13 @@ fn custom2() {
     //        [   0       -1      1 ]
     use crate::algebra::algebraic::Multiquadratic as A;
 
-    let sqrt_two = A::sqrt_of(2).unwrap();
+    let sqrt_two = A::<3>::sqrt_of(2).unwrap();
     let sqrt_three = A::sqrt_of(3).unwrap();
     let sqrt_six = A::sqrt_of(6).unwrap();
     let zero = A::from_rat(Rat::ZERO);
     let one = A::from_rat(Rat::ONE);
 
-    let matrix = Matrix::<A>::from_vec(
+    let matrix = Matrix::<A::<3>>::from_vec(
         4,
         3,
         vec![
