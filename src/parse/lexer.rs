@@ -109,6 +109,8 @@ pub enum Func<T = Real> {
     Acos,
     Atan,
     Sqrt,
+    /// The `n`-th root, `root_n(x)` (i.e. `x^(1/n)`). Carries the index `n`.
+    Root(T),
     Log(T),
     Ln,
 }
@@ -126,6 +128,7 @@ impl<T: FloatType + Display> Display for Func<T> {
             Self::Acos => write!(f, "acos"),
             Self::Atan => write!(f, "atan"),
             Self::Sqrt => write!(f, "sqrt"),
+            Self::Root(n) => write!(f, "root_{n}"),
             Self::Log(n) => write!(f, "log_{n}"),
             Self::Ln => write!(f, "ln"),
         }
@@ -440,6 +443,42 @@ impl<T: FloatType + Display> Lexer<T> {
                         Ok(Token::from_func(Func::Log(base)))
                     }
                     "ln" => Ok(Token::from_func(Func::Ln)),
+                    "root" => {
+                        // `root_n(x)`; a bare `root(...)` defaults to the square root.
+                        let mut index = T::parse_decimal("2")
+                            .map_err(|e| LexError::ParseError(e))?;
+                        if let Ok(c) = self.unwrap_next() {
+                            if c == '_' {
+                                let mut index_str = String::new();
+                                while let Ok(c) = self.unwrap_next() {
+                                    if c.is_ascii_digit() {
+                                        index_str.push(c);
+                                    } else {
+                                        self.pos -= 1;
+                                        break;
+                                    }
+                                }
+                                match T::parse_decimal(&index_str) {
+                                    Ok(n) if !n.is_zero() => index = n,
+                                    Ok(_) => {
+                                        return Err(LexError::ParseError(format!(
+                                            "Invalid root index {} at pos {}",
+                                            index_str, self.pos
+                                        )));
+                                    }
+                                    Err(e) => {
+                                        return Err(LexError::ParseError(format!(
+                                            "Error parsing root index {} at pos {}: {}",
+                                            index_str, self.pos, e
+                                        )));
+                                    }
+                                }
+                            } else {
+                                self.pos -= 1;
+                            }
+                        }
+                        Ok(Token::from_func(Func::Root(index)))
+                    }
                     _ => {
                         // we can only return tokens one at a time so
                         // we need to backtrack to the first char

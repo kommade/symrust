@@ -221,6 +221,7 @@ fn numeric_evaluate_inner(node: &Node, depth: usize) -> Option<Real> {
                     Func::Acos => argument.acos(),
                     Func::Atan => argument.atan(),
                     Func::Sqrt => argument.sqrt(),
+                    Func::Root(index) => argument.pow(&(Real::one() / index)),
                     Func::Ln => argument.ln(),
                     Func::Log(base) => argument.ln() / base.ln(),
                 }

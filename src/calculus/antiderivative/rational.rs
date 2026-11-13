@@ -408,6 +408,15 @@ fn algebraic_factor_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -
     use crate::algebra::algebraic::real_roots;
     use crate::calculus::expr::float_from;
 
+    // Prefer the exact formal root sum `Σ_{Z: p(Z)=0} N_p(Z) ln|x − Z| / p'(Z)`.
+    // This keeps the answer exact (no decimals): the unknown roots `Z` stay
+    // symbolic, and the coefficients are exact rationals. It also gives the
+    // cleanest form for the "irreducible over the reals" cases such as
+    // `1/(x^3+2)`, `1/(x^3-3x+1)`, `1/(x^7+1)` and `1/(x^8+1)`.
+    if let Some(term) = root_sum_term(coefficients, factor, variable) {
+        return Some(term);
+    }
+
     let degree = factor.degree()?;
     let roots = real_roots(factor);
 

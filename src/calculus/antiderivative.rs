@@ -1331,6 +1331,15 @@ fn antiderivative_of_function(func: &Func, argument: Node) -> Option<Node> {
                 float_from(2.0),
             ),
         ),
+        Func::Root(index) => {
+            // ∫ x^(1/n) dx = x^(1/n + 1) / (1/n + 1).
+            let reciprocal = Real::one() / index.clone();
+            let exponent = float_from(reciprocal.to_f64() + 1.0);
+            helpers::divide_by(
+                helpers::pow(argument.clone(), helpers::float(exponent.clone())),
+                exponent,
+            )
+        }
     })
 }
 

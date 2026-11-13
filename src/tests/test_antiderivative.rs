@@ -258,8 +258,8 @@ fn antiderivative_with_custom_variable() {
 }
 
 /// With the `algebraic` feature, a cubic with three real roots (here all
-/// irrational) is integrated by peeling its real roots, even though the
-/// single-real-root path does not apply.
+/// irrational, casus irreducibilis) is integrated exactly as a formal root sum
+/// over its roots `Z` (no decimals).
 #[cfg(feature = "algebraic")]
 #[test]
 fn algebraic_feature_integrates_a_3real_root_cubic() {
@@ -268,11 +268,10 @@ fn algebraic_feature_integrates_a_3real_root_cubic() {
     let antiderivative = expr
         .get_antiderivative()
         .expect("algebraic feature should integrate a 3-real-root cubic");
-    // Three simple real poles give three log terms (and hence verify).
     let rendered = antiderivative.to_string();
     assert!(
-        rendered.matches("ln(").count() >= 3,
-        "expected three log terms, got {rendered}"
+        rendered.contains('Σ') && rendered.contains("ln|x - Z|"),
+        "expected an exact root-sum form, got {rendered}"
     );
 }
 

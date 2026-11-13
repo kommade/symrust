@@ -154,6 +154,7 @@ impl<T: FloatType + Display> Node<T> {
                     Func::Atan => Func::Atan,
                     Func::Sqrt => Func::Sqrt,
                     Func::Ln => Func::Ln,
+                    Func::Root(index) => Func::Root(T::from_float(index.clone().into())),
                     Func::Log(base) => Func::Log(T::from_float(base.clone().into())),
                 }),
                 Token::Operator(op) => Token::Operator(op.clone()),
@@ -424,6 +425,11 @@ impl NodeInner {
                         Func::Acos => format!(r"\arccos({right_str})"),
                         Func::Atan => format!(r"\arctan({right_str})"),
                         Func::Sqrt => format!(r"\sqrt{{{right_str}}}"),
+                        Func::Root(index) => {
+                            let n = index.to_string();
+                            let trimmed = n.strip_suffix('.').unwrap_or(&n);
+                            format!(r"\sqrt[{trimmed}]{{{right_str}}}")
+                        }
                         _ => format!(r"\{op_str}({right_str})"),
                     },
                     _ => return Err(NodeError::WrongToken("operator".to_string())),
@@ -1786,6 +1792,7 @@ impl NodeFunctions<Real> for Node {
                         Func::Acos => argument.acos(),
                         Func::Atan => argument.atan(),
                         Func::Sqrt => argument.sqrt(),
+                        Func::Root(index) => argument.pow(&(Real::one() / index)),
                         Func::Ln => argument.ln(),
                         Func::Log(base) => argument.log(base),
                     }

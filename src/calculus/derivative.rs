@@ -184,6 +184,14 @@ impl DerivativeInternal for Node {
                         let f_prime = number(2).impl_mul(call(Func::Sqrt, arg.clone()));
                         arg.get_derivative().div(f_prime)
                     }
+                    Func::Root(index) => {
+                        // d/dx x^(1/n) = (1/n) x^(1/n − 1).
+                        let arg = op_node.right.clone();
+                        let reciprocal = float(crate::numeric::Real::one() / index.clone());
+                        let exponent = reciprocal.clone().sub(number(1));
+                        let power = arg.clone().pow(exponent);
+                        arg.get_derivative().impl_mul(power).impl_mul(reciprocal)
+                    }
                     Func::Ln => {
                         let arg = op_node.right.clone();
                         arg.clone().get_derivative().div(arg)
@@ -383,6 +391,12 @@ fn differentiate_inner(node: &Node, depth: usize) -> Option<Node> {
                     Func::Acos => negate(div(one(), sqrt_arg(sub(one(), pow(right, number(2)))))),
                     Func::Atan => div(one(), add(one(), pow(right, number(2)))),
                     Func::Sqrt => div(one(), mul(number(2), sqrt_arg(right))),
+                    Func::Root(index) => {
+                        // d/dx x^(1/n) = (1/n) x^(1/n − 1).
+                        let reciprocal = crate::numeric::Real::one() / index;
+                        let exponent = float(reciprocal.to_f64() - 1.0);
+                        mul(float(reciprocal.to_f64()), pow(right, exponent))
+                    }
                     Func::Ln => div(one(), right),
                     Func::Log(base) => div(one(), mul(right, function(Func::Ln, float(base)))),
                 };

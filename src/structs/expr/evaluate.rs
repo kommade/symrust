@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use arpfloat::{FP128, Float};
 
-use crate::numeric::{ExpressionScalar, FloatBridge};
+use crate::numeric::{ExpressionScalar, FloatBridge, Real};
 use crate::parse::lexer::{Const, Func, Op, Token};
 use crate::structs::expr::{Expr, Node, NodeInner, node::NodeValue};
 use crate::utils::float_math::FloatMath;
@@ -210,6 +210,7 @@ fn apply_function<T: Evaluable>(func: &Func, argument: T) -> T {
         Func::Acos => argument.acos(),
         Func::Atan => argument.atan(),
         Func::Sqrt => argument.sqrt(),
+        Func::Root(index) => argument.pow(T::from_float((Real::one() / index.clone()).into())),
         Func::Ln => argument.ln(),
         Func::Log(base) => argument.log(base.clone().into()),
     }
