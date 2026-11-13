@@ -1,4 +1,8 @@
-//! Solving square linear systems over the exact coefficient fields.
+//! Linear algebra over [`Matrixable`] coefficient types. The algorithms are
+//! generic over the coefficient type, so they can be used with [`Rat`], [`Surd`],
+//! [`Multiquadratic`], or any other type that implements [`Matrixable`]. Choose 
+//! from [`StaticMatrix`] (dimensions fixed at compile time) and 
+//! [`Matrix`] (dimensions chosen at runtime).
 
 use std::{fmt::Display, ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign}};
 
