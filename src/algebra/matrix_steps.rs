@@ -49,13 +49,28 @@ fn one() -> Expr {
 /// hard to read. Evaluating a *closed* (variable-free) expression back to a
 /// number keeps every step showing clean values, while genuinely symbolic
 /// entries are left as simplified expressions.
+///
+/// The fold is deliberately narrow: a value is only replaced by a decimal when
+/// the *symbolic* evaluator (`Node::evaluate`) is willing to fold it. That
+/// evaluator refuses `sqrt` and fractional powers precisely so radicals survive,
+/// and we must respect that here. Otherwise `sqrt(1/2)` would be turned into
+/// `0.7071…`, and the very next step would compute `0.5 - (0.7071…)²` as
+/// `1.1e-16` instead of the exact `0`. Keeping the surd means the subtraction
+/// simplifies to `0` symbolically, and no rounding error ever appears in a step.
 fn tidy(entry: Expr) -> Expr {
     let simplified = entry.simplify(true);
     if simplified.has_independent() {
         return simplified;
     }
-    match simplified.evaluate(0.0_f64).value() {
-        Some(value) if value.is_finite() => Expr::from_f64(value),
+    // Only fold to a decimal when the symbolic evaluator agrees the expression
+    // is exactly representable (integers, plain arithmetic, integer powers). For
+    // anything it declines — `sqrt`, fractional powers, functions — keep the
+    // exact form so surds do not collapse into inexact decimals.
+    let exact = simplified.tree().inner.borrow().evaluate();
+    match exact {
+        Some(value) if !value.is_nan() && !value.is_infinite() => {
+            Expr::from_f64(value.to_f64())
+        }
         _ => simplified,
     }
 }
@@ -375,14 +390,35 @@ pub fn qr_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
         }
 
         let norm_squared = dot(&vector, &vector);
-        let norm = norm_squared.sqrt();
-        // A (near-)zero norm means the column is linearly dependent. Compare
-        // numerically: after `sqrt` the expression is not the literal zero, so a
-        // structural `is_zero` check would miss it.
-        let magnitude = norm.clone().evaluate(0.0_f64).value().unwrap_or(1.0);
-        if magnitude.abs() < 1e-12 || norm.is_zero() {
+        // A zero norm means the column is linearly dependent on the earlier
+        // ones. Test `‖v‖²` rather than `‖v‖` for two reasons:
+        //
+        // * `sqrt(...)` is never folded by the symbolic evaluator (so the norm
+        //   itself may be unevaluable), while the squared norm is plain
+        //   arithmetic and folds whenever the entries do;
+        // * `‖v‖² = 0` is equivalent to `‖v‖ = 0`, and it avoids introducing a
+        //   square root into the test.
+        //
+        // A *symbolic* residual such as `2 - 10 sqrt(5)^-2` is algebraically
+        // zero but will not evaluate, because `sqrt` blocks the evaluator.
+        // Treating "cannot evaluate" as "nonzero" would let a dependent column
+        // through silently, so both a structural zero and an unevaluable
+        // squared norm are rejected up front; only a genuine nonzero value
+        // proceeds.
+        let magnitude_squared = norm_squared.clone().evaluate(0.0_f64).value();
+        let is_dependent = norm_squared.is_zero()
+            || norm_squared.clone().simplify(true).is_zero()
+            || match magnitude_squared {
+                Some(value) => value.abs() < 1e-12,
+                // Could not evaluate: only accept if the residual is
+                // structurally the zero vector (checked above), otherwise we
+                // cannot prove independence, so refuse to divide by it.
+                None => true,
+            };
+        if is_dependent {
             return None;
         }
+        let norm = norm_squared.sqrt();
         for value in vector.iter_mut() {
             *value = tidy(value.clone() / norm.clone());
         }

@@ -417,7 +417,6 @@ fn root_sum_result_carries_explanatory_comment() {
         .unwrap()
         .get_antiderivative_solution()
         .expect("root-sum fallback should produce a solution");
-
     assert!(
         solution.result().contains_root_sum(),
         "expected a root-sum result, got {}",

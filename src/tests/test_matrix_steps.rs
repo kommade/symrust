@@ -184,6 +184,42 @@ fn qr_records_elementary_steps() {
         names.contains(&"normalise"),
         "expected normalise steps, got {names:?}"
     );
+
+    // The steps must keep surds exact. `q1` is `(1/√2, 1/√2)`, so the
+    // projection of column 2 onto it is exactly `1/√2` and the residual in
+    // row 1 is exactly `1 − 1/2 = 1/2`. If `tidy` evaluated `√(1/2)` to a
+    // decimal, that residual would become `0.50000000000000011102…` and every
+    // later entry would inherit the rounding error. The residual must instead
+    // stay symbolic, e.g. `sqrt(2)^(-2)`, and no step may contain a long
+    // decimal expansion.
+    let mut saw_symbolic_residual = false;
+    for step in solution.steps() {
+        if let SolutionStep::Elementary(step) = step {
+            let text = step.step_result.to_string();
+            assert!(
+                !text.contains("000000000000000") && !text.contains("999999999999999"),
+                "step '{}' leaked floating-point error instead of keeping the \
+                 surd exact: {text}",
+                step.step_name
+            );
+            if step.step_name == "orthogonalise" && text.contains("sqrt") {
+                saw_symbolic_residual = true;
+            }
+        }
+    }
+    assert!(
+        saw_symbolic_residual,
+        "expected the orthogonalise step to keep an exact surd such as \
+         sqrt(2)^(-2) rather than a decimal; steps were: {:?}",
+        solution
+            .steps()
+            .iter()
+            .filter_map(|step| match step {
+                SolutionStep::Elementary(step) => Some((&step.step_name, step.step_result.to_string())),
+                SolutionStep::SubSolution(_) => None,
+            })
+            .collect::<Vec<_>>()
+    );
 }
 
 /// A dependent column makes the QR decomposition fail rather than divide by zero.
