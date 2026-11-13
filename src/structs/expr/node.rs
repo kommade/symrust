@@ -271,6 +271,126 @@ impl Display for NodeError {
 
 impl Error for NodeError {}
 
+/// If the expression is a perfect-square polynomial, return `u` with
+/// `u^2 = expression` — for example `x^2 - 2x + 1` yields `x - 1`.
+///
+/// The expression is converted to a rational polynomial and factored; a
+/// factorisation whose leading coefficient is a perfect square and whose
+/// factors all have even multiplicity gives the root. Anything else returns
+/// `None`.
+fn square_root_of_rational_square(node: &Node<Real>) -> Option<Node<Real>> {
+    use crate::algebra::factorization::factorise;
+    use crate::algebra::polynomial::Poly;
+    use crate::numeric::ExactField;
+
+    let polynomial = rational_polynomial(node)?;
+    let factorization = factorise(&polynomial)?;
+    let leading_root = factorization.leading.try_sqrt()?;
+    let mut root = Poly::constant(leading_root);
+    for (factor, multiplicity) in &factorization.factors {
+        if multiplicity % 2 != 0 {
+            return None;
+        }
+        let half = multiplicity / 2;
+        root = root.mul(&factor.to_poly().pow(half as u32)?)?;
+    }
+    Some(poly_to_variable_node(&root, 'x'))
+}
+
+/// Convert an expression tree to a polynomial with rational coefficients, or
+/// `None` when it is not a polynomial (fractional powers, functions, several
+/// variables, …).
+fn rational_polynomial(node: &Node<Real>) -> Option<crate::algebra::polynomial::Poly> {
+    use crate::algebra::polynomial::Poly;
+    use crate::algebra::rational::Rat;
+
+    fn convert(node: &Node<Real>, depth: usize) -> Option<Poly> {
+        if depth > 64 {
+            return None;
+        }
+        let borrow = node.inner.borrow();
+        match &borrow.value {
+            NodeValue::Operand(Token::Indp(_)) => Some(Poly::variable()),
+            NodeValue::Operand(Token::Number(value)) => {
+                Some(Poly::constant(Rat::from_i64(*value)))
+            }
+            NodeValue::Operand(Token::Float(value)) => {
+                Some(Poly::constant(Rat::from_real(value)?))
+            }
+            NodeValue::Operand(_) => None,
+            NodeValue::Operator(op_node) => match &op_node.token {
+                Token::Operator(Op::Add) => {
+                    let left = convert(&op_node.left, depth + 1)?;
+                    let right = convert(&op_node.right, depth + 1)?;
+                    left.add(&right)
+                }
+                Token::Operator(Op::Sub) => {
+                    let left = convert(&op_node.left, depth + 1)?;
+                    let right = convert(&op_node.right, depth + 1)?;
+                    left.sub(&right)
+                }
+                Token::Operator(Op::Mul | Op::ImplicitMul) => {
+                    let left = convert(&op_node.left, depth + 1)?;
+                    let right = convert(&op_node.right, depth + 1)?;
+                    left.mul(&right)
+                }
+                Token::Operator(Op::Div) => {
+                    let numerator = convert(&op_node.left, depth + 1)?;
+                    let denominator = convert(&op_node.right, depth + 1)?;
+                    if denominator.degree() != Some(0) {
+                        return None;
+                    }
+                    numerator.scale(denominator.coeff(0).recip()?)
+                }
+                Token::Operator(Op::Pow) => {
+                    let base = convert(&op_node.left, depth + 1)?;
+                    let exponent = op_node.right.inner.borrow().evaluate()?;
+                    if !exponent.is_integer() || exponent.is_negative() {
+                        return None;
+                    }
+                    let power = exponent.to_f64();
+                    if !(0.0..=32.0).contains(&power) {
+                        return None;
+                    }
+                    base.pow(power as u32)
+                }
+                _ => None,
+            },
+            NodeValue::Empty => None,
+        }
+    }
+
+    convert(node, 0)
+}
+
+/// Render a rational polynomial as an expression in `variable`.
+fn poly_to_variable_node(
+    polynomial: &crate::algebra::polynomial::Poly,
+    variable: char,
+) -> Node<Real> {
+    use crate::algebra::expr::{multiply_by_rational, number, one, pow, sum};
+
+    let symbol = NodeInner::<Real>::operand(Token::Indp(variable)).wrap();
+    let mut terms = Vec::new();
+    for degree in 0..=polynomial.degree().unwrap_or(0) {
+        let coefficient = polynomial.coeff(degree);
+        if coefficient.is_zero() {
+            continue;
+        }
+        let power = match degree {
+            0 => one(),
+            1 => symbol.clone(),
+            _ => pow(symbol.clone(), number(degree as i64)),
+        };
+        if coefficient.is_one() {
+            terms.push(power);
+        } else {
+            terms.push(multiply_by_rational(power, coefficient));
+        }
+    }
+    sum(terms)
+}
+
 /// Render a matrix of expressions as a LaTeX `pmatrix`.
 ///
 /// Each entry is rendered through its own `to_latex`, so symbolic entries work.
@@ -373,7 +493,69 @@ impl<T: FloatType + Display> NodeInner<T> {
 }
 
 impl NodeInner {
-    pub(crate) fn to_latex(&self) -> Result<String, NodeError> {        match &self.value {
+    /// Whether this node is a `sqrt(...)` application.
+    pub(crate) fn is_sqrt(&self) -> bool {
+        matches!(
+            &self.value,
+            NodeValue::Operator(op_node) if matches!(op_node.token, Token::Function(Func::Sqrt))
+        )
+    }
+
+    /// When this node is `u^2` and `u` can never be negative, return `u` — so
+    /// that `sqrt(u^2) = |u| = u`.
+    ///
+    /// This is what lets the quadratic formula's discriminant `x^2 - 2x + 1`
+    /// collapse: it factors to `(x - 1)^2`, whose square root is `x - 1`.
+    pub(crate) fn square_root_of_square(&self) -> Option<Node<Real>> {
+        let op_node = match &self.value {
+            NodeValue::Operator(op_node) => op_node,
+            _ => return None,
+        };
+        if !matches!(op_node.token, Token::Operator(Op::Pow)) {
+            return None;
+        }
+        let exponent = op_node.right.inner.borrow().evaluate()?;
+        if !exponent.float_equal(&Real::from_i64(2)) {
+            return None;
+        }
+        let base = op_node.left.clone();
+        if NodeInner::never_negative(&base) {
+            Some(base)
+        } else {
+            None
+        }
+    }
+
+    /// Whether a node is provably non-negative for every real value of its free
+    /// variables.
+    ///
+    /// Deliberately conservative: it accepts only literals, the named constants,
+    /// the independent variable, even powers and square roots. Returning `false`
+    /// merely keeps a `sqrt` in place, never yields a wrong sign.
+    fn never_negative(node: &Node<Real>) -> bool {
+        let borrow = node.inner.borrow();
+        match &borrow.value {
+            NodeValue::Operand(Token::Number(value)) => *value >= 0,
+            NodeValue::Operand(Token::Float(value)) => !value.is_negative(),
+            NodeValue::Operand(Token::Constant(_)) | NodeValue::Operand(Token::Indp(_)) => true,
+            NodeValue::Operator(op_node) => match &op_node.token {
+                Token::Operator(Op::Pow) => op_node
+                    .right
+                    .inner
+                    .borrow()
+                    .evaluate()
+                    .is_some_and(|exponent| {
+                        exponent.is_integer() && exponent.to_f64().rem_euclid(2.0) == 0.0
+                    }),
+                Token::Function(Func::Sqrt) => true,
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    pub(crate) fn to_latex(&self) -> Result<String, NodeError> {
+        match &self.value {
             NodeValue::Operand(token) => match token {
                 Token::Number(num) => Ok(format!("{num}")),
                 Token::Float(num) => {
@@ -2000,6 +2182,27 @@ impl NodeFunctions<Real> for Node {
                     }
                 }
                 NodeInner::<Real>::from_function(Func::Log(base), arg)
+            }
+            // `sqrt(u^2)` is `|u|`, and `|u|` is `u` when `u` cannot be
+            // negative. Without this a perfectly square radicand — such as the
+            // discriminant `x^2 - 2x + 1` that the quadratic formula produces —
+            // leaves a `sqrt` behind and the root never tidies up.
+            t if t.is_sqrt() => {
+                let argument = match &t.value {
+                    NodeValue::Operator(op_node) => op_node.right.clone(),
+                    _ => unreachable!(),
+                };
+                let simplified = argument.clone().simplify(expand, combine_fns);
+                // `sqrt(u^2)` where `u` cannot be negative.
+                if let Some(base) = simplified.inner.borrow().square_root_of_square() {
+                    return base;
+                }
+                // `sqrt(p)` where `p` is a perfect-square polynomial, e.g.
+                // `sqrt(x^2 - 2x + 1) = x - 1`.
+                if let Some(base) = square_root_of_rational_square(&simplified) {
+                    return base;
+                }
+                NodeInner::<Real>::from_function(Func::Sqrt, simplified)
             }
             t if t.is_empty() || t.is_operand() || t.is_fn() => {
                 drop(t);

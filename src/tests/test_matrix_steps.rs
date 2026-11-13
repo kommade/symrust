@@ -166,7 +166,6 @@ fn qr_records_elementary_steps() {
     super::setup();
     let source = matrix(&[&["1", "1"], &["1", "0"]]);
     let solution = qr_tracked(&source).expect("columns are independent");
-
     assert_eq!(solution.problem_type(), "QR factorisation (Gram-Schmidt)");
 
     let names: Vec<&str> = solution

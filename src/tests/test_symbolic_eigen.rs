@@ -118,6 +118,52 @@ fn cubic_characteristic_polynomial_has_no_radical_roots() {
 }
 
 #[test]
+fn symbolic_eigenvalues_are_tidied() {
+    super::setup();
+    // A = [[1, 0], [0, x]]: the discriminant x^2 - 2x + 1 is (x - 1)^2, so the
+    // quadratic formula should collapse to the exact roots {1, x} rather than
+    // leaving a sqrt behind.
+    let source = matrix(&[&["1", "0"], &["0", "x"]]);
+    let found = eigenvalues(&source).expect("degree 2");
+    let rendered: Vec<String> = found.iter().map(ToString::to_string).collect();
+    assert!(
+        !rendered.iter().any(|root| root.contains("sqrt")),
+        "expected the square discriminant to collapse, got {rendered:?}"
+    );
+}
+
+#[test]
+fn sqrt_of_a_perfect_square_polynomial_collapses() {
+    super::setup();
+    // `sqrt(x^2 - 2x + 1)` is `|x - 1|`, which is `x - 1` on the non-negative
+    // branch; the simplifier factors the radicand and drops the sqrt.
+    let expr = create_expr!("sqrt(x^2 - 2x + 1)").unwrap().simplify(true);
+    let text = expr.to_string();
+    assert!(!text.contains("sqrt"), "expected the sqrt to collapse, got {text}");
+
+    // Confirmed numerically at points where x - 1 > 0.
+    for probe in [2.0_f64, 3.5, 10.0] {
+        let value = sample(&expr, probe).unwrap_or(f64::NAN);
+        assert!(
+            (value - (probe - 1.0)).abs() < 1e-9,
+            "expected x - 1 at x = {probe}, got {value}"
+        );
+    }
+}
+
+#[test]
+fn sqrt_of_a_non_square_stays() {
+    super::setup();
+    // x^2 + 1 has no repeated factor, so the sqrt must remain.
+    let expr = create_expr!("sqrt(x^2 + 1)").unwrap().simplify(true);
+    assert!(
+        expr.to_string().contains("sqrt"),
+        "x^2 + 1 is not a perfect square, got {}",
+        expr
+    );
+}
+
+#[test]
 fn eigen_tracked_uses_symbolic_roots() {
     super::setup();
     let source = matrix(&[&["1", "0"], &["0", "x"]]);
