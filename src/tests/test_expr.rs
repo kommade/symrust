@@ -92,6 +92,35 @@ fn expr_simplify() {
     assert_eq!(expr.simplify(true).to_string(), "5 ln(2) / x");
 }
 
+/// `simplify` must collapse `sqrt(a)^n` for even `n` and parse `a^-n` as
+/// `a^(-n)`. Both were broken: `2^-2` used to parse as `(2^0) - 2 = -1`, and
+/// the surd-power rules were missing, so exact Gram–Schmidt steps kept forms
+/// like `sqrt(2) ^ -4`.
+#[test]
+fn surd_powers_collapse() {
+    super::setup();
+    // A minus directly after `^` is part of the exponent.
+    assert_eq!(create_expr!("2^-2").unwrap().simplify(true).to_string(), "2 ^ -2");
+    assert_eq!(create_expr!("x^-2").unwrap().simplify(true).to_string(), "x ^ -2");
+    // `sqrt(a)^(even) = a^(n/2)`.
+    assert_eq!(create_expr!("sqrt(2)^2").unwrap().simplify(true).to_string(), "2");
+    assert_eq!(
+        create_expr!("sqrt(2)^-2").unwrap().simplify(true).to_string(),
+        ".5"
+    );
+    // A product of two reciprocals of the same surd is `1/a`.
+    assert_eq!(
+        create_expr!("(1/sqrt(2))*(1/sqrt(2))")
+            .unwrap()
+            .simplify(true)
+            .to_string(),
+        ".5"
+    );
+    // An ODD power of a surd stays a surd (2^(3/2) is not an integer power).
+    let odd = create_expr!("sqrt(2)^3").unwrap().simplify(true).to_string();
+    assert!(odd.contains("sqrt"), "odd surd power should stay a surd: {odd}");
+}
+
 #[test]
 fn expr_linearise() {
     let expr = create_expr!("-2 * sin(x) / cos(x)").unwrap();

@@ -534,6 +534,33 @@ impl<T: FloatType + Display> Lexer<T> {
         }
         // A minus is unary when it does not follow an operand. Rewriting it as
         // `0 - ...` lets expressions such as `e^(-3x)` parse.
+        //
+        // A `-` immediately after `^` is a special case: `2^-2` must mean
+        // `2^(-2)`, not `2^0 - 2` (which is `(2^0) - 2 = -1`). The generic
+        // `0 - ...` rewrite got this wrong whenever the exponent was written
+        // without parentheses. Fold `^- <literal>` into `^ <negative literal>`
+        // up front so the exponent is a single operand.
+        let mut merged = Vec::with_capacity(tokens.len());
+        let mut cursor = 0;
+        while cursor < tokens.len() {
+            if matches!(tokens[cursor], Token::Operator(Op::Pow))
+                && cursor + 2 < tokens.len()
+                && matches!(tokens[cursor + 1], Token::Operator(Op::Sub))
+            {
+                match tokens[cursor + 2] {
+                    Token::Number(value) => {
+                        merged.push(tokens[cursor].clone());
+                        merged.push(Token::from_num(-value));
+                        cursor += 3;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            merged.push(tokens[cursor].clone());
+            cursor += 1;
+        }
+        let mut tokens = merged;
         let mut index = 0;
         while index < tokens.len() {
             if matches!(tokens[index], Token::Operator(Op::Sub)) {

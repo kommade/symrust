@@ -1867,9 +1867,18 @@ impl NodeFunctions<Real> for Node {
     fn recip(self) -> Self {
         match &self.inner.borrow().value {
             NodeValue::Operand(token) => match token {
-                Token::Number(num) => NodeInner::<Real>::from_number(1 / num).wrap(),
+                // `1 / num` must be a real division: `from_number` takes an
+                // `i64`, so `1 / 5` would truncate to `0`. Keep `±1` as
+                // integers and use a float otherwise, with the correct sign.
+                Token::Number(num) => {
+                    if *num == 1 || *num == -1 {
+                        NodeInner::<Real>::from_number(*num).wrap()
+                    } else {
+                        NodeInner::<Real>::from_float(Real::one() / Real::from_i64(*num)).wrap()
+                    }
+                }
                 Token::Float(num) => {
-                    NodeInner::<Real>::from_float(Real::neg_one() / num.clone()).wrap()
+                    NodeInner::<Real>::from_float(Real::one() / num.clone()).wrap()
                 }
                 _ => NodeInner::<Real>::one().div(self.clone()),
             },
@@ -2363,6 +2372,39 @@ impl NodeFunctions<Real> for Node {
                                 } else if right_borrow.is_neg_one() {
                                     drop(left_borrow);
                                     return left.recip();
+                                }
+                                // `sqrt(a)^n = a^(n/2)` when `n` is an EVEN
+                                // integer. Then `n/2` is an integer too, so the
+                                // result is a plain integer power of `a`, which
+                                // folds or stays as `a^k` — no `sqrt` survives
+                                // and the rule cannot re-fire. This is what turns
+                                // `sqrt(2)^-2` into `1/2` and `sqrt(2)^-4` into
+                                // `1/4` in exact Gram–Schmidt steps.
+                                //
+                                // Even `n` is essential: an odd `n` would leave a
+                                // fractional exponent over a `sqrt`, and
+                                // re-simplifying that can re-enter the rule
+                                // forever (a stack overflow seen while integrating
+                                // `1/(x^4+1)` when the rule accepted all integers).
+                                if left_borrow.is_sqrt()
+                                    && let Some(exponent) = right_borrow.evaluate()
+                                    && exponent.is_integer()
+                                    && (exponent.clone() / Real::from_i64(2)).is_integer()
+                                {
+                                    let radicand = op_node.left.inner.borrow().get_right().ok();
+                                    if let Some(radicand) = radicand {
+                                        let halved = exponent / Real::from_i64(2);
+                                        drop(left_borrow);
+                                        drop(right_borrow);
+                                        let half_node =
+                                            NodeInner::<Real>::from_float(halved).wrap();
+                                        return NodeInner::<Real>::from_operation(
+                                            Op::Pow,
+                                            radicand,
+                                            half_node,
+                                        )
+                                        .simplify(expand, combine_fns);
+                                    }
                                 }
                             } else if op == Op::Add {
                                 if left_borrow.is_zero() {

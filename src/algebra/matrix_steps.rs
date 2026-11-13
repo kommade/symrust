@@ -405,9 +405,15 @@ pub fn qr_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
         // through silently, so both a structural zero and an unevaluable
         // squared norm are rejected up front; only a genuine nonzero value
         // proceeds.
+        //
+        // Simplify the squared norm once and reuse it: the divisions below
+        // build `v / sqrt(‖v‖²)`, and if the radicand is left as `1 + 2 2`
+        // instead of `5`, then a later column that is an exact multiple (such
+        // as `(2,4)` against `(1,2)`) produces entries whose radicals do not
+        // textually match, so the residual never collapses to zero.
+        let norm_squared = norm_squared.simplify(true);
         let magnitude_squared = norm_squared.clone().evaluate(0.0_f64).value();
         let is_dependent = norm_squared.is_zero()
-            || norm_squared.clone().simplify(true).is_zero()
             || match magnitude_squared {
                 Some(value) => value.abs() < 1e-12,
                 // Could not evaluate: only accept if the residual is
