@@ -454,7 +454,7 @@ fn exact_cubic_binomial_term(
     };
     // `r^2 = |c|^(2/3)` — built from the positive `root3` so it never raises a
     // negative base to a power (which goes through `ln` and yields NaN).
-    let r_squared = helpers::pow(root3, helpers::number(2));
+    let r_squared = helpers::pow(root3.clone(), helpers::number(2));
 
     // Numerator `N(x) = n2 x^2 + n1 x + n0` (low-to-high coefficients).
     let coefficient = |power: usize| coefficients.get(power).copied().unwrap_or(Rat::from_i64(0));
@@ -498,16 +498,28 @@ fn exact_cubic_binomial_term(
     terms.push(helpers::mul(half_b.clone(), helpers::function(Func::Ln, quadratic)));
 
     let atan_remainder = helpers::sub(c_value, helpers::div(helpers::mul(b_value, r.clone()), helpers::number(2)));
-    // √(4·1·r² − r²·... ) — completing the square gives √(3 r²) = |r|·√3.
-    let sqrt_neg_delta = helpers::sqrt_arg(multiply_rational(r_squared, Rat::from_i64(3)));
+    // `√(3 r²)` as a single fractional-power node `(3 r²)^(1/2)`, kept symbolic.
+    // One opaque node (rather than `∛c · √3`) keeps the simplifier from splitting
+    // `2x/∛2` etc. when it rewrites the atan argument, so no decimals appear.
+    let one_half = helpers::div(helpers::one(), helpers::number(2));
+    let sqrt_neg_delta = helpers::pow(
+        multiply_rational(r_squared.clone(), Rat::from_i64(3)),
+        one_half,
+    );
     let centre = helpers::add(helpers::mul(helpers::number(2), x), r.clone());
     let atan_arg = helpers::div(centre, sqrt_neg_delta.clone());
+    // Coefficient `2·(C − B r/2)/√(3 r²)`. Use `√(3 r²) = |r|·√3` here (|r| =
+    // `root3`) so the `r²` in the remainder cancels against `|r|` exactly and no
+    // `1/∛` decimal residue appears.
+    let sqrt3 = helpers::pow(helpers::number(3), helpers::div(helpers::one(), helpers::number(2)));
     let atan_coefficient = helpers::div(
         helpers::mul(helpers::number(2), atan_remainder),
-        sqrt_neg_delta,
+        helpers::mul(root3.clone(), sqrt3),
     );
     terms.push(helpers::mul(
-        helpers::function(Func::Atan, atan_arg),
+        // Raw constructor: `function()` would `simplify(expand=true)` the
+        // argument and distribute the division, folding e.g. `2x/∛2` to `∛4·x`.
+        helpers::call(Func::Atan, atan_arg),
         atan_coefficient,
     ));
 
