@@ -2,7 +2,21 @@
 #![allow(incomplete_features)]
 #![allow(unused)]
 
-use tracing::Subscriber;
+/// Record a step into any [`Recorder`][crate::structs::solution::Recorder].
+///
+/// Both the description and the result are lazy, so an answer-only run never
+/// renders them. The result is converted into an
+/// [`Expr`][crate::structs::expr::Expr], so it may be given as an `Expr` or as
+/// the underlying `Node`.
+macro_rules! calc_step {
+    ($recorder:expr, $name:expr, $description:expr, $result:expr) => {
+        $recorder.record(
+            $name,
+            || $description,
+            || $crate::structs::solution::IntoStepResult::into_step_result($result),
+        )
+    };
+}
 
 pub mod algebra;
 pub mod calculus;
@@ -66,17 +80,4 @@ macro_rules! create_expr {
     ($e:expr, $indp:expr; $ty:ty) => {
         $crate::structs::expr::Expr::<$ty>::parse($e.to_string(), Some($indp))
     };
-}
-
-/// Create a new subscriber for tracing. The logs this library generates will make a lot more sense with this subscriber.
-pub fn get_subscriber() -> impl Subscriber {
-    tracing_subscriber::fmt::SubscriberBuilder::default()
-        //.pretty()
-        .compact()
-        .without_time()
-        .with_file(false)
-        .with_line_number(false)
-        .with_target(false)
-        .with_max_level(tracing::Level::INFO)
-        .finish()
 }

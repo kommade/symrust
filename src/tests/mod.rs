@@ -14,6 +14,10 @@ mod test_float_gcd;
 mod test_float_math;
 mod test_linear;
 mod test_matrixable_sqrt;
+mod test_symbolic_matrix;
+mod test_matrix_literal;
+mod test_matrix_steps;
+mod test_symbolic_eigen;
 mod test_eigen;
 mod test_vector;
 
@@ -22,9 +26,6 @@ static INIT: std::sync::Once = std::sync::Once::new();
 fn setup() {
     INIT.call_once(|| {
         color_eyre::install().expect("Failed to install color_eyre");
-        let subscriber = crate::get_subscriber();
-
-        tracing::subscriber::set_global_default(subscriber).expect("Failed to set subscriber");
     });
 }
 

@@ -3,6 +3,7 @@ use std::{cell::RefCell, cmp::Ordering, error::Error, fmt::Display, ops::Neg, rc
 use crate::{
     numeric::{FloatType, Real},
     parse::lexer::{Const, Func, Op, Token},
+    structs::expr::Expr,
     utils::fmt::unnecessary_brackets,
 };
 
@@ -101,6 +102,14 @@ impl<T: FloatType + Display> Node<T> {
     pub fn root_sum(data: crate::parse::lexer::RootSumData) -> Self {
         NodeInner::operand(Token::RootSum(data)).wrap()
     }
+    /// A matrix-literal leaf, e.g. `[[1, 2], [3, 4]]`.
+    ///
+    /// Matrices are stored as [`Token::Matrix`] operands, which is what lets a
+    /// matrix participate in an expression tree (and be a step result).
+    #[must_use]
+    pub fn matrix(matrix: crate::algebra::linear::Matrix<crate::structs::expr::Expr>) -> Self {
+        NodeInner::operand(Token::Matrix(matrix)).wrap()
+    }
     /// A binary operation node, e.g. `left + right`.
     #[must_use]
     pub fn operate(op: Op, left: Self, right: Self) -> Self {
@@ -126,6 +135,66 @@ impl<T: FloatType + Display> Node<T> {
     pub fn is_operand(&self) -> bool {
         self.inner.borrow().is_operand()
     }
+}
+
+impl<T: FloatType + Display> Node<T> {
+    /// Convert a `Node<T>` of any leaf type into a `Node<Real>`.
+    ///
+    /// The inverse of [`from_real`](Self::from_real): numeric leaves are carried
+    /// across through [`FloatType::to_float`], and the symbolic structure is
+    /// preserved exactly. Used when a matrix literal, lexed at the caller's leaf
+    /// type, is stored as a concrete `Expr` (that is, `Expr<Real>`).
+    #[must_use]
+    pub fn from_typed(source: &Node<T>) -> Node<Real> {        fn convert_token<T: FloatType + Display>(token: &Token<T>) -> Token<Real> {
+            use crate::numeric::FloatBridge;
+            match token {
+                Token::Function(func) => Token::Function(match func {
+                    Func::Sin => Func::Sin,
+                    Func::Cos => Func::Cos,
+                    Func::Tan => Func::Tan,
+                    Func::Sec => Func::Sec,
+                    Func::Csc => Func::Csc,
+                    Func::Cot => Func::Cot,
+                    Func::Asin => Func::Asin,
+                    Func::Acos => Func::Acos,
+                    Func::Atan => Func::Atan,
+                    Func::Sqrt => Func::Sqrt,
+                    Func::Ln => Func::Ln,
+                    Func::Root(index) => Func::Root(Real::from_float(index.to_float())),
+                    Func::Log(base) => Func::Log(Real::from_float(base.to_float())),
+                }),
+                Token::Operator(op) => Token::Operator(op.clone()),
+                Token::Constant(c) => Token::Constant(c.clone()),
+                Token::Number(n) => Token::Number(*n),
+                Token::Float(value) => Token::Float(Real::from_float(value.to_float())),
+                Token::Indp(c) => Token::Indp(*c),
+                Token::Var(c) => Token::Var(*c),
+                Token::RootSum(data) => Token::RootSum(data.clone()),
+                Token::Matrix(matrix) => Token::Matrix(matrix.clone()),
+                Token::LBracket => Token::LBracket,
+                Token::RBracket => Token::RBracket,
+                Token::Comma => Token::Comma,
+                Token::LPar => Token::LPar,
+                Token::RPar => Token::RPar,
+            }
+        }
+        let borrow = source.inner.borrow();
+        match &borrow.value {
+            NodeValue::Operand(token) => NodeInner::operand(convert_token::<T>(token)).wrap(),
+            NodeValue::Operator(op_node) => {
+                let left = from_typed_node(&op_node.left);
+                let right = from_typed_node(&op_node.right);
+                NodeInner::operator(convert_token::<T>(&op_node.token), left, right).wrap()
+            }
+            NodeValue::Empty => NodeInner::empty(),
+        }
+    }
+}
+
+/// See [`Node::from_typed`]; the recursion step kept out of the impl so the
+/// generic parameter is the node's own, not the enclosing `T`.
+fn from_typed_node<T: FloatType + Display>(source: &Node<T>) -> Node<Real> {
+    Node::<T>::from_typed(source)
 }
 
 impl<T: FloatType + Display> Node<T> {
@@ -164,6 +233,10 @@ impl<T: FloatType + Display> Node<T> {
                 Token::Indp(c) => Token::Indp(*c),
                 Token::Var(c) => Token::Var(*c),
                 Token::RootSum(data) => Token::RootSum(data.clone()),
+                Token::Matrix(matrix) => Token::Matrix(matrix.clone()),
+                Token::LBracket => Token::LBracket,
+                Token::RBracket => Token::RBracket,
+                Token::Comma => Token::Comma,
                 Token::LPar => Token::LPar,
                 Token::RPar => Token::RPar,
             }
@@ -197,6 +270,25 @@ impl Display for NodeError {
 }
 
 impl Error for NodeError {}
+
+/// Render a matrix of expressions as a LaTeX `pmatrix`.
+///
+/// Each entry is rendered through its own `to_latex`, so symbolic entries work.
+fn matrix_to_latex(matrix: &crate::algebra::linear::Matrix<Expr>) -> String {
+    let mut rows = Vec::with_capacity(matrix.rows());
+    for row in 0..matrix.rows() {
+        let mut entries = Vec::with_capacity(matrix.columns());
+        for column in 0..matrix.columns() {
+            let entry = &matrix[row][column];
+            entries.push(entry.to_latex().unwrap_or_else(|_| entry.to_string()));
+        }
+        rows.push(entries.join(" & "));
+    }
+    format!(
+        r"\begin{{pmatrix}} {} \end{{pmatrix}}",
+        rows.join(r" \\ ")
+    )
+}
 
 impl<T: FloatType + Display> NodeInner<T> {
     pub fn get_left(&self) -> Result<Node<T>, NodeError> {
@@ -281,8 +373,7 @@ impl<T: FloatType + Display> NodeInner<T> {
 }
 
 impl NodeInner {
-    pub(crate) fn to_latex(&self) -> Result<String, NodeError> {
-        match &self.value {
+    pub(crate) fn to_latex(&self) -> Result<String, NodeError> {        match &self.value {
             NodeValue::Operand(token) => match token {
                 Token::Number(num) => Ok(format!("{num}")),
                 Token::Float(num) => {
@@ -313,6 +404,7 @@ impl NodeInner {
                         data.root_symbol,
                     ),
                 )),
+                Token::Matrix(matrix) => Ok(matrix_to_latex(matrix)),
                 _ => Err(NodeError::WrongToken("operand".to_string())),
             },
             NodeValue::Operator(op_node) => {
@@ -642,11 +734,19 @@ impl<T: FloatType + Display> NodeInner<T> {
     }
     /// Creates a new node from a operand token.
     pub(crate) fn operand(token: Token<T>) -> Self {
-        let (has_indp, has_const, has_func) = match token {
+        let (has_indp, has_const, has_func) = match &token {
             Token::Indp(_) => (true, false, false),
             Token::Constant(_) | Token::Var(_) => (false, true, false),
             // A root sum contains the integration variable inside `ln|x − Z|`.
             Token::RootSum(_) => (true, false, false),
+            // A matrix is symbolic if any of its entries is; its entries are
+            // expressions, so they may contain the independent variable.
+            Token::Matrix(matrix) => (
+                (0..matrix.rows())
+                    .any(|row| (0..matrix.columns()).any(|column| matrix[row][column].has_independent())),
+                true,
+                false,
+            ),
             Token::Operator(_) | Token::Function(_) | Token::LPar | Token::RPar => {
                 panic!("Invalid token for operand: {token}")
             }

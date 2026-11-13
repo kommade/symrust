@@ -3,8 +3,6 @@
 
 use std::cell::Cell;
 
-use tracing::{debug, info};
-
 thread_local! {
     /// Set by the algebraic fallback when a factor needs the `algebraic`
     /// feature but it is compiled out. Read and cleared by the integrator so it
@@ -40,6 +38,7 @@ use crate::{
     numeric::Real,
     parse::lexer::{Func, Op, Token},
     structs::expr::node::Node,
+    structs::solution::Recorder,
 };
 #[cfg(all(feature = "algebraic", feature = "complex"))]
 use crate::numeric::Complex;
@@ -78,60 +77,66 @@ impl RationalFunction {
             denom_node,
         })
     }
-    #[tracing::instrument(skip_all, parent = None, name = "(step) partial_fractions", fields(result))]
-    pub(super) fn integrate(&self, variable: &Node) -> Option<Node> {
-        let result = self.integrate_rational(variable);
-        super::record_option(result.as_ref());
-        let numer = describe_polynomial(&self.numer);
-        let denom = describe_polynomial(&self.denom);
-        let numer = if numer.contains(' ') {
-            format!("({numer})")
-        } else {
-            numer
-        };
-        let denom = if denom.contains(' ') {
-            format!("({denom})")
-        } else {
-            denom
-        };
-        info!("{numer} / {denom}");
-        result
+    pub(super) fn integrate<R: Recorder + ?Sized>(
+        &self,
+        variable: &Node,
+        integrator: &mut super::Integrator<'_, R>,
+    ) -> Option<Node> {
+        self.integrate_rational(variable, integrator)
     }
 
-    fn integrate_rational(&self, variable: &Node) -> Option<Node> {
+    fn integrate_rational<R: Recorder + ?Sized>(
+        &self,
+        variable: &Node,
+        integrator: &mut super::Integrator<'_, R>,
+    ) -> Option<Node> {
         let (quotient, remainder) = self.numer.div_rem(&self.denom)?;
         let mut terms = Vec::new();
         if !quotient.is_zero() {
-            info!(
-                "Dividing the polynomials to get a polynomial part of degree {:?}",
-                quotient.degree()
+            let degree = quotient.degree();
+            let polynomial_part = poly_to_node(&quotient.integrate()?, variable);
+            terms.push(polynomial_part);
+            integrator.step(
+                "polynomial division",
+                || format!("Divided out the polynomial part of degree {degree:?}"),
+                || terms[0].clone(),
             );
-            terms.push(poly_to_node(&quotient.integrate()?, variable));
         }
         if !remainder.is_zero() {
-            terms.push(self.integrate_proper(&remainder, variable)?);
+            let proper = self.integrate_proper(&remainder, variable, integrator)?;
+            integrator.step(
+                "partial fractions",
+                || describe_polynomial(&self.denom),
+                || proper.clone(),
+            );
+            terms.push(proper);
         }
         Some(helpers::sum(terms))
     }
-    fn integrate_proper(&self, numerator: &Poly, variable: &Node) -> Option<Node> {
+    fn integrate_proper<R: Recorder + ?Sized>(
+        &self,
+        numerator: &Poly,
+        variable: &Node,
+        integrator: &mut super::Integrator<'_, R>,
+    ) -> Option<Node> {
         let factorization = factorise(&self.denom).or_else(|| {
             self.denom_node
                 .as_ref()
                 .and_then(|node| factorise_from_shape(node, &self.denom))
         })?;
         let denominator_degree = self.denom.degree()?;
-        info!(
-            "Factored the denominator of degree {:?} into {} factor(s) with leading coefficient {}",
-            denominator_degree,
-            factorization.factors.len(),
-            factorization.leading.to_f64()
+        let factor_count = factorization.factors.len();
+        integrator.step(
+            "factor the denominator",
+            || {
+                format!(
+                    "Factored the denominator of degree {denominator_degree:?} into \
+                     {factor_count} factor(s) with leading coefficient {}",
+                    factorization.leading.to_f64()
+                )
+            },
+            || helpers::zero(),
         );
-        for (factor, multiplicity) in &factorization.factors {
-            debug!(
-                "Factor {} with multiplicity {multiplicity}",
-                factor.describe()
-            );
-        }
 
         // Verify the factorization before relying on it.
         let mut rebuilt = Poly::constant(factorization.leading);
@@ -139,7 +144,6 @@ impl RationalFunction {
             rebuilt = rebuilt.mul(&factor.to_poly().pow(*multiplicity as u32)?)?;
         }
         if !rebuilt.sub(&self.denom)?.is_zero() {
-            debug!("The candidate factorization does not multiply back to the denominator");
             return None;
         }
 
@@ -177,14 +181,6 @@ impl RationalFunction {
         }
 
         let solution: Vec<Rat> = solve_partial_fractions(&columns, &numerator)?;
-        debug!(
-            "Partial fraction coefficients: {}",
-            solution
-                .iter()
-                .map(|value| format!("{}", value.to_f64()))
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
 
         let coefficient_at = |index: usize, power: usize, basis: usize| {
             descriptors.iter().position(|descriptor| {
@@ -197,22 +193,6 @@ impl RationalFunction {
                 Factor::Linear { root } => {
                     for power in 1..=*multiplicity {
                         let coefficient = solution[coefficient_at(index, power, 0)?];
-                        if !coefficient.is_zero() {
-                            if power == 1 {
-                                debug!(
-                                    "Partial fraction term: {} / {}",
-                                    coefficient.to_f64(),
-                                    describe_linear(*root)
-                                );
-                            } else {
-                                debug!(
-                                    "Partial fraction term: {} / {}^{}",
-                                    coefficient.to_f64(),
-                                    describe_linear(*root),
-                                    power
-                                );
-                            }
-                        }
                         terms.push(linear_term(coefficient, *root, power, variable));
                     }
                 }
@@ -220,15 +200,6 @@ impl RationalFunction {
                     for power in 1..=*multiplicity {
                         let slope = solution[coefficient_at(index, power, 1)?];
                         let offset = solution[coefficient_at(index, power, 0)?];
-                        if !slope.is_zero() || !offset.is_zero() {
-                            debug!(
-                                "Partial fraction term: ({} x + {}) / ({})^{}",
-                                slope.to_f64(),
-                                offset.to_f64(),
-                                describe_quadratic(*linear, *constant),
-                                power
-                            );
-                        }
                         terms.push(quadratic_term(
                             slope, offset, *linear, *constant, power, variable,
                         )?);
@@ -237,21 +208,12 @@ impl RationalFunction {
                 Factor::General(poly) => {
                     let degree = poly.degree()?;
                     if *multiplicity != 1 {
-                        debug!(
-                            "Cannot integrate {} because its power is greater than one",
-                            factor.describe()
-                        );
                         return None;
                     }
                     let mut coefficients = Vec::with_capacity(degree);
                     for basis in 0..degree {
                         coefficients.push(solution[coefficient_at(index, 1, basis)?]);
                     }
-                    debug!(
-                        "Partial fraction term: ({}) / ({})",
-                        describe_coefficients(&coefficients),
-                        describe_polynomial(poly)
-                    );
                     terms.push(general_term(&coefficients, poly, variable)?);
                 }
             }
@@ -271,7 +233,6 @@ fn solve_partial_fractions(columns: &[Poly], numerator: &Poly) -> Option<Vec<Rat
     if size == 0 {
         return None;
     }
-    info!("Solving a {size}x{size} linear system to find the partial fraction coefficients");
     let mut matrix = Matrix::<Rat>::new(size, size);
     for row in 0..size {
         for column in 0..size {
@@ -389,16 +350,10 @@ fn general_term_algebraic(coefficients: &[Rat], factor: &Poly, variable: &Node) 
     {
         let _ = (coefficients, variable);
         // An irreducible factor left over after the exact paths have run is one
-        // the general algebraic method ("B") could handle. Tell the user why the
-        // integration stopped and how to enable it.
+        // the general algebraic method ("B") could handle. Flag it so the
+        // integrator can report `FeatureRequired` with an actionable message.
         if factor.degree() == Some(3) {
             ALGEBRAIC_NEEDED.with(|flag| flag.set(true));
-            tracing::warn!(
-                "cannot integrate the irreducible cube factor {} without the `algebraic` \
-                 feature; enable it (cargo build --features algebraic) to integrate \
-                 factors of degree three or more",
-                describe_polynomial(factor)
-            );
         }
         None
     }
@@ -1563,12 +1518,7 @@ fn quartic_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<
     let (first, second) = split_quartic(factor)?;
     let first_node = surd_quadratic_node(first.linear, first.constant, variable);
     let second_node = surd_quadratic_node(second.linear, second.constant, variable);
-    info!(
-        "Splitting {} into {} and {} using a quadratic extension",
-        describe_polynomial(factor),
-        super::describe_signed(&first_node),
-        super::describe_signed(&second_node)
-    );
+    let _ = (&first_node, &second_node);
     let first_poly = surd_poly(&first);
     let second_poly = surd_poly(&second);
     // N = (s1 x + s0) Q2 + (t1 x + t0) Q1

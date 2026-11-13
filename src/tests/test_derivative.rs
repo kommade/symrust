@@ -8,7 +8,6 @@ fn try_derivative() {
     for example in &EXAMPLE_FUNCTIONS {
         let expr = create_expr!(example.input).unwrap();
         let derivative = expr.get_derivative();
-        tracing::info!("------------------------------------------------------------------------");
         assert_eq!(derivative.to_string(), example.derivative);
         assert_eq!(derivative.to_latex().unwrap(), example.output_latex);
     }
@@ -24,4 +23,33 @@ fn try_custom() {
     let derivative = expr.get_derivative();
     assert_eq!(derivative.to_string(), "(x ^ (x ^ x + x)) (ln(x) ^ 2) + ln(x) x ^ (x ^ x + x) + x ^ (x ^ x + x - 1)");
     assert_eq!(derivative.to_latex().unwrap(), "{x}^{{x}^{x} + x} {\\ln(x)}^{2} + \\ln(x) {x}^{{x}^{x} + x} + {x}^{{x}^{x} + x - 1}");
+}
+
+/// The step-tracking entry point returns the same answer as the plain one and
+/// records the rules it applied.
+#[test]
+fn derivative_solution_records_steps() {
+    super::setup();
+    for example in &EXAMPLE_FUNCTIONS {
+        let expr = create_expr!(example.input).unwrap();
+        let expected = expr.clone().get_derivative();
+
+        let solution = create_expr!(example.input).unwrap().get_derivative_solution();
+        assert_eq!(
+            solution.result().to_string(),
+            expected.to_string(),
+            "solution answer for {}",
+            example.input
+        );
+        assert_eq!(solution.result().to_latex().unwrap(), example.output_latex);
+        assert_eq!(solution.problem_type(), "derivative");
+        assert_eq!(solution.start().to_string(), create_expr!(example.input).unwrap().to_string());
+        assert!(
+            !solution.steps().is_empty(),
+            "no steps recorded for {}",
+            example.input
+        );
+        // Every recorded step must display without panicking.
+        assert!(!solution.to_string().is_empty());
+    }
 }

@@ -1,6 +1,8 @@
 use std::{error::Error, fmt::Display};
 
+use crate::algebra::linear::Matrix;
 use crate::numeric::{FloatType, Real};
+use crate::structs::expr::Expr;
 
 /// A formal sum over the (unknown, generally complex) roots of a polynomial.
 ///
@@ -207,6 +209,18 @@ pub enum Token<T = Real> {
     Var(char),
     /// A formal `Σ_{Z : p(Z) = 0}` root sum (see [`RootSumData`]).
     RootSum(RootSumData),
+    /// A matrix literal, `[[a, b], [c, d]]`.
+    ///
+    /// The entries are expressions, so a matrix can carry symbolic values. It is
+    /// a leaf like [`RootSumData`]: concrete rather than generic over `T`, since
+    /// a matrix is not itself a scalar of the tree's leaf type.
+    Matrix(Matrix<Expr>),
+    /// The opening `[` of a matrix literal.
+    LBracket,
+    /// The closing `]` of a matrix literal.
+    RBracket,
+    /// The `,` separating matrix entries.
+    Comma,
     LPar,
     RPar,
 }
@@ -221,6 +235,10 @@ impl<T: FloatType + Display> Display for Token<T> {
             Self::Float(n) => write!(f, "{n}"),
             Self::Indp(c) | Self::Var(c) => write!(f, "{c}"),
             Self::RootSum(data) => write!(f, "{data}"),
+            Self::Matrix(matrix) => write!(f, "{matrix}"),
+            Self::LBracket => write!(f, "["),
+            Self::RBracket => write!(f, "]"),
+            Self::Comma => write!(f, ","),
             Self::LPar => write!(f, "("),
             Self::RPar => write!(f, ")"),
         }
@@ -246,6 +264,10 @@ impl<T> Token<T> {
     pub const fn from_var(c: char) -> Self {
         Self::Var(c)
     }
+    /// A matrix literal token, with [`Expr`] entries.
+    pub fn from_matrix(matrix: Matrix<Expr>) -> Self {
+        Self::Matrix(matrix)
+    }
     pub const fn is_implicitly_mul(&self) -> bool {
         matches!(
             self,
@@ -256,6 +278,7 @@ impl<T> Token<T> {
                 | Self::Indp(_)
                 | Self::Function(_)
                 | Self::RootSum(_)
+                | Self::Matrix(_)
                 | Self::LPar
         )
     }
@@ -367,6 +390,9 @@ impl<T: FloatType + Display> Lexer<T> {
             c if c.is_ascii_punctuation() => match c {
                 '(' => Ok(Token::LPar),
                 ')' => Ok(Token::RPar),
+                '[' => Ok(Token::LBracket),
+                ']' => Ok(Token::RBracket),
+                ',' => Ok(Token::Comma),
                 '+' => Ok(Token::from_op(Op::Add)),
                 '-' => Ok(Token::from_op(Op::Sub)),
                 '*' | '×' => Ok(Token::from_op(Op::Mul)),

@@ -1,12 +1,11 @@
 //! Integration of powers and products of trigonometric functions.
 
-use tracing::{debug, info};
-
 use super::Integrator;
 use super::helpers::{self, Shape};
 use crate::algebra::{polynomial::Poly, rational::Rat};
 use crate::numeric::Real;
 use crate::{
+    structs::solution::Recorder,
     parse::lexer::{Func, Op, Token},
     structs::expr::node::{Node, NodeFunctions},
 };
@@ -140,14 +139,23 @@ fn monomial(exponent: i64) -> Option<Poly> {
     Some(Poly::new(coeffs))
 }
 
-#[tracing::instrument(skip_all, parent = None, name = "(step) trigonometric_reduction", fields(result))]
-pub(super) fn try_integrate(integrator: &mut Integrator, node: &Node) -> Option<Node> {
+pub(super) fn try_integrate<R: Recorder + ?Sized>(
+    integrator: &mut Integrator<'_, R>,
+    node: &Node,
+) -> Option<Node> {
     let result = integrate_trig(integrator, node);
-    super::log_technique_outcome(node, super::record_option(result.as_ref()));
+    integrator.step(
+        "trigonometric reduction",
+        || super::describe_signed(node),
+        || result.clone().unwrap_or_else(|| node.clone()),
+    );
     result
 }
 
-fn integrate_trig(integrator: &mut Integrator, node: &Node) -> Option<Node> {
+fn integrate_trig<R: Recorder + ?Sized>(
+    integrator: &mut Integrator<'_, R>,
+    node: &Node,
+) -> Option<Node> {
     let product = helpers::flatten_product(node);
     if product.numer.is_empty() && product.denom.is_empty() {
         return None;
@@ -180,14 +188,6 @@ fn integrate_trig(integrator: &mut Integrator, node: &Node) -> Option<Node> {
     if powers.is_empty() {
         return None;
     }
-    debug!(
-        "Collected the trigonometric powers {}",
-        powers
-            .iter()
-            .map(|power| format!("{}^{}", power.func, power.exponent))
-            .collect::<Vec<_>>()
-            .join(" ")
-    );
     let arg = powers[0].arg.clone();
     let consistent = powers.iter().all(|power| helpers::equal(&power.arg, &arg));
     if !consistent || !others.is_empty() {
@@ -199,8 +199,8 @@ fn integrate_trig(integrator: &mut Integrator, node: &Node) -> Option<Node> {
     let result = integrate_monomials(integrator, &powers, arg.clone())?;
     Some(helpers::multiply_by(result, constant))
 }
-fn integrate_monomials(
-    integrator: &mut Integrator,
+fn integrate_monomials<R: Recorder + ?Sized>(
+    integrator: &mut Integrator<'_, R>,
     powers: &[TrigPower],
     arg: Node,
 ) -> Option<Node> {
@@ -232,38 +232,86 @@ fn integrate_monomials(
     }
 
     if tan == 0 && sec == 0 && csc == 0 && cot == 0 {
-        info!("Using the sine and cosine power rules for sin^{sin} cos^{cos}");
-        return sin_cos(sin, cos, &arg, &variable, &slope);
+        let result = sin_cos(sin, cos, &arg, &variable, &slope);
+        if let Some(node) = &result {
+            integrator.step(
+                "trig power rules",
+                || format!("sine and cosine power rules for sin^{sin} cos^{cos}"),
+                || node.clone(),
+            );
+        }
+        return result;
     }
     if sin == 0 && cos == 0 {
         if csc == 0 && cot == 0 {
             if sec == 0 {
-                info!("Using the tangent reduction formula for tan^{tan}");
-                return tan_power(tan, &arg, &variable, &slope);
+                let result = tan_power(tan, &arg, &variable, &slope);
+                if let Some(node) = &result {
+                    integrator.step(
+                        "tangent reduction",
+                        || format!("tangent reduction formula for tan^{tan}"),
+                        || node.clone(),
+                    );
+                }
+                return result;
             }
             if tan == 0 {
-                info!("Using the secant reduction formula for sec^{sec}");
-                return sec_power(sec, &arg, &variable, &slope);
+                let result = sec_power(sec, &arg, &variable, &slope);
+                if let Some(node) = &result {
+                    integrator.step(
+                        "secant reduction",
+                        || format!("secant reduction formula for sec^{sec}"),
+                        || node.clone(),
+                    );
+                }
+                return result;
             }
-            info!("Using the tangent-secant reduction formula for tan^{tan} sec^{sec}");
-            return tan_sec(tan, sec, &arg, &variable, &slope);
+            let result = tan_sec(tan, sec, &arg, &variable, &slope);
+            if let Some(node) = &result {
+                integrator.step(
+                    "tangent-secant reduction",
+                    || format!("tangent-secant reduction formula for tan^{tan} sec^{sec}"),
+                    || node.clone(),
+                );
+            }
+            return result;
         }
         if tan == 0 && sec == 0 {
             if csc == 0 {
-                info!("Using the cotangent reduction formula for cot^{cot}");
-                return cot_power(cot, &arg, &variable, &slope);
+                let result = cot_power(cot, &arg, &variable, &slope);
+                if let Some(node) = &result {
+                    integrator.step(
+                        "cotangent reduction",
+                        || format!("cotangent reduction formula for cot^{cot}"),
+                        || node.clone(),
+                    );
+                }
+                return result;
             }
             if cot == 0 {
-                info!("Using the cosecant reduction formula for csc^{csc}");
-                return csc_power(csc, &arg, &variable, &slope);
+                let result = csc_power(csc, &arg, &variable, &slope);
+                if let Some(node) = &result {
+                    integrator.step(
+                        "cosecant reduction",
+                        || format!("cosecant reduction formula for csc^{csc}"),
+                        || node.clone(),
+                    );
+                }
+                return result;
             }
-            info!("Using the cotangent-cosecant reduction formula for cot^{cot} csc^{csc}");
-            return cot_csc(cot, csc, &arg, &variable, &slope);
+            let result = cot_csc(cot, csc, &arg, &variable, &slope);
+            if let Some(node) = &result {
+                integrator.step(
+                    "cotangent-cosecant reduction",
+                    || format!("cotangent-cosecant reduction formula for cot^{cot} csc^{csc}"),
+                    || node.clone(),
+                );
+            }
+            return result;
         }
     }
     // `tan(x)^m cos(x)^n` is `sin(x)^m cos(x)^(n-m)`.
     if tan > 0 && cos >= tan && sin == 0 && sec == 0 && csc == 0 && cot == 0 {
-        info!("Rewriting tan^{tan} cos^{cos} as sine and cosine");
         let mut factors = vec![helpers::pow(
             helpers::function(Func::Sin, arg.clone()),
             helpers::number(tan),
@@ -274,11 +322,17 @@ fn integrate_monomials(
                 helpers::number(cos - tan),
             ));
         }
-        return integrator.integrate(&helpers::product_of(&factors)).ok();
+        let rewritten = helpers::product_of(&factors);
+        let result = integrator.integrate(&rewritten).ok();
+        integrator.step(
+            "trig rewrite",
+            || format!("tan^{tan} cos^{cos} as sine and cosine"),
+            || rewritten.clone(),
+        );
+        return result;
     }
     // `cot(x)^m sin(x)^n` is `cos(x)^m sin(x)^(n-m)`.
     if cot > 0 && sin >= cot && cos == 0 && tan == 0 && sec == 0 && csc == 0 {
-        info!("Rewriting cot^{cot} sin^{sin} as sine and cosine");
         let mut factors = vec![helpers::pow(
             helpers::function(Func::Cos, arg.clone()),
             helpers::number(cot),
@@ -289,21 +343,32 @@ fn integrate_monomials(
                 helpers::number(sin - cot),
             ));
         }
-        return integrator.integrate(&helpers::product_of(&factors)).ok();
+        let rewritten = helpers::product_of(&factors);
+        let result = integrator.integrate(&rewritten).ok();
+        integrator.step(
+            "trig rewrite",
+            || format!("cot^{cot} sin^{sin} as sine and cosine"),
+            || rewritten.clone(),
+        );
+        return result;
     }
     // `sec(x) csc(x)` is `2 csc(2x)`.
     if sec == 1 && csc == 1 && sin == 0 && cos == 0 && tan == 0 && cot == 0 {
-        info!("Rewriting sec(x) csc(x) as 2 csc(2x)");
         let doubled = helpers::mul(helpers::number(2), arg.clone());
         let expression = helpers::scale(
             helpers::function(Func::Csc, doubled),
             helpers::float_from(2.0),
         );
-        return integrator.integrate(&expression).ok();
+        let result = integrator.integrate(&expression).ok();
+        integrator.step(
+            "trig rewrite",
+            || String::from("sec(x) csc(x) as 2 csc(2x)"),
+            || expression.clone(),
+        );
+        return result;
     }
     // `sin(x)^m / cos(x)^n` is `tan(x)^n sin(x)^(m-n)`.
     if sec > 0 && sin >= sec && cos == 0 && tan == 0 && csc == 0 && cot == 0 {
-        info!("Rewriting sin^{sin} / cos^{sec} using tangents");
         let mut factors = vec![helpers::pow(
             helpers::function(Func::Tan, arg.clone()),
             helpers::number(sec),
@@ -314,11 +379,17 @@ fn integrate_monomials(
                 helpers::number(sin - sec),
             ));
         }
-        return integrator.integrate(&helpers::product_of(&factors)).ok();
+        let rewritten = helpers::product_of(&factors);
+        let result = integrator.integrate(&rewritten).ok();
+        integrator.step(
+            "trig rewrite",
+            || format!("sin^{sin} / cos^{sec} using tangents"),
+            || rewritten.clone(),
+        );
+        return result;
     }
     // `cos(x)^m / sin(x)^n` is `cot(x)^n cos(x)^(m-n)`.
     if csc > 0 && cos >= csc && sin == 0 && tan == 0 && sec == 0 && cot == 0 {
-        info!("Rewriting cos^{cos} / sin^{csc} using cotangents");
         let mut factors = vec![helpers::pow(
             helpers::function(Func::Cot, arg.clone()),
             helpers::number(csc),
@@ -329,11 +400,17 @@ fn integrate_monomials(
                 helpers::number(cos - csc),
             ));
         }
-        return integrator.integrate(&helpers::product_of(&factors)).ok();
+        let rewritten = helpers::product_of(&factors);
+        let result = integrator.integrate(&rewritten).ok();
+        integrator.step(
+            "trig rewrite",
+            || format!("cos^{cos} / sin^{csc} using cotangents"),
+            || rewritten.clone(),
+        );
+        return result;
     }
     // `sin(x)^m / cos(x)^n` with `m <= n` is `tan(x)^m sec(x)^(n-m)`.
     if sec > 0 && sin > 0 && sin < sec && cos == 0 && tan == 0 && csc == 0 && cot == 0 {
-        info!("Rewriting sin^{sin} / cos^{sec} using tangents and secants");
         let mut factors = vec![helpers::pow(
             helpers::function(Func::Tan, arg.clone()),
             helpers::number(sin),
@@ -342,11 +419,17 @@ fn integrate_monomials(
             helpers::function(Func::Sec, arg.clone()),
             helpers::number(sec - sin),
         ));
-        return integrator.integrate(&helpers::product_of(&factors)).ok();
+        let rewritten = helpers::product_of(&factors);
+        let result = integrator.integrate(&rewritten).ok();
+        integrator.step(
+            "trig rewrite",
+            || format!("sin^{sin} / cos^{sec} using tangents and secants"),
+            || rewritten.clone(),
+        );
+        return result;
     }
     // `cos(x)^m / sin(x)^n` with `m <= n` is `cot(x)^m csc(x)^(n-m)`.
     if csc > 0 && cos > 0 && cos < csc && sin == 0 && tan == 0 && sec == 0 && cot == 0 {
-        info!("Rewriting cos^{cos} / sin^{csc} using cotangents and cosecants");
         let mut factors = vec![helpers::pow(
             helpers::function(Func::Cot, arg.clone()),
             helpers::number(cos),
@@ -355,7 +438,14 @@ fn integrate_monomials(
             helpers::function(Func::Csc, arg.clone()),
             helpers::number(csc - cos),
         ));
-        return integrator.integrate(&helpers::product_of(&factors)).ok();
+        let rewritten = helpers::product_of(&factors);
+        let result = integrator.integrate(&rewritten).ok();
+        integrator.step(
+            "trig rewrite",
+            || format!("cos^{cos} / sin^{csc} using cotangents and cosecants"),
+            || rewritten.clone(),
+        );
+        return result;
     }
     None
 }
@@ -593,8 +683,8 @@ fn cot_csc(m: i64, n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<
 
 /// Rewrite a product of trigonometric functions with different arguments
 /// using the product to sum identities.
-fn rewrite_product(
-    integrator: &mut Integrator,
+fn rewrite_product<R: Recorder + ?Sized>(
+    integrator: &mut Integrator<'_, R>,
     powers: &[TrigPower],
     others: &[Node],
 ) -> Option<Node> {
@@ -622,13 +712,17 @@ fn rewrite_product(
         ),
         _ => return None,
     };
-    info!(
-        "Using the product to sum identity on {}^{} and {}^{}",
-        first.func, first.exponent, second.func, second.exponent
-    );
     let mut integrand = helpers::scale(expression, helpers::float_from(0.5));
     for other in others {
         integrand = helpers::mul(integrand, other.clone());
     }
-    integrator.integrate(&integrand).ok()
+    let result = integrator.integrate(&integrand).ok();
+    let first_desc = format!("{}^{}", first.func, first.exponent);
+    let second_desc = format!("{}^{}", second.func, second.exponent);
+    integrator.step(
+        "product to sum",
+        || format!("product to sum identity on {first_desc} and {second_desc}"),
+        || integrand.clone(),
+    );
+    result
 }

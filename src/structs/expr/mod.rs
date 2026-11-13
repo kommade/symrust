@@ -1,8 +1,8 @@
 use std::error::Error;
 use std::fmt::Display;
-use std::ops::{Add, Div, Mul, Sub};
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
-use crate::numeric::{FloatType, Real};
+use crate::numeric::{ExactField, FloatType, Real};
 use crate::parse::{lexer::Lexer, parser::Parser};
 
 pub mod node;
@@ -36,10 +36,101 @@ impl<T: Clone> Clone for Expr<T> {
     }
 }
 
+/// Expressions compare equal when their trees render identically.
+///
+/// Structural equality is not meaningful for the shared, mutable node tree, so
+/// equality follows the same rule as [`NodeInner`]'s `PartialEq`: the LaTeX
+/// rendering must match. This is what makes [`Expr`] usable as a matrix
+/// coefficient and in the linear-algebra code.
+impl PartialEq for Expr<Real> {
+    fn eq(&self, other: &Self) -> bool {
+        self.tree.inner.borrow().eq(&*other.tree.inner.borrow())
+    }
+}
+
+impl Neg for Expr<Real> {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        Self::from_node(self.tree.negate())
+    }
+}
+
+/// An expression is a valid coefficient for the linear-algebra routines.
+///
+/// This is what lets a matrix hold symbolic entries: `Matrix<Expr>` works with
+/// every generic algorithm in [`crate::algebra::linear`]. The conversions are
+/// deliberately lossy in the usual way for symbolic values — `as_f64` returns
+/// `NaN` when the expression cannot be folded to a number, the square roots
+/// build `sqrt` nodes rather than guessing a numeric root, and
+/// [`is_floating`](Self::is_floating) is `false` so the numeric-only SVD
+/// fallback is not applied to symbolic entries.
+impl ExactField for Expr<Real> {
+    fn multiplicative_identity() -> Self {
+        Self::from_node(NodeInner::<Real>::one())
+    }
+
+    fn additive_identity() -> Self {
+        Self::from_node(NodeInner::<Real>::zero())
+    }
+
+    fn as_f64(self) -> f64 {
+        self.evaluate(f64::NAN).value().unwrap_or(f64::NAN)
+    }
+
+    /// Whether the expression evaluates to zero.
+    ///
+    /// Expressions are compared by their LaTeX rendering, so a value that is
+    /// numerically zero (`0 / 1`, `1 * 0`) is not the literal zero node. The
+    /// linear algebra needs the numeric reading, so this simplifies first and
+    /// then asks whether the result is zero.
+    fn is_zero_value(&self) -> bool {
+        if self.is_zero() {
+            return true;
+        }
+        let simplified = self.clone().simplify(true);
+        if simplified.is_zero() {
+            return true;
+        }
+        match simplified.evaluate(f64::NAN).value() {
+            Some(value) => value == 0.0,
+            None => false,
+        }
+    }
+
+    fn from_f64(value: f64) -> Self {
+        Self::from_node(NodeInner::<Real>::from_float(Real::from_f64(value)).wrap())
+    }
+
+    fn sqrt(self) -> Self {
+        Self::from_node(NodeInner::<Real>::from_function(
+            crate::parse::lexer::Func::Sqrt,
+            self.tree,
+        ))
+    }
+
+    fn try_sqrt(self) -> Option<Self> {
+        Some(Self::from_node(NodeInner::<Real>::from_function(
+            crate::parse::lexer::Func::Sqrt,
+            self.tree,
+        )))
+    }
+
+    fn is_floating() -> bool {
+        false
+    }
+}
+
 impl<T: FloatType + Display> Default for Expr<T> {
+    /// The expression `0`.
+    ///
+    /// This is the additive identity, which is the convention the linear
+    /// algebra relies on (`T::default()` is used to zero-fill matrices). It is
+    /// a numeric zero rather than an empty tree, so it displays as `0` and
+    /// behaves correctly as a matrix coefficient.
     fn default() -> Self {
         Self {
-            tree: NodeInner::<T>::empty(),
+            tree: NodeInner::<T>::zero(),
         }
     }
 }
@@ -107,6 +198,15 @@ impl Expr<Real> {
     pub fn is_zero(&self) -> bool {
         self.tree.inner.borrow().is_zero()
     }
+
+    /// Whether the expression contains the independent variable.
+    ///
+    /// Used to decide whether a matrix token is symbolic, and to drive the
+    /// constant/independent classification of nodes.
+    #[must_use]
+    pub fn has_independent(&self) -> bool {
+        self.tree.inner.borrow().has_indp
+    }
     /// Returns the LaTeX representation of the expression.
     #[must_use]
     pub fn to_latex(&self) -> Result<String, NodeError> {
@@ -129,11 +229,9 @@ impl Expr<Real> {
     /// let expr = create_expr!("2x^2 / 1").unwrap();
     /// assert_eq!(expr.simplify(true).to_string(), "2 x ^ 2");
     /// ```
-    #[tracing::instrument(skip(self), parent = None, name = "(step) simplify", fields(result))]
     #[must_use]
     pub fn simplify(self, expand: bool) -> Self {
         let tree = self.tree.simplify(expand, true);
-        tracing::Span::current().record("result", tree.inner.borrow().to_string());
         Self { tree }
     }
 }

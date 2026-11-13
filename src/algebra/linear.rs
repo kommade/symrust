@@ -87,33 +87,35 @@ impl <T, const N: usize, const M: usize> StaticMatrix<T, N, M> where T: Matrixab
         if slice.len() != N * M {
             return None;
         }
-        Some(Self::from_iter(slice.iter().copied()))
+        Some(Self::from_iter(slice.iter().cloned()))
     }
 
     pub fn from_unchecked_slice(slice: &[T]) -> Self {
-        Self::from_iter(slice.iter().copied())
+        Self::from_iter(slice.iter().cloned())
     }
 
     /// The first `R` columns of every row.
     pub fn from_n_cols<const R: usize>(&self) -> StaticMatrix<T, N, R> {
         assert!(R <= M, "from_n_cols: R ({R}) must be <= M ({M})");
-        StaticMatrix { data: std::array::from_fn(|row| std::array::from_fn(|column| self.data[row][column])) }
+        StaticMatrix { data: std::array::from_fn(|row| std::array::from_fn(|column| self.data[row][column].clone())) }
     }
 
     /// The first `R` rows, each row keeping all `M` columns.
     pub fn from_n_rows<const R: usize>(&self) -> StaticMatrix<T, R, M> {
         assert!(R <= N, "from_n_rows: R ({R}) must be <= N ({N})");
-        StaticMatrix::<T, R, M>::new(std::array::from_fn(|row| self.data[row]))
+        StaticMatrix::<T, R, M>::new(std::array::from_fn(|row| self.data[row].clone()))
     }
 }
 
 impl <T, const N: usize> StaticMatrix<T, N, N> where T: Matrixable {
     pub fn identity() -> Self {
-        let mut data = [[T::default(); N]; N];
-        for (i, row) in data.iter_mut().enumerate() {
-            row[i] = T::multiplicative_identity();
+        let mut data = vec![T::default(); N * N];
+        for i in 0..N {
+            data[i * N + i] = T::multiplicative_identity();
         }
-        Self { data }
+        Self::new(std::array::from_fn(|row| {
+            std::array::from_fn(|column| data[row * N + column].clone())
+        }))
     }
 }
 
@@ -142,7 +144,7 @@ impl <T, const N: usize, const M: usize> MatrixOps<T> for StaticMatrix<T, N, M> 
     }
 
     fn entry(&self, row: usize, column: usize) -> T {
-        self.data[row][column]
+        self.data[row][column].clone()
     }
 
     fn set_entry(&mut self, row: usize, column: usize, value: T) {
@@ -187,7 +189,7 @@ impl <T, const N: usize, const M: usize> PartialEq for StaticMatrix<T, N, M> whe
 
 impl <T, const N: usize, const M: usize> Default for StaticMatrix<T, N, M> where T: Matrixable {
     fn default() -> Self {
-        Self { data: [[T::default(); M]; N] }
+        Self { data: std::array::from_fn(|_| std::array::from_fn(|_| T::default())) }
     }
 }
 
@@ -207,7 +209,7 @@ impl <T, const N: usize, const M: usize> IndexMut<usize> for StaticMatrix<T, N, 
 
 impl <T, const N: usize, const M: usize> Clone for StaticMatrix<T, N, M> where T: Matrixable {
     fn clone(&self) -> Self {
-        Self { data: self.data }
+        Self { data: std::array::from_fn(|row| self.data[row].clone()) }
     }
 }
 
@@ -248,7 +250,7 @@ impl <T, const N: usize, const M: usize> FromIterator<StaticVector<T, M>> for St
         let mut matrix = Self::default();
         for (row, vector) in iter.into_iter().take(N).enumerate() {
             for (column, value) in matrix.data[row].iter_mut().enumerate() {
-                *value = vector[column][0];
+                *value = vector[column][0].clone();
             }
         }
         matrix
@@ -308,7 +310,7 @@ impl <T, const N: usize, const M: usize> Mul<T> for StaticMatrix<T, N, M> where 
 
 impl <T, const N: usize, const M: usize> MulAssign<T> for StaticMatrix<T, N, M> where T: Matrixable {
     fn mul_assign(&mut self, rhs: T) {
-        map_scalar(self, |a| a * rhs);
+        map_scalar(self, |a| a * rhs.clone());
     }
 }
 
@@ -324,7 +326,7 @@ impl <T, const N: usize, const M: usize> Div<T> for StaticMatrix<T, N, M> where 
 
 impl <T, const N: usize, const M: usize> DivAssign<T> for StaticMatrix<T, N, M> where T: Matrixable {
     fn div_assign(&mut self, rhs: T) {
-        map_scalar(self, |a| a / rhs);
+        map_scalar(self, |a| a / rhs.clone());
     }
 }
 
@@ -435,7 +437,7 @@ pub fn from_vec(rows: usize, columns: usize, values: Vec<T>) -> Option<Self> {
 
     /// Copy the entries of a [`StaticMatrix`] into a runtime matrix.
     pub fn from_static<const N: usize, const M: usize>(source: &StaticMatrix<T, N, M>) -> Self {
-        Self::from_unchecked_vec(N, M, source.iter().copied().collect())
+        Self::from_unchecked_vec(N, M, source.iter().cloned().collect())
     }
 
     /// Number of rows.
@@ -454,8 +456,10 @@ pub fn from_vec(rows: usize, columns: usize, values: Vec<T>) -> Option<Self> {
         let row_count = self.rows.min(rows);
         let column_count = self.columns.min(columns);
         for row in 0..row_count {
-            let source = &self.data[row * self.columns..][..column_count];
-            resized.data[row * columns..][..column_count].copy_from_slice(source);
+            for column in 0..column_count {
+                let value = self.data[row * self.columns + column].clone();
+                resized.data[row * columns + column] = value;
+            }
         }
         *self = resized;
     }
@@ -466,7 +470,7 @@ impl <T> Matrix<T> where T: Matrixable {
     /// one row.
     pub fn column(&self, index: usize) -> Vector<T> {
         assert!(index < self.columns, "column {index} is out of bounds for a {}x{} matrix", self.rows, self.columns);
-        Vector::from_unchecked_vec((0..self.rows).map(|row| self[row][index]).collect())
+        Vector::from_unchecked_vec((0..self.rows).map(|row| self[row][index].clone()).collect())
     }
 
     /// The row at `index`, as a [`Vector`]. The matrix must have at least one
@@ -504,7 +508,7 @@ impl <T> MatrixOps<T> for Matrix<T> where T: Matrixable {
     }
 
     fn entry(&self, row: usize, column: usize) -> T {
-        self.data[row * self.columns + column]
+        self.data[row * self.columns + column].clone()
     }
 
     fn set_entry(&mut self, row: usize, column: usize, value: T) {
@@ -637,7 +641,7 @@ impl <T> Mul<T> for Matrix<T> where T: Matrixable {
 
 impl <T> MulAssign<T> for Matrix<T> where T: Matrixable {
     fn mul_assign(&mut self, rhs: T) {
-        map_scalar(self, |a| a * rhs);
+        map_scalar(self, |a| a * rhs.clone());
     }
 }
 
@@ -653,7 +657,7 @@ impl <T> Div<T> for Matrix<T> where T: Matrixable {
 
 impl <T> DivAssign<T> for Matrix<T> where T: Matrixable {
     fn div_assign(&mut self, rhs: T) {
-        map_scalar(self, |a| a / rhs);
+        map_scalar(self, |a| a / rhs.clone());
     }
 }
 
@@ -703,9 +707,7 @@ impl <T> Vector<T> where T: Matrixable {
         Self { data: data.to_vec() }
     }
 
-    /// A vector of `length` entries read from `values`.
-    ///
-    /// Returns `None` when the count does not match.
+    /// A vector read top to bottom from `data`.
     pub fn from_unchecked_vec(data: Vec<T>) -> Self {
         Self { data }
     }
@@ -734,7 +736,7 @@ impl <T> Vector<T> where T: Matrixable {
     ///
     /// Returns `None` when the matrix has more than one column.
     pub fn from_matrix(matrix: &Matrix<T>) -> Option<Self> {
-        (matrix.columns() == 1).then(|| Self::from_vec((0..matrix.rows()).map(|row| matrix[row][0]).collect()))
+        (matrix.columns() == 1).then(|| Self::from_vec((0..matrix.rows()).map(|row| matrix[row][0].clone()).collect()))
     }
 
     /// Build a vector by applying `f` to each index in `0..length`.
@@ -760,7 +762,7 @@ impl <T> Vector<T> where T: Matrixable {
         assert_eq!(self.len(), rhs.len(), "dot_product: vectors have different lengths");
         let mut result = T::additive_identity();
         for i in 0..self.len() {
-            result = result + self.data[i] * rhs.data[i];
+            result = result + self.data[i].clone() * rhs.data[i].clone();
         }
         result
     }
@@ -789,14 +791,14 @@ impl <T> Vector<T> where T: Matrixable {
     /// This vector scaled by `scalar`.
     pub fn scale(&self, scalar: T) -> Self {
         Self {
-            data: self.data.iter().map(|value| *value * scalar).collect(),
+            data: self.data.iter().map(|value| value.clone() * scalar.clone()).collect(),
         }
     }
 }
 
 impl <T> Vector<T> where T: Matrixable {
     pub fn iter(&self) -> impl Iterator<Item = T> + '_ {
-        self.data.iter().copied()
+        self.data.iter().cloned()
     }
 }
 
@@ -883,7 +885,7 @@ impl <T> MatrixOps<T> for Vector<T> where T: Matrixable {
 
     fn entry(&self, row: usize, column: usize) -> T {
         assert_eq!(column, 0, "a vector has a single column");
-        self.data[row]
+        self.data[row].clone()
     }
 
     fn set_entry(&mut self, row: usize, column: usize, value: T) {
@@ -944,7 +946,7 @@ impl <T> Mul<T> for Vector<T> where T: Matrixable {
 
 impl <T> MulAssign<T> for Vector<T> where T: Matrixable {
     fn mul_assign(&mut self, rhs: T) {
-        map_scalar(self, |a| a * rhs);
+        map_scalar(self, |a| a * rhs.clone());
     }
 }
 
@@ -960,7 +962,7 @@ impl <T> Div<T> for Vector<T> where T: Matrixable {
 
 impl <T> DivAssign<T> for Vector<T> where T: Matrixable {
     fn div_assign(&mut self, rhs: T) {
-        map_scalar(self, |a| a / rhs);
+        map_scalar(self, |a| a / rhs.clone());
     }
 }
 
@@ -1087,7 +1089,7 @@ where
     let mut result = T::multiplicative_identity();
     let mut matrix = matrix.clone();
     for i in 0..size {
-        let Some(pivot) = (i..size).find(|&row| !(matrix.entry(row, i) == T::additive_identity())) else {
+        let Some(pivot) = (i..size).find(|&row| !matrix.entry(row, i).is_zero_value()) else {
             return T::additive_identity();
         };
         if pivot != i {
@@ -1095,11 +1097,12 @@ where
             result = -result;
         }
         let pivot_value = matrix.entry(i, i);
-        result = result * pivot_value;
+        result = result * pivot_value.clone();
         for j in (i + 1)..size {
-            let factor = matrix.entry(j, i) / pivot_value;
+            let factor = matrix.entry(j, i) / pivot_value.clone();
             for k in i..size {
-                matrix.set_entry(j, k, matrix.entry(j, k) - factor * matrix.entry(i, k));
+                let value = matrix.entry(j, k) - factor.clone() * matrix.entry(i, k);
+                matrix.set_entry(j, k, value);
             }
         }
     }
@@ -1118,19 +1121,21 @@ where
     let mut inverse = matrix.clone().identity_like();
 
     for column in 0..size {
-        let Some(pivot) = (column..size).find(|&row| !(reduced.entry(row, column) == zero)) else {
+        let Some(pivot) = (column..size).find(|&row| !reduced.entry(row, column).is_zero_value()) else {
             return None;
         };
         swap_rows(&mut reduced, column, pivot);
         swap_rows(&mut inverse, column, pivot);
 
         let pivot_value = reduced.entry(column, column);
-        if pivot_value == zero {
+        if pivot_value.is_zero_value() {
             return None;
         }
         for j in 0..size {
-            reduced.set_entry(column, j, reduced.entry(column, j) / pivot_value);
-            inverse.set_entry(column, j, inverse.entry(column, j) / pivot_value);
+            let reduced_value = reduced.entry(column, j) / pivot_value.clone();
+            reduced.set_entry(column, j, reduced_value);
+            let inverse_value = inverse.entry(column, j) / pivot_value.clone();
+            inverse.set_entry(column, j, inverse_value);
         }
 
         for row in 0..size {
@@ -1142,8 +1147,10 @@ where
                 continue;
             }
             for j in 0..size {
-                reduced.set_entry(row, j, reduced.entry(row, j) - factor * reduced.entry(column, j));
-                inverse.set_entry(row, j, inverse.entry(row, j) - factor * inverse.entry(column, j));
+                let reduced_value = reduced.entry(row, j) - factor.clone() * reduced.entry(column, j);
+                reduced.set_entry(row, j, reduced_value);
+                let inverse_value = inverse.entry(row, j) - factor.clone() * inverse.entry(column, j);
+                inverse.set_entry(row, j, inverse_value);
             }
         }
     }
@@ -1154,7 +1161,7 @@ where
 /// The inverse of a runtime [`Matrix`], or `None` when it is singular.
 fn inverse_of_matrix<T: Matrixable>(matrix: &Matrix<T>) -> Option<Matrix<T>> {
     let inverse = inverse_of(matrix)?;
-    Some(Matrix::from_vec(inverse.rows(), inverse.columns(), inverse.iter().copied().collect())?)
+    Some(Matrix::from_vec(inverse.rows(), inverse.columns(), inverse.iter().cloned().collect())?)
 }
 
 /// The product of two runtime matrices.
@@ -1174,7 +1181,7 @@ fn multiply_matrices<T: Matrixable>(left: &Matrix<T>, right: &Matrix<T>) -> Matr
     for row in 0..left.rows() {
         for column in 0..right.columns() {
             let value = (0..left.columns())
-                .fold(T::additive_identity(), |acc, k| acc + left[row][k] * right[k][column]);
+                .fold(T::additive_identity(), |acc, k| acc + left[row][k].clone() * right[k][column].clone());
             result[row][column] = value;
         }
     }
@@ -1253,7 +1260,7 @@ where
     let mut row = 0;
     let mut lead = 0;
     while row < rows && lead < columns {
-        let Some(pivot) = (row..rows).find(|&candidate| !(matrix.entry(candidate, lead) == T::additive_identity())) else {
+        let Some(pivot) = (row..rows).find(|&candidate| !matrix.entry(candidate, lead).is_zero_value()) else {
             lead += 1;
             continue;
         };
@@ -1263,7 +1270,7 @@ where
         if !(pivot_value == T::multiplicative_identity()) {
             for column in 0..columns {
                 let value = matrix.entry(row, column);
-                matrix.set_entry(row, column, if normalise { value / pivot_value } else { value });
+                matrix.set_entry(row, column, if normalise { value / pivot_value.clone() } else { value });
             }
         }
 
@@ -1272,11 +1279,12 @@ where
                 continue;
             }
             let factor = matrix.entry(target, lead);
-            if factor == T::additive_identity() {
+            if factor.is_zero_value() {
                 continue;
             }
             for column in 0..columns {
-                matrix.set_entry(target, column, matrix.entry(target, column) - factor * matrix.entry(row, column));
+                let value = matrix.entry(target, column) - factor.clone() * matrix.entry(row, column);
+                matrix.set_entry(target, column, value);
             }
         }
         row += 1;
@@ -1297,14 +1305,15 @@ where
     let mut upper = matrix.clone();
     for i in 0..size {
         let pivot = upper.entry(i, i);
-        if pivot == T::additive_identity() {
+        if pivot.is_zero_value() {
             return None;
         }
         for j in (i + 1)..size {
-            let factor = upper.entry(j, i) / pivot;
-            lower.set_entry(j, i, factor);
+            let factor = upper.entry(j, i) / pivot.clone();
+            lower.set_entry(j, i, factor.clone());
             for k in i..size {
-                upper.set_entry(j, k, upper.entry(j, k) - factor * upper.entry(i, k));
+                let value = upper.entry(j, k) - factor.clone() * upper.entry(i, k);
+                upper.set_entry(j, k, value);
             }
         }
     }
@@ -1327,9 +1336,10 @@ where
             for i in 0..size {
                 rkj = rkj + q.entry(i, k) * r.entry(i, j);
             }
-            r.set_entry(k, j, rkj);
+            r.set_entry(k, j, rkj.clone());
             for i in 0..size {
-                r.set_entry(i, j, r.entry(i, j) - rkj * q.entry(i, k));
+                let value = r.entry(i, j) - rkj.clone() * q.entry(i, k);
+                r.set_entry(i, j, value);
             }
         }
 
@@ -1337,13 +1347,13 @@ where
         for i in 0..size {
             norm_v_squared = norm_v_squared + r.entry(i, j) * r.entry(i, j);
         }
-        if norm_v_squared == T::additive_identity() {
+        if norm_v_squared.is_zero_value() {
             return None;
         }
         let norm_v = norm_v_squared.sqrt();
-        r.set_entry(j, j, norm_v);
+        r.set_entry(j, j, norm_v.clone());
         for i in 0..size {
-            q.set_entry(i, j, r.entry(i, j) / norm_v);
+            q.set_entry(i, j, r.entry(i, j) / norm_v.clone());
         }
     }
     Some((q, r))
@@ -1432,8 +1442,9 @@ where
 
 /// The exact value of an entry, if it happens to be rational.
 fn exact_rational<T: Matrixable>(value: T) -> Option<Rat> {
-    let rounded = Rat::from_f64(value.as_f64())?;
-    (rounded.to_f64() == value.as_f64()).then_some(rounded)
+    let as_float = value.as_f64();
+    let rounded = Rat::from_f64(as_float)?;
+    (rounded.to_f64() == as_float).then_some(rounded)
 }
 
 /// Every root of the polynomial, repeated with multiplicity, or `None` if some
@@ -1484,7 +1495,8 @@ where
     for row in 0..size {
         for column in 0..size {
             let value = matrix.entry(row, column);
-            shifted.set_entry(row, column, if row == column { value - lambda } else { value });
+            let shifted_value = if row == column { value - lambda.clone() } else { value };
+            shifted.set_entry(row, column, shifted_value);
         }
     }
     shifted
@@ -1509,7 +1521,7 @@ where
         if seen.contains(&lambda) {
             continue;
         }
-        seen.push(lambda);
+        seen.push(lambda.clone());
         let shifted = shifted_by(matrix, lambda);
         for vector in vec_null_space(&shifted) {
             if vector.len() == size {
@@ -1535,7 +1547,7 @@ where
     let mut eigenvectors = Matrix::new(size, size);
     for (column, entries) in columns.iter().enumerate() {
         for (row, value) in entries.iter().enumerate() {
-            eigenvectors.set_entry(row, column, *value);
+            eigenvectors.set_entry(row, column, value.clone());
         }
     }
     let inverse = inverse_of_matrix(&eigenvectors)?;
@@ -1547,7 +1559,10 @@ where
             let value = transformed.entry(row, column);
             if row == column {
                 diagonal.push(value);
-            } else if !(value == T::additive_identity()) {
+            } else if !value.is_zero_value() {
+                // Off-diagonal entries must vanish; compare numerically so an
+                // expression like `0 / 1` (zero, but not the literal zero node)
+                // does not reject an otherwise diagonal result.
                 return None;
             }
         }
@@ -1608,18 +1623,18 @@ where
     let mut pairs: Vec<(f64, T, usize)> = eigenvalues
         .iter()
         .enumerate()
-        .map(|(column, value)| (value.as_f64().abs(), *value, column))
+        .map(|(column, value)| (value.clone().as_f64().abs(), value.clone(), column))
         .collect();
     pairs.sort_by(|left, right| right.0.partial_cmp(&left.0).unwrap_or(std::cmp::Ordering::Equal));
-
     let mut ordered_right = Matrix::new(columns, columns);
     let mut singular_values = Vec::with_capacity(columns);
     let mut right_columns = Vec::with_capacity(columns);
     for (position, (_, value, column)) in pairs.iter().enumerate() {
-        if value.as_f64() < 0.0 {
+        let value_magnitude = value.clone().as_f64();
+        if value_magnitude < 0.0 {
             return None;
         }
-        let singular_value = exact_sqrt(*value)?;
+        let singular_value = exact_sqrt(value.clone())?;
         let mut vector: Vec<T> = (0..columns).map(|row| right.entry(row, *column)).collect();
         let norm = exact_sqrt(dot_values(&vector, &vector))?;
         if norm == T::additive_identity() && !(singular_value == T::additive_identity()) {
@@ -1627,11 +1642,11 @@ where
         }
         if !(norm == T::additive_identity()) {
             for entry in vector.iter_mut() {
-                *entry = *entry / norm;
+                *entry = entry.clone() / norm.clone();
             }
         }
         for (row, entry) in vector.iter().enumerate() {
-            ordered_right.set_entry(row, position, *entry);
+            ordered_right.set_entry(row, position, entry.clone());
         }
         right_columns.push(vector);
         singular_values.push(singular_value);
@@ -1640,7 +1655,7 @@ where
     // S is m x n: the singular values on the leading diagonal, zero elsewhere.
     let mut sigma = Matrix::new(rows, columns);
     for (i, value) in singular_values.iter().enumerate() {
-        sigma.set_entry(i, i, *value);
+        sigma.set_entry(i, i, value.clone());
     }
 
     // U = A V S^-1 for the non-zero singular values; zero singular values can
@@ -1652,7 +1667,7 @@ where
         if *singular_value == T::additive_identity() {
             continue;
         }
-        left_columns.push(image.into_iter().map(|value| value / *singular_value).collect());
+        left_columns.push(image.into_iter().map(|value| value / singular_value.clone()).collect());
     }
 
     // Columns of `U` that pair with a zero singular value do not affect
@@ -1662,7 +1677,7 @@ where
     let mut left = Matrix::new(rows, rows);
     for (column, entries) in left_columns.iter().enumerate() {
         for (row, value) in entries.iter().enumerate() {
-            left.set_entry(row, column, *value);
+            left.set_entry(row, column, value.clone());
         }
     }
     let mut next_basis = 0;
@@ -1708,14 +1723,18 @@ where
                 let mut beta = T::additive_identity();
                 let mut gamma = T::additive_identity();
                 for row in 0..rows {
-                    alpha = alpha + work[row][first] * work[row][first];
-                    beta = beta + work[row][second] * work[row][second];
-                    gamma = gamma + work[row][first] * work[row][second];
+                    alpha = alpha + work[row][first].clone() * work[row][first].clone();
+                    beta = beta + work[row][second].clone() * work[row][second].clone();
+                    gamma = gamma + work[row][first].clone() * work[row][second].clone();
                 }
-                if alpha == T::additive_identity() || beta == T::additive_identity() {
+                let zero = T::additive_identity();
+                if alpha == zero || beta == zero {
                     continue;
                 }
-                let relative = (gamma.as_f64().abs() / (alpha.as_f64().sqrt() * beta.as_f64().sqrt())).abs();
+                let alpha_f = alpha.as_f64();
+                let beta_f = beta.as_f64();
+                let gamma_f = gamma.as_f64();
+                let relative = (gamma_f.abs() / (alpha_f.sqrt() * beta_f.sqrt())).abs();
                 if relative < TOLERANCE {
                     continue;
                 }
@@ -1723,25 +1742,22 @@ where
                 // Right-handed plane rotation that zeroes the (first, second)
                 // inner product. The rotation angle is worked out in `f64` from
                 // the magnitudes, then the sine and cosine are rounded into `T`.
-                let alpha_f = alpha.as_f64();
-                let beta_f = beta.as_f64();
-                let gamma_f = gamma.as_f64();
                 let zeta = (beta_f - alpha_f) / (2.0 * gamma_f);
                 let tangent = zeta.signum() / (zeta.abs() + (1.0 + zeta * zeta).sqrt());
                 let cosine = T::from_f64(1.0 / (1.0 + tangent * tangent).sqrt());
                 let sine = T::from_f64(tangent / (1.0 + tangent * tangent).sqrt());
 
                 for row in 0..rows {
-                    let left_value = work[row][first];
-                    let right_value = work[row][second];
-                    work[row][first] = cosine * left_value - sine * right_value;
-                    work[row][second] = sine * left_value + cosine * right_value;
+                    let left_value = work[row][first].clone();
+                    let right_value = work[row][second].clone();
+                    work[row][first] = cosine.clone() * left_value.clone() - sine.clone() * right_value.clone();
+                    work[row][second] = sine.clone() * left_value + cosine.clone() * right_value;
                 }
                 for row in 0..columns {
-                    let left_value = right[row][first];
-                    let right_value = right[row][second];
-                    right[row][first] = cosine * left_value - sine * right_value;
-                    right[row][second] = sine * left_value + cosine * right_value;
+                    let left_value = right[row][first].clone();
+                    let right_value = right[row][second].clone();
+                    right[row][first] = cosine.clone() * left_value.clone() - sine.clone() * right_value.clone();
+                    right[row][second] = sine.clone() * left_value + cosine.clone() * right_value;
                 }
                 rotated = true;
             }
@@ -1755,10 +1771,10 @@ where
     let mut singular_values: Vec<T> = Vec::with_capacity(columns);
     let mut left_columns: Vec<Vec<T>> = Vec::with_capacity(columns);
     for column in 0..columns {
-        let norm_squared = (0..rows).fold(T::additive_identity(), |acc, row| acc + work[row][column] * work[row][column]);
+        let norm_squared = (0..rows).fold(T::additive_identity(), |acc, row| acc + work[row][column].clone() * work[row][column].clone());
         let norm = T::from_f64(norm_squared.as_f64().max(0.0).sqrt());
         if !(norm == T::additive_identity()) {
-            left_columns.push((0..rows).map(|row| work[row][column] / norm).collect());
+            left_columns.push((0..rows).map(|row| work[row][column].clone() / norm.clone()).collect());
         }
         singular_values.push(norm);
     }
@@ -1766,11 +1782,12 @@ where
     // Sort by singular value, large to small. Reordering the pairs keeps `U`,
     // `S` and `V` aligned.
     let mut order: Vec<usize> = (0..columns).collect();
-    order.sort_by(|&a, &b| singular_values[b].as_f64().partial_cmp(&singular_values[a].as_f64()).unwrap_or(std::cmp::Ordering::Equal));
-    let ordered_values: Vec<T> = order.iter().map(|&index| singular_values[index]).collect();
+    let order_keys: Vec<f64> = singular_values.iter().map(|value| value.clone().as_f64()).collect();
+    order.sort_by(|&a, &b| order_keys[b].partial_cmp(&order_keys[a]).unwrap_or(std::cmp::Ordering::Equal));
+    let ordered_values: Vec<T> = order.iter().map(|&index| singular_values[index].clone()).collect();
     let ordered_right_columns: Vec<Vec<T>> = order
         .iter()
-        .map(|&index| (0..columns).map(|row| right[row][index]).collect())
+        .map(|&index| (0..columns).map(|row| right[row][index].clone()).collect())
         .collect();
     // `left_columns` only holds the non-zero columns, in original order; map
     // each ordered column index back to its position there.
@@ -1788,21 +1805,21 @@ where
     let mut sigma = Matrix::new(rows, columns);
     for (i, value) in ordered_values.iter().enumerate() {
         if i < rows && i < columns {
-            sigma.set_entry(i, i, *value);
+            sigma.set_entry(i, i, value.clone());
         }
     }
 
     let mut left = Matrix::new(rows, rows);
     for (column, entries) in left_columns.iter().enumerate() {
         for (row, value) in entries.iter().enumerate() {
-            left.set_entry(row, column, *value);
+            left.set_entry(row, column, value.clone());
         }
     }
 
     let mut ordered_right = Matrix::new(columns, columns);
     for (column, entries) in ordered_right_columns.iter().enumerate() {
         for (row, value) in entries.iter().enumerate() {
-            ordered_right.set_entry(row, column, *value);
+            ordered_right.set_entry(row, column, value.clone());
         }
     }
 
@@ -1840,11 +1857,10 @@ where
     for row in 0..rows {
         result.push(
             (0..columns)
-                .fold(T::additive_identity(), |acc, column| acc + matrix.entry(row, column) * vector[column]),
+                .fold(T::additive_identity(), |acc, column| acc + matrix.entry(row, column) * vector[column].clone()),
         );
     }
-    Some(result)
-}
+    Some(result)}
 
 /// Complete `columns` into an orthonormal basis of `T^dimension`.
 ///
@@ -1856,7 +1872,7 @@ fn complete_orthonormal_basis<T: Matrixable>(
     mut columns: Vec<Vec<T>>,
     dimension: usize,
 ) -> Option<Vec<Vec<T>>> {
-    columns.retain(|column| column.iter().any(|value| !(*value == T::additive_identity())));
+    columns.retain(|column| column.iter().any(|value| !(value.clone() == T::additive_identity())));
 
     // For floating types a vanishing norm is round-off, not an exact zero, so
     // treat anything below a tolerance as already spanned.
@@ -1872,13 +1888,15 @@ fn complete_orthonormal_basis<T: Matrixable>(
         for existing in &columns {
             let projection = dot_values(existing, &vector);
             for row in 0..dimension {
-                vector[row] = vector[row] - projection * existing[row];
+                let value = vector[row].clone() - projection.clone() * existing[row].clone();
+                vector[row] = value;
             }
         }
         let norm_squared = dot_values(&vector, &vector);
-        if norm_squared.as_f64() > tolerance {
+        let norm_magnitude = norm_squared.clone().as_f64();
+        if norm_magnitude > tolerance {
             let norm = sqrt_value(norm_squared)?;
-            columns.push(vector.into_iter().map(|value| value / norm).collect());
+            columns.push(vector.into_iter().map(|value| value / norm.clone()).collect());
         }
         candidate += 1;
     }
@@ -1902,7 +1920,7 @@ fn sqrt_value<T: Matrixable>(value: T) -> Option<T> {
 fn dot_values<T: Matrixable>(left: &[T], right: &[T]) -> T {
     left.iter()
         .zip(right)
-        .fold(T::additive_identity(), |acc, (a, b)| acc + *a * *b)
+        .fold(T::additive_identity(), |acc, (a, b)| acc + a.clone() * b.clone())
 }
 
 /// A diagonal form `P^-1 A P = D` of a single square matrix.
@@ -2069,7 +2087,7 @@ impl <T: Matrixable> MatrixOps<T> for VecMatrix<T> {
     }
 
     fn entry(&self, row: usize, column: usize) -> T {
-        self.data[row * self.columns + column]
+        self.data[row * self.columns + column].clone()
     }
 
     fn set_entry(&mut self, row: usize, column: usize, value: T) {
@@ -2111,7 +2129,7 @@ fn vec_solve_system<T: Matrixable>(matrix: &VecMatrix<T>, rhs: &[T]) -> Option<V
 
     let mut rank = 0;
     for column in 0..columns {
-        let Some(pivot) = (rank..rows).find(|&row| !(matrix.entry(row, column) == T::additive_identity())) else {
+        let Some(pivot) = (rank..rows).find(|&row| !matrix.entry(row, column).is_zero_value()) else {
             continue;
         };
         swap_rows(&mut matrix, rank, pivot);
@@ -2119,29 +2137,31 @@ fn vec_solve_system<T: Matrixable>(matrix: &VecMatrix<T>, rhs: &[T]) -> Option<V
 
         let pivot_value = matrix.entry(rank, column);
         for j in 0..columns {
-            matrix.set_entry(rank, j, matrix.entry(rank, j) / pivot_value);
+            let value = matrix.entry(rank, j) / pivot_value.clone();
+            matrix.set_entry(rank, j, value);
         }
-        values[rank] = values[rank] / pivot_value;
+        values[rank] = values[rank].clone() / pivot_value.clone();
 
         for row in 0..rows {
             if row == rank {
                 continue;
             }
             let factor = matrix.entry(row, column);
-            if factor == T::additive_identity() {
+            if factor.is_zero_value() {
                 continue;
             }
             for j in 0..columns {
-                matrix.set_entry(row, j, matrix.entry(row, j) - factor * matrix.entry(rank, j));
+                let value = matrix.entry(row, j) - factor.clone() * matrix.entry(rank, j);
+                matrix.set_entry(row, j, value);
             }
-            values[row] = values[row] - factor * values[rank];
+            values[row] = values[row].clone() - factor * values[rank].clone();
         }
         rank += 1;
     }
 
     for row in 0..rows {
-        if (0..columns).all(|column| matrix.entry(row, column) == T::additive_identity())
-            && !(values[row] == T::additive_identity())
+        if (0..columns).all(|column| matrix.entry(row, column).is_zero_value())
+            && !values[row].is_zero_value()
         {
             return None;
         }
@@ -2149,8 +2169,8 @@ fn vec_solve_system<T: Matrixable>(matrix: &VecMatrix<T>, rhs: &[T]) -> Option<V
 
     let mut solution = vec![T::default(); columns];
     for row in 0..rank {
-        if let Some(column) = (0..columns).find(|&column| !(matrix.entry(row, column) == T::additive_identity())) {
-            solution[column] = values[row];
+        if let Some(column) = (0..columns).find(|&column| !matrix.entry(row, column).is_zero_value()) {
+            solution[column] = values[row].clone();
         }
     }
     Some(solution)
@@ -2162,7 +2182,7 @@ fn vec_column_space<T: Matrixable>(matrix: &VecMatrix<T>) -> Vec<Vec<T>> {
     eliminate(&mut rref, true);
     let mut basis = Vec::new();
     for column in 0..columns {
-        if (0..rows).any(|row| !(rref.entry(row, column) == T::additive_identity())) {
+        if (0..rows).any(|row| !rref.entry(row, column).is_zero_value()) {
             basis.push((0..rows).map(|row| matrix.entry(row, column)).collect());
         }
     }
@@ -2175,7 +2195,7 @@ fn vec_row_space<T: Matrixable>(matrix: &VecMatrix<T>) -> Vec<Vec<T>> {
     eliminate(&mut rref, true);
     let mut basis = Vec::new();
     for row in 0..rows {
-        if (0..columns).any(|column| !(rref.entry(row, column) == T::additive_identity())) {
+        if (0..columns).any(|column| !rref.entry(row, column).is_zero_value()) {
             basis.push((0..columns).map(|column| matrix.entry(row, column)).collect());
         }
     }
@@ -2190,7 +2210,7 @@ fn vec_null_space<T: Matrixable>(matrix: &VecMatrix<T>) -> Vec<Vec<T>> {
     // The pivot of each row is the first column with a leading one; every
     // other column is free and gets one basis vector.
     let pivots: Vec<Option<usize>> = (0..rows)
-        .map(|row| (0..columns).find(|&column| !(rref.entry(row, column) == T::additive_identity())))
+        .map(|row| (0..columns).find(|&column| !rref.entry(row, column).is_zero_value()))
         .collect();
     let pivot_columns: Vec<usize> = pivots.iter().flatten().copied().collect();
 
@@ -2219,7 +2239,7 @@ fn vec_rank<T: Matrixable>(matrix: &VecMatrix<T>) -> usize {
     let mut rref = matrix.clone();
     eliminate(&mut rref, true);
     (0..rows)
-        .filter(|&row| (0..columns).any(|column| !(rref.entry(row, column) == T::additive_identity())))
+        .filter(|&row| (0..columns).any(|column| !rref.entry(row, column).is_zero_value()))
         .count()
 }
 
@@ -2246,7 +2266,7 @@ fn span_basis<T: Matrixable>(vectors: &[Vec<T>]) -> Vec<Vec<T>> {
     let mut rref = matrix.clone();
     eliminate(&mut rref, true);
     (0..rows)
-        .filter(|&row| (0..columns).any(|column| !(rref.entry(row, column) == T::additive_identity())))
+        .filter(|&row| (0..columns).any(|column| !rref.entry(row, column).is_zero_value()))
         .map(|row| (0..columns).map(|column| rref.entry(row, column)).collect())
         .collect()
 }
@@ -2526,7 +2546,8 @@ where
         for i in 0..N {
             for j in 0..P {
                 for k in 0..M {
-                    result.data[i][j] = result.data[i][j] + self.data[i][k] * rhs.data[k][j];
+                    let product = result.data[i][j].clone() + self.data[i][k].clone() * rhs.data[k][j].clone();
+                    result.data[i][j] = product;
                 }
             }
         }
@@ -2622,7 +2643,8 @@ impl <T, const N: usize> StaticSquareMatrixFns<T, N> for StaticMatrix<T, N, N> w
         for lambda in eigenvalues {
             let mut shifted = self.clone();
             for i in 0..N {
-                shifted.data[i][i] = shifted.data[i][i] - lambda;
+                let value = shifted.data[i][i].clone() - lambda.clone();
+                shifted.data[i][i] = value;
             }
             let basis = shifted.null_space();
             if basis.is_empty() {
@@ -2658,7 +2680,7 @@ impl <T, const N: usize> StaticVector<T, N> where T: Matrixable {
     pub fn dot_product(&self, rhs: &Self) -> T {
         let mut result = T::additive_identity();
         for row in 0..N {
-            result = result + self[row][0] * rhs[row][0];
+            result = result + self[row][0].clone() * rhs[row][0].clone();
         }
         result
     }
@@ -2681,7 +2703,7 @@ impl <T, const N: usize, const M: usize> StaticMatrix<T, N, M> where T: Matrixab
         let mut result = StaticMatrix::default();
         for row in 0..N {
             for column in 0..M {
-                result.data[column][row] = self.data[row][column];
+                result.data[column][row] = self.data[row][column].clone();
             }
         }
         result
@@ -2702,15 +2724,15 @@ impl <T, const N: usize, const M: usize> StaticMatrix<T, N, M> where T: Matrixab
     }
 
     pub fn solve_system(&self, rhs: &StaticVector<T, N>) -> Option<Vector<T>> {
-        let matrix = VecMatrix::new(N, M, self.iter().copied().collect());
-        let solution = vec_solve_system(&matrix, &rhs.iter().copied().collect::<Vec<_>>())?;
+        let matrix = VecMatrix::new(N, M, self.iter().cloned().collect());
+        let solution = vec_solve_system(&matrix, &rhs.iter().cloned().collect::<Vec<_>>())?;
         Some(Vector::from_vec(solution))
     }
 
     /// A basis of the column space. Each basis vector has `N` entries.
     pub fn col_space(&self) -> VectorSet<T> {
         VectorSet::from_vectors(
-            vec_column_space(&VecMatrix::new(N, M, self.iter().copied().collect()))
+            vec_column_space(&VecMatrix::new(N, M, self.iter().cloned().collect()))
                 .into_iter()
                 .map(Vector::from_vec)
                 .collect(),
@@ -2720,7 +2742,7 @@ impl <T, const N: usize, const M: usize> StaticMatrix<T, N, M> where T: Matrixab
     /// A basis of the row space. Each basis vector has `M` entries.
     pub fn row_space(&self) -> VectorSet<T> {
         VectorSet::from_vectors(
-            vec_row_space(&VecMatrix::new(N, M, self.iter().copied().collect()))
+            vec_row_space(&VecMatrix::new(N, M, self.iter().cloned().collect()))
                 .into_iter()
                 .map(Vector::from_vec)
                 .collect(),
@@ -2730,7 +2752,7 @@ impl <T, const N: usize, const M: usize> StaticMatrix<T, N, M> where T: Matrixab
     /// A basis of the null space. Each basis vector has `M` entries.
     pub fn null_space(&self) -> VectorSet<T> {
         VectorSet::from_vectors(
-            vec_null_space(&VecMatrix::new(N, M, self.iter().copied().collect()))
+            vec_null_space(&VecMatrix::new(N, M, self.iter().cloned().collect()))
                 .into_iter()
                 .map(Vector::from_vec)
                 .collect(),
@@ -2738,7 +2760,7 @@ impl <T, const N: usize, const M: usize> StaticMatrix<T, N, M> where T: Matrixab
     }
 
     pub fn rank(&self) -> usize {
-        vec_rank(&VecMatrix::new(N, M, self.iter().copied().collect()))
+        vec_rank(&VecMatrix::new(N, M, self.iter().cloned().collect()))
     }
 
     pub fn nullity(&self) -> usize {
@@ -2837,7 +2859,7 @@ impl <T> Matrix<T> where T: Matrixable {
         let mut result = Self::new(self.columns, self.rows);
         for row in 0..self.rows {
             for column in 0..self.columns {
-                result.data[column * self.rows + row] = self.data[row * self.columns + column];
+                result.data[column * self.rows + row] = self.data[row * self.columns + column].clone();
             }
         }
         result
@@ -2861,7 +2883,7 @@ impl <T> Matrix<T> where T: Matrixable {
     pub fn from_diagonal(diagonal: &[T]) -> Self {
         let mut matrix = Self::new(diagonal.len(), diagonal.len());
         for (i, value) in diagonal.iter().enumerate() {
-            matrix.set_entry(i, i, *value);
+            matrix.set_entry(i, i, value.clone());
         }
         matrix
     }
@@ -2992,7 +3014,7 @@ impl <T> SquareMatrixOps<T> for Matrix<T> where T: Matrixable {
 
 impl <T> From<&Matrix<T>> for VecMatrix<T> where T: Matrixable {
     fn from(matrix: &Matrix<T>) -> Self {
-        VecMatrix::new(matrix.rows(), matrix.columns(), matrix.iter().copied().collect())
+        VecMatrix::new(matrix.rows(), matrix.columns(), matrix.iter().cloned().collect())
     }
 }
 
@@ -3036,7 +3058,8 @@ impl <T> SquareMatrixFns<T> for Matrix<T> where T: Matrixable {
         for lambda in eigenvalues {
             let mut shifted = self.clone();
             for i in 0..self.rows() {
-                shifted[i][i] = shifted[i][i] - lambda;
+                let value = shifted[i][i].clone() - lambda.clone();
+                shifted[i][i] = value;
             }
             let basis = shifted.null_space();
             if basis.is_empty() {
@@ -3095,7 +3118,7 @@ impl <T> MatrixMul<T> for Matrix<T> where T: Matrixable {
             for column in 0..rhs.columns() {
                 let mut value = T::additive_identity();
                 for k in 0..self.columns() {
-                    value = value + self[row][k] * rhs[k][column];
+                    value = value + self[row][k].clone() * rhs[k][column].clone();
                 }
                 result[row][column] = value;
             }

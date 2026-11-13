@@ -25,14 +25,17 @@
 //! The constant of integration is not included in the result; add it yourself
 //! when needed.
 //!
-//! Every step is reported through [`tracing`]; install the subscriber returned
-//! by [`crate::get_subscriber`] to follow the search:
+//! Every rule the search applies is recorded. Call
+//! [`get_antiderivative_solution`][Antiderivative::get_antiderivative_solution]
+//! to get back a [`Solution`][crate::structs::solution::Solution] describing
+//! them, or [`get_antiderivative`][Antiderivative::get_antiderivative] for just
+//! the answer:
 //!
-//! ```no_run
-//! use rust_calculus::{calculus::antiderivative::Antiderivative, create_expr, structs::expr::Expr};
-//! tracing::subscriber::set_global_default(rust_calculus::get_subscriber()).unwrap();
+//! ```
+//! use rust_calculus::{calculus::antiderivative::Antiderivative, create_expr};
 //! let expr = create_expr!("x^2 e^x").unwrap();
-//! println!("{}", expr.get_antiderivative().unwrap());
+//! let solution = expr.get_antiderivative_solution().unwrap();
+//! println!("{} steps, answer {}", solution.len(), solution.result());
 //! ```
 
 mod helpers;
@@ -47,8 +50,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tracing::{debug, info};
-
 use crate::numeric::{FloatBridge, Real};
 use crate::{
     algebra,
@@ -58,6 +59,7 @@ use crate::{
             Expr,
             node::{Node, NodeFunctions},
         },
+        solution::{NoSteps, Recorder, Solution, StepRecorder},
     },
     utils::float_math::FloatMath,
 };
@@ -127,6 +129,22 @@ pub trait Antiderivative {
     fn get_antiderivative(&self) -> Result<Self, IntegrationError>
     where
         Self: Sized;
+    /// Find the antiderivative, recording every rule the search applies.
+    ///
+    /// See [`Antiderivative::get_antiderivative`] for the search itself; this
+    /// returns the same answer wrapped in a
+    /// [`Solution`][crate::structs::solution::Solution] with the steps.
+    /// # Examples
+    /// ```
+    /// use rust_calculus::{create_expr, calculus::antiderivative::Antiderivative};
+    /// let expr = create_expr!("2x").unwrap();
+    /// let solution = expr.get_antiderivative_solution().unwrap();
+    /// assert_eq!(solution.result().to_string(), "x ^ 2");
+    /// assert!(!solution.steps().is_empty());
+    /// ```
+    fn get_antiderivative_solution(&self) -> Result<Solution, IntegrationError>
+    where
+        Self: Sized;
     fn get_antiderivative_with_context(
         &self,
         context: IntegratorContext,
@@ -164,22 +182,12 @@ impl Antiderivative for Expr {
     /// assert!(expr.get_antiderivative().is_err());
     /// ```
     /// See [`IntegrationError`] for the possible error values.
-    #[tracing::instrument(skip_all, parent = None, name = "(main) get_antiderivative", fields(result))]
     fn get_antiderivative(&self) -> Result<Self, IntegrationError> {
-        info!("Finding antiderivative of {self}");
-        let simplified = self.clone().simplify(false);
-        info!("Simplified integrand: {simplified}");
-        let mut integrator = Integrator::new();
-        let tree = integrator.integrate_with_verification(&simplified.tree)?;
-        let result = Self::from_node(tree).simplify(false);
-        tracing::Span::current().record("result", result.to_string());
-        info!("Calculation complete");
-        Ok(result)
+        antiderivative_with_context(self, IntegratorContext::default(), &mut NoSteps)
     }
     /// Find the antiderivative of an expression with a custom search context.
     /// See [`IntegratorContext`] for the meaning of the context fields.
     /// See [`Antiderivative::get_antiderivative`] for examples.
-    #[tracing::instrument(skip_all, parent = None, name = "(main) get_antiderivative", fields(result))]
     fn get_antiderivative_with_context(
         &self,
         context: IntegratorContext,
@@ -187,15 +195,17 @@ impl Antiderivative for Expr {
     where
         Self: Sized,
     {
-        info!("Finding antiderivative of {self}");
-        let simplified = self.clone().simplify(false);
-        info!("Simplified integrand: {simplified}");
-        let mut integrator = Integrator::from_context(context);
-        let tree = integrator.integrate_with_verification(&simplified.tree)?;
-        let result = Self::from_node(tree).simplify(false);
-        tracing::Span::current().record("result", result.to_string());
-        info!("Calculation complete");
-        Ok(result)
+        antiderivative_with_context(self, context, &mut NoSteps)
+    }
+
+    fn get_antiderivative_solution(&self) -> Result<Solution, IntegrationError>
+    where
+        Self: Sized,
+    {
+        let mut recorder = StepRecorder::new(self.clone(), "antiderivative");
+        let result =
+            antiderivative_with_context(self, IntegratorContext::default(), &mut recorder)?;
+        Ok(recorder.finish(result))
     }
 
     /// Evaluate a definite integral over `[lower, upper]`.
@@ -208,7 +218,6 @@ impl Antiderivative for Expr {
     /// let value = expr.integrate(Real::from_i64(0), Real::from_i64(3)).unwrap();
     /// assert_eq!(value, Real::from_i64(9));
     /// ```
-    #[tracing::instrument(skip_all, parent = None, name = "(main) integrate", fields(result))]
     fn integrate<T>(&self, lower: T, upper: T) -> Result<T, IntegrationError>
     where
         T: crate::numeric::FloatType + Display,
@@ -246,9 +255,7 @@ impl Antiderivative for Expr {
         let lower_value = value_at(&lower)?;
         // `F(upper) - F(lower)`, computed in Real, then cast to the caller's type.
         let result = upper_value - lower_value;
-        let result = T::from_float(result.to_float());
-        tracing::Span::current().record("result", result.to_string());
-        Ok(result)
+        Ok(T::from_float(result.to_float()))
     }
 }
 
@@ -278,8 +285,35 @@ impl IntegratorContext {
     }
 }
 
+impl Default for IntegratorContext {
+    fn default() -> Self {
+        Self::new(
+            Instant::now() + DEFAULT_TIME_BUDGET,
+            DEFAULT_STEP_BUDGET,
+            0,
+            0,
+        )
+    }
+}
+
+/// Run the integration once against any [`Recorder`].
+///
+/// Both public entry points funnel through here: `get_antiderivative` passes
+/// [`NoSteps`] and `get_antiderivative_solution` passes a [`StepRecorder`], so
+/// there is a single implementation and the answer-only path records nothing.
+fn antiderivative_with_context(
+    expression: &Expr,
+    context: IntegratorContext,
+    recorder: &mut impl Recorder,
+) -> Result<Expr, IntegrationError> {
+    let simplified = expression.clone().simplify(false);
+    let mut integrator = Integrator::from_context(context, recorder);
+    let tree = integrator.integrate_with_verification(&simplified.tree)?;
+    Ok(Expr::from_node(tree).simplify(false))
+}
+
 /// Shared state for a single integration run.
-pub(super) struct Integrator {
+pub(super) struct Integrator<'a, R: Recorder + ?Sized> {
     deadline: Instant,
     steps: u64,
     depth: usize,
@@ -288,21 +322,12 @@ pub(super) struct Integrator {
     variable: char,
     /// How many integration by parts steps are currently in progress.
     parts_depth: usize,
+    /// Where the rules that are applied are recorded.
+    recorder: &'a mut R,
 }
 
-impl Integrator {
-    fn new() -> Self {
-        Self {
-            deadline: Instant::now() + DEFAULT_TIME_BUDGET,
-            steps: DEFAULT_STEP_BUDGET,
-            depth: 0,
-            active: Vec::new(),
-            variable: 'x',
-            parts_depth: 0,
-        }
-    }
-
-    fn from_context(context: IntegratorContext) -> Self {
+impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
+    fn from_context(context: IntegratorContext, recorder: &'a mut R) -> Self {
         Self {
             deadline: context.deadline,
             steps: context.steps,
@@ -310,7 +335,23 @@ impl Integrator {
             active: Vec::new(),
             variable: 'x',
             parts_depth: context.parts_depth,
+            recorder,
         }
+    }
+
+    /// Record a step the integrator is about to take.
+    pub(super) fn step(
+        &mut self,
+        step_name: &str,
+        description: impl FnOnce() -> String,
+        result: impl FnOnce() -> Node,
+    ) {
+        let recorder = &mut *self.recorder;
+        recorder.record(
+            step_name,
+            description,
+            || Expr::from_node(result()).simplify(false),
+        );
     }
 
     pub(super) fn variable_node(&self) -> Node {
@@ -328,7 +369,6 @@ impl Integrator {
         Ok(())
     }
 
-    #[tracing::instrument(skip_all, parent = None, name = "(step) integrate")]
     fn integrate_with_verification(&mut self, node: &Node) -> Result<Node, IntegrationError> {
         self.variable = helpers::independent_variable(node);
         let result = self.integrate(node)?;
@@ -339,17 +379,11 @@ impl Integrator {
             std::panic::catch_unwind(AssertUnwindSafe(|| helpers::verify(node, &result)))
                 .unwrap_or(true);
         if !verified {
-            info!(
-                "Discarding {} because differentiating it does not give {}",
-                describe(&result),
-                describe(node)
-            );
             return Err(IntegrationError::Unsupported(describe(node)));
         }
         Ok(helpers::simplify_deep(&result))
     }
 
-    #[tracing::instrument(skip_all, parent = None, name = "(step) integrate")]
     pub(super) fn integrate(&mut self, node: &Node) -> Result<Node, IntegrationError> {
         self.tick()?;
         let simplified = node.clone().simplify(false, true);
@@ -357,7 +391,6 @@ impl Integrator {
         if self.active.iter().any(|existing| *existing == key) {
             // Re-entering the same integral means the recursion is cyclic; the
             // technique that caused it needs to bail out.
-            debug!("Cyclic integral detected while integrating {key}");
             return Err(IntegrationError::Unsupported(key));
         }
         self.active.push(key);
@@ -370,23 +403,23 @@ impl Integrator {
 
     fn integrate_inner(&mut self, node: &Node) -> Result<Node, IntegrationError> {
         if self.depth > MAX_DEPTH {
-            info!("Giving up on {}: the recursion is too deep", describe(node));
             return Err(IntegrationError::Timeout);
         }
         if helpers::is_zero(node) {
-            info!("{} is zero, so it integrates to zero", describe(node));
             return Ok(zero());
         }
         if !node.inner.borrow().has_indp {
             let value = helpers::constant_value(node)
                 .ok_or_else(|| IntegrationError::Unsupported(describe(node)))?;
-            info!(
+            let result = helpers::multiply_by(self.variable_node(), value.clone());
+            let description = format!(
                 "{} is constant, so the antiderivative is {} {}",
                 describe(node),
                 describe_number(&value),
                 self.variable
             );
-            return Ok(helpers::multiply_by(self.variable_node(), value));
+            self.step("constant rule", || description, || result.clone());
+            return Ok(result);
         }
         // `ln(1/u)` is `-ln(u)`.
         if let Shape::Operator(Token::Function(Func::Ln), _, argument) = helpers::shape(node) {
@@ -394,26 +427,20 @@ impl Integrator {
                 helpers::shape(&argument)
             {
                 if helpers::is_one(&numerator) {
-                    info!(
-                        "Rewriting {} as -ln({})",
-                        describe(node),
-                        describe(&denominator)
-                    );
                     let rewritten = helpers::negate(helpers::function(Func::Ln, denominator));
+                    self.step(
+                        "logarithm rewrite",
+                        || format!("Rewrote {} as a negated logarithm", describe(node)),
+                        || rewritten.clone(),
+                    );
                     return self.integrate(&rewritten);
                 }
             }
         }
         // `log_b(u)` is `ln(u) / ln(b)`: rewrite it so the change of base is
-        // visible in the log and the natural logarithm is integrated normally.
+        // visible and the natural logarithm is integrated normally.
         if let Shape::Operator(Token::Function(Func::Log(base)), _, argument) = helpers::shape(node)
         {
-            info!(
-                "Rewriting {} as ln({}) / ln({}) using the change of base formula",
-                describe_signed(node),
-                describe_signed(&argument),
-                describe_number(&base.clone().into())
-            );
             let numerator = self.integrate(&helpers::function(Func::Ln, argument))?;
             let denominator = helpers::function(Func::Ln, helpers::float(base));
             return Ok(helpers::div(numerator, denominator));
@@ -427,34 +454,25 @@ impl Integrator {
         }
         // Integrate sums term by term.
         if let Some(terms) = helpers::sum_terms(node) {
-            info!(
-                "Using linearity: splitting {} into {} terms",
-                describe(node),
-                terms.len()
-            );
+            let term_count = terms.len();
             let mut total = zero();
             for (negated, term) in terms {
-                debug!(
-                    "Integrating term {}{}",
-                    if negated { "-" } else { "" },
-                    describe(&term)
-                );
                 let mut integral = self.integrate(&term)?;
                 if negated {
                     integral = integral.negate();
                 }
                 total = helpers::add(total, integral);
             }
+            self.step(
+                "linearity",
+                || format!("Split {} into {term_count} terms", describe(node)),
+                || total.clone(),
+            );
             return Ok(total);
         }
         // Cancel common factors so that the techniques below see a clean
         // product (for example `x^3 ln(x) / x` becomes `x^2 ln(x)`).
         if let Some(reduced) = helpers::reduce_fraction(node) {
-            info!(
-                "Cancelling common factors: {} => {}",
-                describe(node),
-                describe(&reduced)
-            );
             self.tick()?;
             self.depth += 1;
             let result = self.integrate_inner(&reduced);
@@ -466,28 +484,17 @@ impl Integrator {
         if let Some(value) = constant {
             if !helpers::equal(&dependent, node) {
                 if helpers::is_one(&dependent) {
-                    info!(
-                        "{} is a constant, so the antiderivative is {} {}",
-                        describe(node),
-                        describe(&helpers::float(value.clone())),
-                        self.variable
-                    );
                     return Ok(helpers::multiply_by(self.variable_node(), value));
                 }
-                info!(
+                let integral = self.integrate(&dependent)?;
+                let scaled = helpers::scale(integral.clone(), value.clone());
+                let description = format!(
                     "{} => constant = {}, dependent = {}",
                     describe_signed(node),
                     describe_number(&value),
                     describe_signed(&dependent)
                 );
-                let integral = self.integrate(&dependent)?;
-                let scaled = helpers::scale(integral.clone(), value);
-                debug!(
-                    "The integral of {} is {}, so the result is {}",
-                    describe(&dependent),
-                    describe(&integral),
-                    describe(&scaled)
-                );
+                self.step("constant multiple", || description, || scaled.clone());
                 return Ok(scaled);
             }
         }
@@ -495,7 +502,6 @@ impl Integrator {
         // see the individual factors (for example `(x ln(x))^2`). The expansion
         // is integrated directly because simplifying it would fold it back.
         if let Some(expanded) = expand_product_power(node) {
-            info!("Expanding {} into {}", describe(node), describe(&expanded));
             self.tick()?;
             self.depth += 1;
             let result = self.integrate_inner(&expanded);
@@ -534,9 +540,9 @@ impl Integrator {
         }
         // Rational functions (including plain polynomials).
         if let Some(function) = RationalFunction::from_node(node) {
-            debug!("Trying partial fractions on {}", describe(node));
             self::rational::reset_algebraic_needed();
-            if let Some(result) = function.integrate(&self.variable_node()) {
+            let variable = self.variable_node();
+            if let Some(result) = function.integrate(&variable, self) {
                 return Ok(result);
             }
             // If the only thing in the way was the disabled `algebraic` feature,
@@ -547,10 +553,6 @@ impl Integrator {
                     feature: "algebraic",
                 });
             }
-            debug!(
-                "The partial fraction decomposition failed for {}",
-                describe(node)
-            );
         }
         // Substitution.
         if let Some(result) = self.try_substitution(node)? {
@@ -558,9 +560,10 @@ impl Integrator {
         }
         // `P(x)·(a x + b)^p` by the u-substitution `u = a x + b` (avoids by parts).
         if let Some(result) = rational::linear_power_substitution(node, &self.variable_node()) {
-            info!(
-                "Using the u-substitution u = the linear base to integrate {}",
-                describe(node)
+            self.step(
+                "u-substitution",
+                || format!("u-substitution with the linear base for {}", describe(node)),
+                || result.clone(),
             );
             return Ok(result);
         }
@@ -568,25 +571,36 @@ impl Integrator {
         if let Some(result) = self.try_by_parts(node)? {
             return Ok(result);
         }
-        info!(
-            "No technique applies to {}, so it has no elementary antiderivative that this crate can find",
-            describe_signed(node)
-        );
         Err(IntegrationError::Unsupported(describe(node)))
     }
 
-    /// Elementary antiderivatives of the form `f(a x + b)`.
-    #[tracing::instrument(skip_all, parent = None, name = "(step) standard_integral", fields(result))]
-    fn try_table(&self, node: &Node) -> Option<Node> {
-        let result = self.find_standard_rule(node);
-        log_technique_outcome(node, record_option(result.as_ref()));
+    /// Record the outcome of a named technique, then return it.
+    ///
+    /// A technique that did not apply records nothing, so a `Solution` only
+    /// contains the rules that actually ran.
+    fn record_technique(
+        &mut self,
+        step_name: &'static str,
+        node: &Node,
+        result: Option<Node>,
+    ) -> Option<Node> {
+        if let Some(found) = &result {
+            let described = describe_signed(node);
+            let found = found.clone();
+            self.step(step_name, || described, || found);
+        }
         result
+    }
+
+    /// Elementary antiderivatives of the form `f(a x + b)`.
+    fn try_table(&mut self, node: &Node) -> Option<Node> {
+        let result = self.find_standard_rule(node);
+        self.record_technique("standard integral", node, result)
     }
 
     fn find_standard_rule(&self, node: &Node) -> Option<Node> {
         match helpers::shape(node) {
             Shape::Operand(Token::Indp(_)) => {
-                info!("Applying the power rule to {}", describe(node));
                 let variable = self.variable_node();
                 Some(helpers::divide_by(
                     helpers::pow(variable, number(2)),
@@ -622,10 +636,6 @@ impl Integrator {
                     _ => return None,
                 };
                 let coefficient = helpers::constant_value(&numerator)?;
-                debug!(
-                    "Rewriting {} as a negative power and applying the power rule",
-                    describe(node)
-                );
                 let antiderivative = self.power_of(base, exponent)?;
                 Some(helpers::multiply_by(antiderivative, coefficient))
             }
@@ -647,21 +657,6 @@ impl Integrator {
                 }
                 let (slope, _) = helpers::linear_coefficients(&arg)?;
                 let antiderivative = antiderivative_of_function(&func, arg.clone())?;
-                if slope.is_one() {
-                    info!(
-                        "Using the standard antiderivative of {}({})",
-                        func,
-                        describe_signed(&arg)
-                    );
-                } else {
-                    // The linear argument needs the chain rule: integrate the
-                    // standard function of `u` and divide by `du/dx`.
-                    info!(
-                        "Using the standard antiderivative of {func}(u) with u = {} and du = {} dx",
-                        describe_signed(&arg),
-                        describe_number(&slope)
-                    );
-                }
                 Some(helpers::divide_by(antiderivative, slope))
             }
             _ => None,
@@ -676,11 +671,6 @@ impl Integrator {
                 return None;
             }
             let (slope, _) = helpers::linear_coefficients(&exponent)?;
-            info!(
-                "Applying the exponential rule to {}{}",
-                describe(&helpers::pow(base.clone(), exponent.clone())),
-                chain_rule_note(&exponent, &slope)
-            );
             let is_e = constant.float_equal(&Real::e());
             let current = helpers::pow(base, exponent);
             if is_e {
@@ -703,23 +693,12 @@ impl Integrator {
         // Powers of a linear expression.
         let (slope, _) = helpers::linear_coefficients(&base)?;
         if exponent_value.is_neg_one() {
-            info!(
-                "Applying the power rule to {}{}",
-                describe(&base),
-                chain_rule_note(&base, &slope)
-            );
             return Some(helpers::divide_by(helpers::function(Func::Ln, base), slope));
         }
         let new_exponent = exponent_value.clone() + Real::one();
         if new_exponent.is_zero() {
             return None;
         }
-        info!(
-            "Applying the power rule to {}{}, raising the exponent to {}",
-            describe(&helpers::pow(base.clone(), helpers::float(exponent_value))),
-            chain_rule_note(&base, &slope),
-            describe(&helpers::float(new_exponent.clone()))
-        );
         Some(helpers::divide_by(
             helpers::pow(base, helpers::float(new_exponent.clone())),
             slope * new_exponent,
@@ -728,11 +707,9 @@ impl Integrator {
 
     /// `integral of ln(u)^n dx` using the reduction formula
     /// `I_n = u ln(u)^n / a - n I_(n-1)`.
-    #[tracing::instrument(skip_all, parent = None, name = "(step) logarithm_reduction", fields(result))]
-    fn try_logarithm_power(&self, node: &Node) -> Option<Node> {
+    fn try_logarithm_power(&mut self, node: &Node) -> Option<Node> {
         let result = self.logarithm_power(node);
-        log_technique_outcome(node, record_option(result.as_ref()));
-        result
+        self.record_technique("logarithm reduction", node, result)
     }
 
     fn logarithm_power(&self, node: &Node) -> Option<Node> {
@@ -747,27 +724,20 @@ impl Integrator {
             return None;
         }
         let (slope, _) = helpers::linear_coefficients(&argument)?;
-        info!(
-            "Applying the reduction formula I_n = u ln(u)^n / a - n I_(n-1) to {}",
-            describe_signed(node)
-        );
         let mut current = self.variable_node();
         for step in 1..=power {
             let logarithm = helpers::pow(base.clone(), number(step));
             let term = helpers::divide_by(helpers::mul(argument.clone(), logarithm), slope.clone());
             let previous = helpers::scale(current, float_from(-(step as f64)));
             current = helpers::add(term, previous);
-            debug!("I_{step} = {}", describe_signed(&current));
         }
         Some(current)
     }
 
     /// `k / sqrt(q)` where `q` is a quadratic that can be completed to a square.
-    #[tracing::instrument(skip_all, parent = None, name = "(step) quadratic_reciprocal", fields(result))]
-    fn try_quadratic_reciprocal(&self, node: &Node) -> Option<Node> {
+    fn try_quadratic_reciprocal(&mut self, node: &Node) -> Option<Node> {
         let result = self.find_quadratic_reciprocal(node);
-        log_technique_outcome(node, record_option(result.as_ref()));
-        result
+        self.record_technique("quadratic reciprocal", node, result)
     }
 
     fn find_quadratic_reciprocal(&self, node: &Node) -> Option<Node> {
@@ -829,11 +799,9 @@ impl Integrator {
     }
 
     /// `k sqrt(q)` where `q` is a quadratic, using the standard area formulas.
-    #[tracing::instrument(skip_all, parent = None, name = "(step) quadratic_sqrt", fields(result))]
-    fn try_quadratic_root(&self, node: &Node) -> Option<Node> {
+    fn try_quadratic_root(&mut self, node: &Node) -> Option<Node> {
         let result = self.find_quadratic_sqrt(node);
-        log_technique_outcome(node, record_option(result.as_ref()));
-        result
+        self.record_technique("quadratic root", node, result)
     }
 
     fn find_quadratic_sqrt(&self, node: &Node) -> Option<Node> {
@@ -898,11 +866,9 @@ impl Integrator {
     }
 
     /// `integral of e^(a x + b) sin(c x + d) dx` and the cosine counterpart.
-    #[tracing::instrument(skip_all, parent = None, name = "(step) exponential_trig", fields(result))]
-    fn try_exponential_trig(&self, node: &Node) -> Option<Node> {
+    fn try_exponential_trig(&mut self, node: &Node) -> Option<Node> {
         let result = self.find_exponential_trig(node);
-        log_technique_outcome(node, record_option(result.as_ref()));
-        result
+        self.record_technique("exponential times trig", node, result)
     }
 
     /// `integral of sin/cos(a ln(x) + b) dx`.
@@ -913,10 +879,9 @@ impl Integrator {
     /// `integral of e^u sin(a u + b) du = e^u (sin - a cos)/(1 + a^2)` and
     /// `integral of e^u cos(a u + b) du = e^u (cos + a sin)/(1 + a^2)`
     /// (and `x = e^u`), the antiderivative follows directly.
-    fn try_log_trig(&self, node: &Node) -> Option<Node> {
+    fn try_log_trig(&mut self, node: &Node) -> Option<Node> {
         let result = self.find_log_trig(node);
-        log_technique_outcome(node, record_option(result.as_ref()));
-        result
+        self.record_technique("logarithm times trig", node, result)
     }
 
     fn find_log_trig(&self, node: &Node) -> Option<Node> {
@@ -947,10 +912,6 @@ impl Integrator {
             // cos: (cos + a sin)
             helpers::add(cosine, helpers::scale(sine, slope))
         };
-        info!(
-            "Using u = ln(x) to integrate {} as an exponential times trigonometric",
-            describe(node)
-        );
         Some(helpers::divide_by(helpers::mul(x, combination), denominator))
     }
 
@@ -1011,11 +972,9 @@ impl Integrator {
         Some(helpers::divide_by(combination, denominator))
     }
 
-    #[tracing::instrument(skip_all, parent = None, name = "(step) substitution", fields(result))]
     fn try_substitution(&mut self, node: &Node) -> Result<Option<Node>, IntegrationError> {
         let result = self.find_substitution(node)?;
-        log_technique_outcome(node, record_option(result.as_ref()));
-        Ok(result)
+        Ok(self.record_technique("substitution", node, result))
     }
 
     fn find_substitution(&mut self, node: &Node) -> Result<Option<Node>, IntegrationError> {
@@ -1033,11 +992,6 @@ impl Integrator {
             if let Some(ratio) =
                 helpers::proportional_to(&product.numer, &divisors, None, &derivative)
             {
-                info!(
-                    "Using the substitution u = {} (the rest of the integrand is {} times du)",
-                    describe(divisor),
-                    describe_number(&ratio)
-                );
                 let logarithm = helpers::function(Func::Ln, divisor.clone());
                 return Ok(Some(helpers::multiply_by(logarithm, ratio)));
             }
@@ -1056,11 +1010,6 @@ impl Integrator {
                         antiderivative_of_function(&func, argument.clone()),
                     ) {
                         if let Some(ratio) = ratio_of(&inner) {
-                            info!(
-                                "Using the substitution u = {} (the rest of the integrand is {} times du)",
-                                describe(&argument),
-                                describe_number(&ratio)
-                            );
                             return Ok(Some(helpers::multiply_by(antiderivative, ratio)));
                         }
                     }
@@ -1083,11 +1032,6 @@ impl Integrator {
                                         helpers::function(Func::Ln, helpers::float(constant));
                                     helpers::div(factor.clone(), logarithm)
                                 };
-                                info!(
-                                    "Using the substitution u = {} (the rest of the integrand is {} times du)",
-                                    describe(&exponent),
-                                    describe_number(&ratio)
-                                );
                                 return Ok(Some(helpers::multiply_by(antiderivative, ratio)));
                             }
                         }
@@ -1116,11 +1060,6 @@ impl Integrator {
             // `f(x) * f'(x)` integrates to `f(x)^2 / 2`.
             if let Some(derivative) = helpers::differentiate(factor) {
                 if let Some(ratio) = ratio_of(&derivative) {
-                    info!(
-                        "Using the substitution u = {} (the rest of the integrand is {} times du)",
-                        describe(factor),
-                        describe_number(&ratio)
-                    );
                     let square = helpers::pow(factor.clone(), number(2));
                     return Ok(Some(helpers::divide_by(
                         helpers::multiply_by(square, ratio),
@@ -1132,16 +1071,13 @@ impl Integrator {
         Ok(None)
     }
 
-    #[tracing::instrument(skip_all, parent = None, name = "(step) integration_by_parts", fields(result))]
     fn try_by_parts(&mut self, node: &Node) -> Result<Option<Node>, IntegrationError> {
         let result = self.integrate_by_parts(node)?;
-        log_technique_outcome(node, record_option(result.as_ref()));
-        Ok(result)
+        Ok(self.record_technique("integration by parts", node, result))
     }
 
     fn integrate_by_parts(&mut self, node: &Node) -> Result<Option<Node>, IntegrationError> {
         if self.parts_depth >= MAX_PARTS_DEPTH {
-            debug!("Not using integration by parts: the parts recursion is too deep");
             return Ok(None);
         }
         let product = helpers::flatten_product(node);
@@ -1176,21 +1112,10 @@ impl Integrator {
                 .map(|(_, factor)| factor.clone())
                 .collect();
             let rest = helpers::product_of(&rest);
-            // Announce the rule before doing any of its sub-integrations so the
-            // log reads top down.
-            info!(
-                "Using integration by parts with u = {} and dv = {} dx",
-                describe(&candidate),
-                describe(&rest)
-            );
             let v = match self.integrate(&rest) {
                 Ok(value) => value,
                 Err(IntegrationError::Timeout) => return Err(IntegrationError::Timeout),
                 Err(_) => {
-                    debug!(
-                        "Rejected u = {}: dv is not integrable",
-                        describe(&candidate)
-                    );
                     continue;
                 }
             };
@@ -1198,8 +1123,8 @@ impl Integrator {
                 continue;
             };
             let du = helpers::simplify_deep(&du);
-            // Show the assembled formula before solving the remaining integral
-            // so the log follows the rule step by step.
+            // Record the assembled formula before solving the remaining
+            // integral so the solution reads top down.
             let uv = helpers::mul(candidate.clone(), v.clone());
             let inner_integrand = helpers::mul(v.clone(), du.clone());
             let du_text = if helpers::is_one(&du) {
@@ -1207,12 +1132,11 @@ impl Integrator {
             } else {
                 format!("{} dx", describe_signed(&du))
             };
-            info!(
-                "With v = {} and du = {}, result is {} - ∫{} dx",
-                describe_signed(&v),
-                du_text,
-                describe_signed(&uv),
-                describe_signed(&inner_integrand)
+            let candidate_text = describe_signed(&candidate);
+            self.step(
+                "integration by parts",
+                || format!("u = {candidate_text}, du = {du_text}"),
+                || uv.clone(),
             );
             self.parts_depth += 1;
             let inner_result = self.integrate(&inner_integrand);
@@ -1223,10 +1147,6 @@ impl Integrator {
                 }
                 Err(IntegrationError::Timeout) => return Err(IntegrationError::Timeout),
                 Err(_) => {
-                    debug!(
-                        "Rejected u = {}: the remaining integral is not solvable",
-                        describe(&candidate)
-                    );
                     continue;
                 }
             }
@@ -1391,29 +1311,6 @@ fn expand_product_power(node: &Node) -> Option<Node> {
 
 fn describe(node: &Node) -> String {
     node.inner.borrow().to_string()
-}
-
-/// Log the integrand for a technique: `info` when it produced an antiderivative
-/// (the span's `result` field follows it), `debug` when it did not apply.
-fn log_technique_outcome(node: &Node, found: bool) {
-    if found {
-        info!("{}", describe_signed(node));
-    } else {
-        debug!("{}", describe_signed(node));
-    }
-}
-
-/// Record a technique's outcome in the current span so it appears in the logs.
-///
-/// Returns whether a result was found; failures are only interesting at the
-/// debug level.
-fn record_option(result: Option<&Node>) -> bool {
-    let text = match result {
-        Some(node) => describe_signed(node),
-        None => String::from("no result"),
-    };
-    tracing::Span::current().record("result", text);
-    result.is_some()
 }
 
 /// The ` with u = ... and du = ... dx` suffix used when a linear argument

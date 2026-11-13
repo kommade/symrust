@@ -1,0 +1,565 @@
+//! Step-tracked matrix operations.
+//!
+//! The guiding rule is that a [`Solution`] should account for **every stage** of
+//! a computation: either decomposed into elementary steps, or recorded as a
+//! single named step when it cannot sensibly be decomposed.
+//!
+//! * **Elementary row operations** — row echelon form, determinant, inverse —
+//!   decompose into pivot selection, row swaps, row scaling and row
+//!   replacement, and each of those is recorded.
+//! * **Gram–Schmidt QR** decomposes into normalising a column and
+//!   orthogonalising the following columns against it.
+//! * **Eigen-decomposition** composes steps already available: the shifted
+//!   matrix `A - λI` and its null space (which is itself a row reduction).
+//! * **One-sided Jacobi SVD** cannot be decomposed into meaningful intermediate
+//!   matrices — it is a convergence loop over plane rotations — so it is
+//!   recorded as a *single* step rather than either being omitted or dumped as
+//!   hundreds of rotations.
+//! * **Elementwise arithmetic** (addition, scaling, transposition,
+//!   multiplication) is a primitive: no rule is being *chosen*, so it is not a
+//!   step at all.
+//!
+//! These operations are concrete over [`Expr`]: an intermediate matrix is stored
+//! as an [`Expr`] whose tree is a
+//! [`Token::Matrix`][crate::parse::lexer::Token], so it renders and nests like
+//! any other expression.
+
+use crate::algebra::linear::{Matrix, SquareMatrixFns};
+use crate::numeric::ExactField;
+use crate::structs::expr::Expr;
+use crate::structs::expr::node::Node;
+use crate::structs::solution::{Recorder, Solution, StepRecorder};
+
+/// Wrap a matrix as an expression so it can be recorded as a step result.
+#[must_use]
+pub(crate) fn matrix_expr(matrix: &Matrix<Expr>) -> Expr {
+    Expr::from_node(Node::matrix(matrix.clone()))
+}
+
+/// The constant expression `1`.
+fn one() -> Expr {
+    Expr::from_f64(1.0)
+}
+
+/// Simplify an entry, and fold it to a plain number when it is fully numeric.
+///
+/// Elementary row operations repeatedly build expressions like `-2 / -2` or
+/// `0 - 2 * (1 / -2)`. Symbolic simplification leaves those partly unevaluated
+/// (it will not fold mixed float/integer forms), which makes a recorded step
+/// hard to read. Evaluating a *closed* (variable-free) expression back to a
+/// number keeps every step showing clean values, while genuinely symbolic
+/// entries are left as simplified expressions.
+fn tidy(entry: Expr) -> Expr {
+    let simplified = entry.simplify(true);
+    if simplified.has_independent() {
+        return simplified;
+    }
+    match simplified.evaluate(0.0_f64).value() {
+        Some(value) if value.is_finite() => Expr::from_f64(value),
+        _ => simplified,
+    }
+}
+
+/// Swap rows `a` and `b`, recording the step.
+fn swap_rows(
+    matrix: &mut Matrix<Expr>,
+    a: usize,
+    b: usize,
+    recorder: &mut StepRecorder,
+    why: &str,
+) {
+    if a == b {
+        return;
+    }
+    for column in 0..matrix.columns() {
+        let value = matrix[a][column].clone();
+        matrix[a][column] = matrix[b][column].clone();
+        matrix[b][column] = value;
+    }
+    let result = matrix_expr(matrix);
+    recorder.record(
+        "row swap",
+        || format!("{why}: exchanged row {} with row {}", a + 1, b + 1),
+        || result,
+    );
+}
+
+/// Multiply row `row` by `factor`, recording the step.
+fn scale_row(
+    matrix: &mut Matrix<Expr>,
+    row: usize,
+    factor: Expr,
+    recorder: &mut StepRecorder,
+    why: &str,
+) {
+    if factor == one() {
+        return;
+    }
+    for column in 0..matrix.columns() {
+        matrix[row][column] = tidy(matrix[row][column].clone() * factor.clone());
+    }
+    let result = matrix_expr(matrix);
+    recorder.record(
+        "row scaling",
+        || format!("{why}: multiplied row {} by {}", row + 1, factor),
+        || result,
+    );
+}
+
+/// Subtract `multiple` times row `source` from row `target`, recording the step.
+fn eliminate_row(
+    matrix: &mut Matrix<Expr>,
+    target: usize,
+    source: usize,
+    multiple: Expr,
+    recorder: &mut StepRecorder,
+    why: &str,
+) {
+    for column in 0..matrix.columns() {
+        matrix[target][column] = tidy(
+            matrix[target][column].clone() - multiple.clone() * matrix[source][column].clone(),
+        );
+    }
+    let result = matrix_expr(matrix);
+    recorder.record(
+        "row replacement",
+        || {
+            format!(
+                "{why}: row {} -= ({}) * row {}",
+                target + 1,
+                multiple,
+                source + 1
+            )
+        },
+        || result,
+    );
+}
+
+/// Row echelon form (reduced when `normalise`), recording each elementary row
+/// operation.
+///
+/// The pivot is always made `1` only when `normalise` is set; elimination always
+/// divides by the *current* pivot so the target entry becomes exactly zero.
+#[must_use]
+pub fn row_reduce_tracked(matrix: &Matrix<Expr>, normalise: bool) -> Solution {
+    let mut work = matrix.clone();
+    let mut recorder = StepRecorder::new(
+        matrix_expr(matrix),
+        if normalise {
+            "reduced row echelon form"
+        } else {
+            "row echelon form"
+        },
+    );
+
+    let (rows, columns) = (work.rows(), work.columns());
+    let mut row = 0;
+    let mut lead = 0;
+    while row < rows && lead < columns {
+        let pivot = (row..rows).find(|&candidate| !work[candidate][lead].is_zero());
+        let Some(pivot_row) = pivot else {
+            lead += 1;
+            continue;
+        };
+        swap_rows(&mut work, row, pivot_row, &mut recorder, "choose pivot");
+
+        if normalise {
+            let pivot_value = work[row][lead].clone();
+            if pivot_value != one() {
+                let inverse = one() / pivot_value;
+                scale_row(&mut work, row, inverse, &mut recorder, "make pivot 1");
+            }
+        }
+
+        // Eliminate every other row's entry in this column, using the current
+        // pivot so the entry becomes exactly zero.
+        let pivot_value = work[row][lead].clone();
+        for target in 0..rows {
+            if target == row {
+                continue;
+            }
+            let entry = work[target][lead].clone();
+            if entry.is_zero() {
+                continue;
+            }
+            let multiple = entry / pivot_value.clone();
+            eliminate_row(&mut work, target, row, multiple, &mut recorder, "eliminate");
+        }
+        row += 1;
+        lead += 1;
+    }
+
+    recorder.finish(matrix_expr(&work))
+}
+
+/// The determinant by Gaussian elimination, recording the steps.
+///
+/// Returns `None` when the matrix is not square.
+#[must_use]
+pub fn determinant_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
+    if matrix.rows() != matrix.columns() {
+        return None;
+    }
+    let size = matrix.rows();
+    let mut work = matrix.clone();
+    let mut recorder = StepRecorder::new(matrix_expr(matrix), "determinant");
+    let mut sign = 1i64;
+
+    for i in 0..size {
+        let pivot = (i..size).find(|&candidate| !work[candidate][i].is_zero());
+        let Some(pivot_row) = pivot else {
+            recorder.record(
+                "singular",
+                || {
+                    format!(
+                        "column {} has no non-zero pivot, so the determinant is 0",
+                        i + 1
+                    )
+                },
+                || Expr::from_f64(0.0),
+            );
+            return Some(recorder.finish(Expr::from_f64(0.0)));
+        };
+        if pivot_row != i {
+            swap_rows(&mut work, i, pivot_row, &mut recorder, "choose pivot");
+            sign = -sign;
+        }
+        let pivot_value = work[i][i].clone();
+        for target in (i + 1)..size {
+            let entry = work[target][i].clone();
+            if entry.is_zero() {
+                continue;
+            }
+            let multiple = entry / pivot_value.clone();
+            eliminate_row(&mut work, target, i, multiple, &mut recorder, "eliminate");
+        }
+    }
+
+    // The determinant is the product of the triangular diagonal, times the sign
+    // accumulated from row swaps.
+    let mut value = Expr::from_f64(sign as f64);
+    for i in 0..size {
+        value = (value * work[i][i].clone()).simplify(false);
+    }
+    recorder.record(
+        "multiply the diagonal",
+        || String::from("the determinant is the product of the diagonal, times the swap sign"),
+        || value.clone(),
+    );
+    Some(recorder.finish(value))
+}
+
+/// The inverse by Gauss-Jordan elimination of `[A | I]`, recording the steps.
+///
+/// The elimination runs on the **augmented** matrix as a single `n x 2n`
+/// matrix, so every elementary row operation is applied to `A` and `I` together
+/// by construction — there is no second bookkeeping step that could drift out of
+/// sync. The right-hand half of the reduced matrix is the inverse.
+///
+/// Returns `None` when the matrix is not square or not invertible.
+#[must_use]
+pub fn inverse_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
+    if matrix.rows() != matrix.columns() {
+        return None;
+    }
+    let size = matrix.rows();
+
+    // Build `[A | I]`.
+    let mut augmented = Matrix::<Expr>::new(size, size * 2);
+    for row in 0..size {
+        for column in 0..size {
+            augmented[row][column] = matrix[row][column].clone();
+            augmented[row][size + column] = if row == column {
+                one()
+            } else {
+                Expr::from_f64(0.0)
+            };
+        }
+    }
+    let mut recorder =
+        StepRecorder::new(matrix_expr(matrix), "inverse by Gauss-Jordan elimination");
+
+    for column in 0..size {
+        let pivot = (column..size).find(|&candidate| !augmented[candidate][column].is_zero());
+        let Some(pivot_row) = pivot else {
+            return None;
+        };
+        swap_rows(
+            &mut augmented,
+            column,
+            pivot_row,
+            &mut recorder,
+            "choose pivot",
+        );
+
+        let pivot_value = augmented[column][column].clone();
+        if pivot_value != one() {
+            let inverse = one() / pivot_value;
+            scale_row(
+                &mut augmented,
+                column,
+                inverse,
+                &mut recorder,
+                "make pivot 1",
+            );
+        }
+
+        for row in 0..size {
+            if row == column {
+                continue;
+            }
+            let entry = augmented[row][column].clone();
+            if entry.is_zero() {
+                continue;
+            }
+            eliminate_row(
+                &mut augmented,
+                row,
+                column,
+                entry,
+                &mut recorder,
+                "eliminate",
+            );
+        }
+    }
+
+    // Read the right-hand half out as the inverse.
+    let mut inverse = Matrix::<Expr>::new(size, size);
+    for row in 0..size {
+        for column in 0..size {
+            inverse[row][column] = augmented[row][size + column].clone();
+        }
+    }
+    Some(recorder.finish(matrix_expr(&inverse)))
+}
+
+/// QR factorisation by Gram–Schmidt, recording the orthogonalisation steps.
+///
+/// Each column is first orthogonalised against the previous orthonormal columns
+/// (`qⱼ − Σ (qⱼ·qᵢ) qᵢ`) and then normalised; both are recorded. `Q` is built up
+/// column by column, so every step shows the partially built basis. `R` is
+/// `QᵀA`. Returns `None` when a column is linearly dependent on the earlier
+/// ones (a zero norm).
+#[must_use]
+pub fn qr_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
+    let (rows, columns) = (matrix.rows(), matrix.columns());
+    let mut recorder = StepRecorder::new(matrix_expr(matrix), "QR factorisation (Gram-Schmidt)");
+
+    // Work on the columns of A, building Q column by column.
+    let mut q: Vec<Vec<Expr>> = Vec::with_capacity(columns);
+    for j in 0..columns {
+        let mut vector: Vec<Expr> = (0..rows).map(|row| matrix[row][j].clone()).collect();
+
+        // Orthogonalise against every already-built q_i.
+        for (i, existing) in q.iter().enumerate() {
+            let projection = dot(existing, &vector);
+            if projection.is_zero() {
+                continue;
+            }
+            for (row, value) in vector.iter_mut().enumerate() {
+                *value = tidy(value.clone() - projection.clone() * existing[row].clone());
+            }
+            let described = column_matrix(&vector);
+            recorder.record(
+                "orthogonalise",
+                || {
+                    format!(
+                        "subtracted the projection of column {} onto q{} from column {}",
+                        j + 1,
+                        i + 1,
+                        j + 1
+                    )
+                },
+                || described.clone(),
+            );
+        }
+
+        let norm_squared = dot(&vector, &vector);
+        let norm = norm_squared.sqrt();
+        // A (near-)zero norm means the column is linearly dependent. Compare
+        // numerically: after `sqrt` the expression is not the literal zero, so a
+        // structural `is_zero` check would miss it.
+        let magnitude = norm.clone().evaluate(0.0_f64).value().unwrap_or(1.0);
+        if magnitude.abs() < 1e-12 || norm.is_zero() {
+            return None;
+        }
+        for value in vector.iter_mut() {
+            *value = tidy(value.clone() / norm.clone());
+        }
+        let described = column_matrix(&vector);
+        recorder.record(
+            "normalise",
+            || {
+                format!(
+                    "normalised column {} to unit length to give q{}",
+                    j + 1,
+                    j + 1
+                )
+            },
+            || described.clone(),
+        );
+        q.push(vector);
+    }
+
+    // Assemble Q and compute R = Qᵀ A.
+    let mut q_matrix = Matrix::<Expr>::new(rows, columns);
+    for (column, entries) in q.iter().enumerate() {
+        for (row, value) in entries.iter().enumerate() {
+            q_matrix[row][column] = value.clone();
+        }
+    }
+    let mut r_matrix = Matrix::<Expr>::new(columns, columns);
+    for i in 0..columns {
+        for j in 0..columns {
+            if i > j {
+                r_matrix[i][j] = Expr::from_f64(0.0);
+                continue;
+            }
+            let mut total = Expr::from_f64(0.0);
+            for row in 0..rows {
+                total = tidy(total + q[i][row].clone() * matrix[row][j].clone());
+            }
+            r_matrix[i][j] = total;
+        }
+    }
+
+    recorder.record(
+        "assemble",
+        || String::from("Q holds the orthonormal columns and R = QᵀA"),
+        || matrix_expr(&q_matrix),
+    );
+    Some(recorder.finish(matrix_expr(&r_matrix)))
+}
+
+/// A single column rendered as an `n x 1` matrix expression, for showing a
+/// partially built basis.
+fn column_matrix(values: &[Expr]) -> Expr {
+    matrix_expr(&Matrix::from_rows(
+        values.iter().map(|value| vec![value.clone()]).collect(),
+    ))
+}
+
+/// Dot product of two entry slices.
+fn dot(left: &[Expr], right: &[Expr]) -> Expr {
+    let mut total = Expr::from_f64(0.0);
+    for (a, b) in left.iter().zip(right) {
+        total = tidy(total + a.clone() * b.clone());
+    }
+    total
+}
+
+/// Singular value decomposition, recorded as a **single** step.
+///
+/// One-sided Jacobi is a convergence loop over plane rotations rather than a
+/// sequence of meaningful intermediate matrices, so it is reported as one named
+/// step (with the result) instead of either being omitted or dumping hundreds
+/// of rotations. Returns `None` when the decomposition is not available for this
+/// coefficient type (see [`SquareMatrixFns::svd`]).
+#[must_use]
+pub fn svd_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
+    let decomposition = matrix.svd()?;
+    let sigma = decomposition.sigma().clone();
+    let mut recorder = StepRecorder::new(matrix_expr(matrix), "singular value decomposition");
+    recorder.record(
+        "Jacobi rotations",
+        || {
+            format!(
+                "computed the SVD of a {}x{} matrix by one-sided Jacobi rotations",
+                matrix.rows(),
+                matrix.columns()
+            )
+        },
+        || matrix_expr(&sigma),
+    );
+    Some(recorder.finish(matrix_expr(&sigma)))
+}
+
+/// Eigenvalues and eigenvectors, composing the steps that compute them.
+///
+/// The characteristic polynomial is a single step (the current implementation
+/// interpolates it numerically, which is not a cofactor expansion a reader would
+/// follow), each shifted matrix `A − λI` is a step, and the null space of each
+/// is itself a row reduction — recorded as a nested sub-solution. Returns `None`
+/// when the matrix is not diagonalisable over the coefficient type.
+#[must_use]
+pub fn eigen_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
+    if matrix.rows() != matrix.columns() {
+        return None;
+    }
+    let size = matrix.rows();
+
+    // Prefer the numeric path (it handles any size when the entries are
+    // rational); fall back to symbolic radicals for matrices with variables.
+    let (eigenvalues, polynomial_text) = match matrix.eigenvalues() {
+        Some(values) => (values, None),
+        None => {
+            let polynomial = super::symbolic_eigen::characteristic_polynomial(matrix)?;
+            let values = super::symbolic_eigen::roots(&polynomial)?;
+            let text = describe_polynomial(&polynomial);
+            (values, Some(text))
+        }
+    };
+    let mut recorder = StepRecorder::new(matrix_expr(matrix), "eigen-decomposition");
+
+    // The characteristic polynomial, as one step: the eigenvalues are its roots.
+    let root_list = eigenvalues
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    recorder.record(
+        "characteristic polynomial",
+        || match &polynomial_text {
+            Some(polynomial) => {
+                format!("det(λI - A) = {polynomial}, whose roots are {root_list}")
+            }
+            None => format!("the eigenvalues (roots of det(xI - A)) are {root_list}"),
+        },
+        || Expr::from_f64(0.0),
+    );
+
+    let mut seen: Vec<Expr> = Vec::new();
+    for lambda in eigenvalues {
+        if seen.contains(&lambda) {
+            continue;
+        }
+        seen.push(lambda.clone());
+
+        // (A - λI) is a step in its own right.
+        let mut shifted = matrix.clone();
+        for i in 0..size {
+            shifted[i][i] = tidy(shifted[i][i].clone() - lambda.clone());
+        }
+        recorder.record(
+            "shift by the eigenvalue",
+            || format!("formed A - ({lambda})I"),
+            || matrix_expr(&shifted),
+        );
+
+        // Its null space is a row reduction; record it as a nested solution.
+        let reduction = row_reduce_tracked(&shifted, true);
+        recorder.solution_mut().push_sub_solution(reduction);
+    }
+
+    Some(recorder.finish(matrix_expr(matrix)))
+}
+
+/// Render a polynomial in `λ` as a readable string, e.g. `λ^2 - 2 λ + 1`.
+fn describe_polynomial(polynomial: &super::symbolic_eigen::ExprPoly) -> String {
+    let terms: Vec<String> = polynomial
+        .coefficients()
+        .iter()
+        .enumerate()
+        .filter(|(_, coefficient)| !coefficient.is_zero_value())
+        .map(|(power, coefficient)| match power {
+            0 => coefficient.to_string(),
+            1 => format!("({coefficient})λ"),
+            _ => format!("({coefficient})λ^{power}"),
+        })
+        .collect();
+    if terms.is_empty() {
+        String::from("0")
+    } else {
+        terms.join(" + ")
+    }
+}

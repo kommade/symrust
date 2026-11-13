@@ -10,7 +10,7 @@
 //!                       ╱       ╲
 //!           ExactField            ExpressionScalar
 //!     "exact field coefficient"   "scalar in an expression"
-//!     + Copy + PartialEq + Neg     + pow/trig/ln/sqrt/pi/e
+//!     + Clone + PartialEq + Neg   + pow/trig/ln/sqrt/pi/e
 //!     + identities + try_sqrt      + from_i64
 //!            │                          │
 //!        Matrixable                  Evaluable
@@ -19,7 +19,7 @@
 //!
 //! * [`NumCore`] is the genuinely shared core: the four ring operations every
 //!   number here supports.
-//! * [`ExactField`] is what the linear-algebra module needs: a `Copy`,
+//! * [`ExactField`] is what the linear-algebra module needs: a `Clone`,
 //!   comparable, invertible field element with a multiplicative identity and a
 //!   (best-effort) square root. This is what [`Matrixable`] really is.
 //! * [`ExpressionScalar`] is what the evaluator needs: a scalar closed under the
@@ -61,13 +61,18 @@ impl<T> NumCore for T where
 
 /// An exact-coefficient field element for the linear algebra module.
 ///
-/// Beyond [`NumCore`] a coefficient must be `Copy` (matrix algorithms copy
+/// Beyond [`NumCore`] a coefficient must be `Clone` (matrix algorithms copy
 /// entries constantly), comparable with `PartialEq`, negatable, and know its
 /// additive/multiplicative identities. It also offers square roots — the one
 /// operation a plain field does not guarantee — with both a lossy `sqrt` and an
 /// exact [`try_sqrt`](Self::try_sqrt).
+///
+/// `Clone` rather than `Copy` so that a representation which cannot be `Copy` —
+/// in particular the refcounted [`Expr`][crate::structs::expr::Expr], whose clone
+/// is a cheap refcount bump — can still be used as a coefficient. Types that
+/// *are* `Copy` lose nothing.
 pub trait ExactField:
-    NumCore + Copy + PartialEq + std::fmt::Debug + Neg<Output = Self> + Default
+    NumCore + Clone + PartialEq + std::fmt::Debug + Neg<Output = Self> + Default
 {
     /// The multiplicative identity (`1`).
     fn multiplicative_identity() -> Self;
@@ -80,6 +85,17 @@ pub trait ExactField:
     /// A approximate conversion to `f64` (used by the numerical SVD fallback and
     /// the default `sqrt`/`try_sqrt`).
     fn as_f64(self) -> f64;
+
+    /// Whether this value is zero.
+    ///
+    /// The default is structural equality with the additive identity, which is
+    /// exact for `Copy` field types. Symbolic types such as
+    /// [`Expr`][crate::structs::expr::Expr] override it, because an expression
+    /// that *evaluates* to zero (for instance `0 / 1`) is not the literal zero
+    /// node and comparing by structure would report it as non-zero.
+    fn is_zero_value(&self) -> bool {
+        *self == Self::additive_identity()
+    }
 
     /// Build a value from an `f64`. Exact types round to the nearest
     /// representable element.
@@ -101,11 +117,13 @@ pub trait ExactField:
     /// squares back to the input. Exact types override this so that, for
     /// example, `sqrt 6` stays `sqrt 6` rather than becoming `2.449…`.
     fn try_sqrt(self) -> Option<Self> {
-        if self.as_f64() < 0.0 {
+        let value = self.clone().as_f64();
+        if value < 0.0 {
             return None;
         }
-        let candidate = Self::from_f64(self.as_f64().sqrt());
-        (candidate * candidate == self).then_some(candidate)
+        let candidate = Self::from_f64(value.sqrt());
+        let squared = candidate.clone() * candidate.clone();
+        (squared == self).then_some(candidate)
     }
 
     /// Whether this is a floating-point coefficient type.

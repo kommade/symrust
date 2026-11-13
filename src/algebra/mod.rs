@@ -14,8 +14,10 @@
 pub(crate) mod expr;
 pub(crate) mod factorization;
 pub(crate) mod linear;
+pub mod matrix_steps;
 pub(crate) mod polynomial;
 pub(crate) mod rational;
+pub mod symbolic_eigen;
 pub(crate) mod surd;
 
 /// General algebraic-number support (Option B). Compiled only with the

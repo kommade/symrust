@@ -141,8 +141,31 @@ fn try_antiderivative() {
         let result = expr
             .get_antiderivative()
             .unwrap_or_else(|error| panic!("{input} failed: {error}"));
-        tracing::info!("------------------------------------------------------------------------");
         assert_eq!(result.to_string(), expected, "antiderivative of {input}");
+    }
+}
+
+/// The step-tracking entry point returns the same answer as the plain one and
+/// records the techniques it tried.
+#[test]
+fn antiderivative_solution_records_steps() {
+    super::setup();
+    for (input, expected) in EXAMPLES {
+        let solution = create_expr!(input)
+            .unwrap()
+            .get_antiderivative_solution()
+            .unwrap_or_else(|error| panic!("{input} failed: {error}"));
+        assert_eq!(
+            solution.result().to_string(),
+            expected,
+            "solution answer for {input}"
+        );
+        assert_eq!(solution.problem_type(), "antiderivative");
+        assert!(
+            !solution.steps().is_empty(),
+            "no steps recorded for {input}"
+        );
+        assert!(!solution.to_string().is_empty());
     }
 }
 

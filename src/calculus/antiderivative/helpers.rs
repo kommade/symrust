@@ -10,8 +10,6 @@
 
 use std::ops::Neg;
 
-use tracing::{debug, info};
-
 use crate::{
     numeric::Real,
     parse::lexer::{Func, Op, Token},
@@ -389,7 +387,6 @@ fn split_numeric(node: &Node) -> (Real, Option<Node>) {
 /// The derivative of the candidate is approximated with a central difference.
 /// `arpfloat` carries far more precision than the step size needs, so the
 /// approximation is accurate enough to catch genuinely wrong results.
-#[tracing::instrument(skip_all, parent = None, name = "(step) verify", fields(result))]
 pub(super) fn verify(integrand: &Node, candidate: &Node) -> bool {
     let step = float_from(1e-4);
     let tolerance = float_from(1e-5);
@@ -415,16 +412,10 @@ pub(super) fn verify(integrand: &Node, candidate: &Node) -> bool {
         let difference = (derivative.clone() - expected.clone()).abs();
         let scale = Real::one() + expected.abs();
         if difference > tolerance.clone() * scale {
-            tracing::Span::current().record("result", String::from("rejected"));
-            info!(
-                "Verification failed at x = {sample}: the derivative is {} but the integrand is {}",
-                derivative, expected
-            );
             return false;
         }
         checked += 1;
     }
-    tracing::Span::current().record("result", String::from("verified"));
-    debug!("Verified the candidate antiderivative numerically at {checked} sample points");
+    let _ = checked;
     true
 }
