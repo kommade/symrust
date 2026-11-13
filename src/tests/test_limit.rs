@@ -113,3 +113,10 @@ fn oscillation_is_reported_as_not_existing() {
     assert_eq!(expr.limit('x', Real::from_i64(0)), Limit::DoesNotExist);
 }
 
+#[test]
+fn polynomial_over_exponential_goes_to_zero() {
+    super::setup();
+    // lim_{x->inf} x^8 / 2^x = 0 (eight applications of L'Hôpital).
+    let expr = create_expr!("x^8/2^x").unwrap();
+    assert_eq!(expr.limit('x', Real::infinity()), Limit::Finite(Real::zero()));
+}

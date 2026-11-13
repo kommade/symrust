@@ -97,6 +97,21 @@ impl Expr<Real> {
     }
 
     fn limit_inner(&self, var: char, toward: &Real, depth: usize) -> Limit<Real> {
+        // At infinity, a naive substitution can be misleading: `2^x` overflows
+        // to a huge-but-finite value, so `x^8 / 2^x` substitutes to a tiny
+        // (but non-zero) float instead of `0`. Prefer L'Hôpital's rule for a
+        // quotient at infinity before trusting the direct value, which reduces
+        // `p(x)/e^x`-type limits exactly.
+        if toward.is_infinite()
+            && depth < MAX_LHOPITAL_DEPTH
+            && matches!(
+                shape(&self.tree),
+                Shape::Operator(Token::Operator(Op::Div), _, _)
+            )
+            && let Some(result) = self.lhopital_at_infinity(var, toward, depth)
+        {
+            return result;
+        }
         // 1. Direct substitution.
         let direct = self.substitute_evaluate(var, toward);
         match &direct {
@@ -179,6 +194,56 @@ impl Expr<Real> {
         )
     }
 
+    /// L'Hôpital's rule at infinity for a quotient, *without* the `0/0`/`∞/∞`
+    /// precondition.
+    ///
+    /// At infinity `2^x` (and the like) overflow to a huge-but-finite float, so
+    /// `inf_over_inf` is not detected. Instead we differentiate and recurse as
+    /// long as the quotient keeps changing shape. When the numerator stops
+    /// changing (it has become a constant, e.g. `8!` from `d^8(x^8)`), it is
+    /// `constant / (something growing)`, whose limit is `0`.
+    fn lhopital_at_infinity(
+        &self,
+        var: char,
+        toward: &Real,
+        depth: usize,
+    ) -> Option<Limit<Real>> {
+        let Shape::Operator(Token::Operator(Op::Div), numerator, denominator) =
+            shape(&self.tree)
+        else {
+            return None;
+        };
+        let f = Expr::from_node(numerator);
+        let g = Expr::from_node(denominator);
+        // Restrict to the exponential-growth case this rule is meant for: a
+        // polynomial numerator over an exponential denominator (`c^u`, `c > 1`).
+        // This keeps it from interfering with logarithmic or rational quotient
+        // limits that the standard rule (or probing) already handles.
+        if !is_polynomial(&f.tree) || !is_exponential_growth(&g.tree) {
+            return None;
+        }
+        let f_prime = f.clone().get_derivative();
+        let g_prime = g.clone().get_derivative();
+        // Nothing changes on either side: the rule makes no progress.
+        if f_prime.tree.inner.borrow().eq(&f.tree.inner.borrow())
+            && g_prime.tree.inner.borrow().eq(&g.tree.inner.borrow())
+        {
+            return None;
+        }
+        // The numerator has stopped changing (constant): `constant / g`, and `g`
+        // is still growing (otherwise the denominator derivative would also have
+        // stopped, caught above), so the limit is `0`.
+        if f_prime.tree.inner.borrow().eq(&f.tree.inner.borrow()) {
+            return Some(Limit::Finite(Real::zero()));
+        }
+        let quotient = Expr::from_node(NodeInner::from_operation(
+            Op::Div,
+            f_prime.tree.clone(),
+            g_prime.tree.clone(),
+        ));
+        Some(quotient.limit_inner(var, toward, depth + 1))
+    }
+
     /// Apply L'Hôpital's rule if `self` is a `f / g` whose direct limit is
     /// `0/0` or `∞/∞`, returning the limit of `f' / g'`.
     fn lhopital(&self, var: char, toward: &Real, depth: usize) -> Option<Limit<Real>> {
@@ -197,6 +262,18 @@ impl Expr<Real> {
             && matches!(&g_limit, Some(v) if v.is_zero());
         let inf_over_inf = matches!(&f_limit, Some(v) if v.is_infinite())
             && matches!(&g_limit, Some(v) if v.is_infinite());
+
+        // A finite numerator over an infinite denominator is `0` exactly. This
+        // is the endpoint of `p(x)/e^x`-type limits after enough L'Hôpital
+        // steps (the polynomial derivative becomes a non-zero constant while
+        // the exponential keeps growing), so resolve it directly rather than
+        // falling through to numeric probing (which would only see an
+        // infinitesimal).
+        if matches!(&f_limit, Some(v) if !v.is_infinite() && !v.is_nan())
+            && matches!(&g_limit, Some(v) if v.is_infinite())
+        {
+            return Some(Limit::Finite(Real::zero()));
+        }
 
         if !zero_over_zero && !inf_over_inf {
             return None;
@@ -329,6 +406,59 @@ impl Expr<Real> {
             Limit::NegInfinity => Limit::Finite(Real::zero()),
             Limit::DoesNotExist => Limit::DoesNotExist,
         })
+    }
+}
+
+/// Whether `node` is a polynomial in the independent variable (sums, products
+/// and non-negative integer powers of the variable and constants; no division
+/// by a non-constant or functions).
+fn is_polynomial(node: &Node) -> bool {
+    is_polynomial_inner(node, 0)
+}
+
+fn is_polynomial_inner(node: &Node, depth: usize) -> bool {
+    if depth > 128 {
+        return false;
+    }
+    match shape(node) {
+        Shape::Operand(token) => matches!(
+            token,
+            Token::Indp(_) | Token::Number(_) | Token::Constant(_) | Token::Var(_)
+        ),
+        Shape::Operator(token, left, right) => match token {
+            Token::Operator(Op::Add | Op::Sub | Op::Mul | Op::ImplicitMul) => {
+                is_polynomial_inner(&left, depth + 1) && is_polynomial_inner(&right, depth + 1)
+            }
+            Token::Operator(Op::Pow) => {
+                // A polynomial base to a non-negative integer constant power.
+                is_polynomial_inner(&left, depth + 1) && is_nonneg_integer_constant(&right)
+            }
+            _ => false,
+        },
+        Shape::Empty => false,
+    }
+}
+
+/// Whether `node` is a non-negative integer constant.
+fn is_nonneg_integer_constant(node: &Node) -> bool {
+    match shape(node) {
+        Shape::Operand(Token::Number(n)) => n >= 0,
+        Shape::Operand(Token::Float(v)) => v.is_integer() && !v.is_negative(),
+        _ => false,
+    }
+}
+
+/// Whether `node` is an exponential that grows without bound, e.g. `2^u` or
+/// `e^u` with `u -> ∞` (`base` a constant strictly greater than 1).
+fn is_exponential_growth(node: &Node) -> bool {
+    let Shape::Operator(Token::Operator(Op::Pow), base, _exponent) = shape(node) else {
+        return false;
+    };
+    match shape(&base) {
+        Shape::Operand(Token::Number(n)) => n > 1,
+        Shape::Operand(Token::Constant(_)) => true,
+        Shape::Operand(Token::Float(v)) => v > Real::from_i64(1),
+        _ => false,
     }
 }
 
