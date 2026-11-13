@@ -184,6 +184,26 @@ fn irreducible_denominators_report_failure() {
     assert!(cubic.get_antiderivative().is_err(), "1/(x^3+2) without the algebraic feature");
 }
 
+/// Cyclotomic denominators `x^n + 1` whose factors reduce to quadratics over a
+/// single square-root extension are integrated exactly by the cyclotomic
+/// split in `factorise`. (`x^7+1` and `x^8+1` still need nested square roots
+/// and are refused — see [`irreducible_denominators_report_failure`].)
+#[cfg(feature = "algebraic")]
+#[test]
+fn cyclotomic_denominators_integrate() {
+    super::setup();
+    for input in ["1/(x^5+1)", "1/(x^6+1)"] {
+        let expr = create_expr!(input).unwrap();
+        let antiderivative = expr
+            .get_antiderivative()
+            .unwrap_or_else(|error| panic!("{input} failed: {error}"));
+        assert!(
+            !antiderivative.to_string().is_empty(),
+            "{input} produced an empty antiderivative"
+        );
+    }
+}
+
 #[test]
 fn try_functions_without_elementary_antiderivative() {
     super::setup();

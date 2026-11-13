@@ -183,6 +183,10 @@ pub(crate) struct Factorization {
 }
 
 pub(crate) fn factorise(poly: &Poly) -> Option<Factorization> {
+    factorise_inner(poly, true)
+}
+
+fn factorise_inner(poly: &Poly, use_cyclotomic: bool) -> Option<Factorization> {
     let leading = poly.leading()?;
     if leading.is_zero() {
         return None;
@@ -243,11 +247,30 @@ pub(crate) fn factorise(poly: &Poly) -> Option<Factorization> {
             ));
         }
         Some(degree) => {
+            // `x^n ± 1` split into cyclotomic polynomials (integer
+            // coefficients). The factors are re-factored WITHOUT re-running
+            // cyclotomic detection, so a factor that is itself `x^m ± 1`
+            // (e.g. Phi_16 = x^8 + 1) cannot recurse forever.
+            if use_cyclotomic {
+                if let Some(cyclotomics) = cyclotomic_factors(&remaining) {
+                    for (phi, multiplicity) in cyclotomics {
+                        match factorise_inner(&phi, false) {
+                            Some(inner) => {
+                                for (factor, m) in inner.factors {
+                                    factors.push((factor, m * multiplicity));
+                                }
+                            }
+                            None => factors.push((Factor::General(phi), multiplicity)),
+                        }
+                    }
+                    return Some(Factorization { leading, factors });
+                }
+            }
             // Repeated factors: `(q^2)` can be recognised by taking a square
             // root of the remaining polynomial.
             if degree % 2 == 0 {
                 if let Some(root) = remaining.square_root() {
-                    if let Some(inner) = factorise(&root) {
+                    if let Some(inner) = factorise_inner(&root, use_cyclotomic) {
                         for (factor, multiplicity) in inner.factors {
                             factors.push((factor, multiplicity * 2));
                         }
@@ -301,6 +324,93 @@ fn factor_even(poly: &Poly) -> Option<Vec<(Factor, usize)>> {
     } else {
         None
     }
+}
+
+/// Split `x^n - 1` into its cyclotomic factors `Phi_d(x)` for every `d | n`,
+/// or `x^n + 1` into `Phi_d(x)` for every `d | 2n` with `d ∤ n`.
+///
+/// Returns `None` unless `poly` is monic and equal to `x^n - 1` or `x^n + 1`.
+/// Cyclotomic polynomials have integer coefficients, so later steps
+/// (rational/quadratic/quartic/even) can factor each one exactly.
+fn cyclotomic_factors(poly: &Poly) -> Option<Vec<(Poly, usize)>> {
+    let degree = poly.degree()?;
+    if degree < 1 || !poly.leading()?.is_one() {
+        return None;
+    }
+    // Recognise `x^n ± 1`: only the constant and the top coefficient are set.
+    let matches = |constant: Rat| {
+        poly.coefficients().iter().enumerate().all(|(index, coefficient)| {
+            if index == 0 {
+                *coefficient == constant
+            } else if index == degree {
+                coefficient.is_one()
+            } else {
+                coefficient.is_zero()
+            }
+        })
+    };
+    if matches(Rat::ONE.neg()) {
+        // x^n - 1 = prod_{d | n} Phi_d
+        let mut factors = Vec::new();
+        for d in factor_divisors(degree) {
+            factors.push((cyclotomic_polynomial(d)?, 1));
+        }
+        Some(factors)
+    } else if matches(Rat::ONE) {
+        // x^n + 1 = prod_{d | 2n, d ∤ n} Phi_d
+        let mut factors = Vec::new();
+        for d in factor_divisors(2 * degree) {
+            if degree % d == 0 {
+                continue;
+            }
+            factors.push((cyclotomic_polynomial(d)?, 1));
+        }
+        Some(factors)
+    } else {
+        None
+    }
+}
+
+/// The positive divisors of `n`.
+fn factor_divisors(n: usize) -> Vec<usize> {
+    let mut result = Vec::new();
+    let mut d = 1;
+    while d * d <= n {
+        if n % d == 0 {
+            result.push(d);
+            if d != n / d {
+                result.push(n / d);
+            }
+        }
+        d += 1;
+    }
+    result.sort_unstable();
+    result
+}
+
+/// `Phi_n(x)`, the `n`-th cyclotomic polynomial, by
+/// `Phi_n(x) = (x^n - 1) / prod_{d | n, d < n} Phi_d(x)`.
+fn cyclotomic_polynomial(n: usize) -> Option<Poly> {
+    if n == 0 {
+        return None;
+    }
+    if n == 1 {
+        // x - 1
+        return Some(Poly::new(vec![Rat::ONE.neg(), Rat::ONE]));
+    }
+    // x^n - 1
+    let mut xn_minus_one = vec![Rat::ZERO; n + 1];
+    xn_minus_one[0] = Rat::ONE.neg();
+    xn_minus_one[n] = Rat::ONE;
+    let mut result = Poly::new(xn_minus_one);
+    for d in factor_divisors(n) {
+        if d == n {
+            continue;
+        }
+        let phi = cyclotomic_polynomial(d)?;
+        result = result.div_exact(&phi)?;
+    }
+    Some(result)
 }
 
 pub(crate) fn find_rational_root(poly: &Poly) -> Option<Rat> {
