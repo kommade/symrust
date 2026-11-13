@@ -36,7 +36,9 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 
 use arpfloat::{FP128, Float};
 
+pub mod complex;
 pub mod real;
+pub use complex::Complex;
 pub use real::Real;
 
 /// A number supporting the four ring operations.

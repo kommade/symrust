@@ -1,4 +1,5 @@
 mod test_antiderivative;
+mod test_complex;
 mod test_derivative;
 mod test_diagonalization_svd;
 mod test_dynamic_matrix;
