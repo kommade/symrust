@@ -10,16 +10,19 @@ tracing-subscriber = "0.3.19"
 
 [features]
 default = []
-# Enables the crate's `Complex` number type (and the root-of-unity integration
-# that uses it). Off by default: with it disabled none of the extra code is
-# compiled, so there is zero runtime cost.
+# Enables the crate's `Complex` number type. Off by default: with it disabled
+# none of the extra code is compiled, so there is zero runtime cost. Combined
+# with `algebraic` it additionally enables the exact roots-of-unity integration
+# of cyclotomic denominators (which factors over C using `Complex` residues).
 complex = []
 # Enables the general algebraic-number machinery (Option B): exact real roots of
 # arbitrary rational polynomials via Sturm-sequence isolation, so the integrator
-# can factor irreducible factors of any degree. Off by default: with it disabled
-# none of the extra code is compiled, so there is zero runtime cost. Implies
-# `complex`, because the roots-of-unity path integrates over `Complex` residues.
-algebraic = ["complex"]
+# can factor irreducible factors of any degree. This is independent of `complex`:
+# on its own it factors over R (real surds), not over C. Enable `complex` as well
+# to factor over C and write cyclotomic integrals in terms of roots of unity.
+# Off by default: with it disabled none of the extra code is compiled, so there
+# is zero runtime cost.
+algebraic = []
 [dev-dependencies]
 color-eyre = "0.6.3"
 

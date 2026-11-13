@@ -40,7 +40,7 @@ use crate::{
     parse::lexer::{Func, Op, Token},
     structs::node::Node,
 };
-#[cfg(feature = "complex")]
+#[cfg(all(feature = "algebraic", feature = "complex"))]
 use crate::numeric::Complex;
 
 /// A rational function `numerator / denominator`.
@@ -743,7 +743,7 @@ fn root_of_unity_angle(m: i64, n: i64) -> Node {
 }
 
 /// Evaluate a real-coefficient polynomial (low-to-high) at the complex point `z`.
-#[cfg(feature = "algebraic")]
+#[cfg(all(feature = "algebraic", feature = "complex"))]
 fn poly_at_complex(coefficients: &[f64], z: &Complex) -> Complex {
     let mut acc = Complex::new(crate::numeric::Real::from_f64(0.0), crate::numeric::Real::from_f64(0.0));
     for coefficient in coefficients.iter().rev() {
@@ -761,7 +761,7 @@ fn poly_at_complex(coefficients: &[f64], z: &Complex) -> Complex {
 /// where `A = N(e^{iθ})/D'(e^{iθ})` is the partial-fraction residue and
 /// `θ = π·m/n`. We emit `cosθ`/`sinθ` symbolically (built from `π`), so the
 /// result is exact rather than a long decimal.
-#[cfg(feature = "algebraic")]
+#[cfg(all(feature = "algebraic", feature = "complex"))]
 fn exact_root_of_unity_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
     // Recognise `x^n + s` with `s = ±1`: monic, degree ≥ 2, all intermediate
     // coefficients zero, constant term ±1.
@@ -910,6 +910,7 @@ fn numeric_factor_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> 
     // real quadratics then carry symbolic `cos(2πk/n)` / `sin(2πk/n)`
     // coefficients instead of long decimals. Fall through to the numeric path
     // when the exact form is not available (e.g. a translated cyclotomic).
+    #[cfg(feature = "complex")]
     if let Some(exact) = exact_root_of_unity_term(coefficients, factor, variable) {
         return Some(exact);
     }
