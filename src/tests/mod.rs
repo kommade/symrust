@@ -6,6 +6,8 @@ mod test_expr;
 mod test_evaluate;
 mod test_generic_tree;
 mod test_limit;
+#[cfg(feature = "algebraic")]
+mod test_algebraic;
 mod test_float_gcd;
 mod test_float_math;
 mod test_linear;
