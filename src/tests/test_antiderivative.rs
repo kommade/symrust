@@ -171,12 +171,21 @@ fn irreducible_denominators_report_failure() {
     super::setup();
     // x^7+1 and x^8+1 have cyclotomic factors that do not reduce to quadratics
     // over a single square-root extension. Without the `algebraic` feature they
-    // are refused; with it they integrate numerically by splitting over the
-    // complex roots (decimal coefficients).
+    // are refused; with it they integrate exactly in terms of roots of unity
+    // (symbolic `cos(πk/n)` / `sin(πk/n)` coefficients, no long decimals).
     for input in ["1/(x^7+1)", "1/(x^8+1)"] {
         let expr = create_expr!(input).unwrap();
         #[cfg(feature = "algebraic")]
-        assert!(expr.get_antiderivative().is_ok(), "{input} with the algebraic feature");
+        {
+            let antiderivative = expr
+                .get_antiderivative()
+                .unwrap_or_else(|error| panic!("{input} with the algebraic feature: {error}"));
+            let text = antiderivative.to_string();
+            assert!(
+                text.contains("cos(") || text.contains("ln("),
+                "{input} should integrate in terms of roots of unity, got {text}"
+            );
+        }
         #[cfg(not(feature = "algebraic"))]
         assert!(expr.get_antiderivative().is_err(), "{input} without the algebraic feature");
     }
@@ -191,8 +200,8 @@ fn irreducible_denominators_report_failure() {
 
 /// Cyclotomic denominators `x^n + 1` whose factors reduce to quadratics over a
 /// single square-root extension are integrated exactly by the cyclotomic
-/// split in `factorise`. (`x^7+1` and `x^8+1` still need nested square roots
-/// and are refused — see [`irreducible_denominators_report_failure`].)
+/// split in `factorise`. (`x^7+1` and `x^8+1` are handled by the root-of-unity
+/// path — see [`irreducible_denominators_report_failure`].)
 #[cfg(feature = "algebraic")]
 #[test]
 fn cyclotomic_denominators_integrate() {

@@ -37,6 +37,7 @@ use crate::{
         surd::{Surd, surd_quadratic_node, surd_sqrt_node},
     },
     calculus::expr::float_from,
+    numeric::Complex,
     parse::lexer::{Func, Op, Token},
     structs::node::Node,
 };
@@ -707,6 +708,190 @@ fn quadratic_node(a: f64, b: f64, e: f64, variable: &Node) -> Node {
     )
 }
 
+/// Build the exact node `cos(π·m/n)`, the real part of the root of unity
+/// `e^{iπm/n}`. The argument is assembled from `π` so the expression carries no
+/// decimal approximation.
+#[cfg(feature = "algebraic")]
+fn cos_root_of_unity(m: i64, n: i64) -> Node {
+    // Use the raw `call` (not `function`) so the exact `π·m/n` argument is not
+    // simplified down to a decimal.
+    helpers::call(Func::Cos, root_of_unity_angle(m, n))
+}
+
+/// Build the exact node `sin(π·m/n)`, the imaginary part of `e^{iπm/n}`.
+#[cfg(feature = "algebraic")]
+fn sin_root_of_unity(m: i64, n: i64) -> Node {
+    helpers::call(Func::Sin, root_of_unity_angle(m, n))
+}
+
+/// The exact angle `π·m/n` as a symbolic node `π · m / n`, so it renders as
+/// `π·m/n` rather than a decimal.
+#[cfg(feature = "algebraic")]
+fn root_of_unity_angle(m: i64, n: i64) -> Node {
+    use crate::parse::lexer::Const;
+    if m == 0 {
+        return helpers::zero();
+    }
+    let pi = crate::structs::node::Node::from_constant(Const::Pi);
+    let numer = helpers::mul(pi, helpers::number(m));
+    if n == 1 {
+        numer
+    } else {
+        helpers::div(numer, helpers::number(n))
+    }
+}
+
+/// Evaluate a real-coefficient polynomial (low-to-high) at the complex point `z`.
+#[cfg(feature = "algebraic")]
+fn poly_at_complex(coefficients: &[f64], z: &Complex) -> Complex {
+    let mut acc = Complex::new(crate::numeric::Real::from_f64(0.0), crate::numeric::Real::from_f64(0.0));
+    for coefficient in coefficients.iter().rev() {
+        acc = acc * z.clone() + Complex::from_real(crate::numeric::Real::from_f64(*coefficient));
+    }
+    acc
+}
+
+/// Detect a cyclotomic-shaped denominator factor `x^n ± 1` and, when present,
+/// integrate `N(x)/D(x)` exactly over the roots of unity.
+///
+/// Every root of `x^n ± 1` lies on the unit circle. Each conjugate pair
+/// `e^{±iθ}` contributes the real expression
+/// `Re(A)·ln(x² − 2cosθ·x + 1) − 2·Im(A)·atan((x − cosθ)/sinθ)`
+/// where `A = N(e^{iθ})/D'(e^{iθ})` is the partial-fraction residue and
+/// `θ = π·m/n`. We emit `cosθ`/`sinθ` symbolically (built from `π`), so the
+/// result is exact rather than a long decimal.
+#[cfg(feature = "algebraic")]
+fn exact_root_of_unity_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
+    // Recognise `x^n + s` with `s = ±1`: monic, degree ≥ 2, all intermediate
+    // coefficients zero, constant term ±1.
+    let degree = factor.degree()?;
+    if degree < 2 {
+        return None;
+    }
+    let leading = factor.leading()?.to_f64();
+    if (leading - 1.0).abs() > 1e-12 {
+        return None;
+    }
+    for power in 1..degree {
+        if factor.coeff(power).to_f64().abs() > 1e-9 {
+            return None;
+        }
+    }
+    let constant = factor.coeff(0).to_f64();
+    let plus = (constant - 1.0).abs() < 1e-9;
+    let minus = (constant + 1.0).abs() < 1e-9;
+    if !plus && !minus {
+        return None;
+    }
+    let n = degree as i64;
+
+    // The `n` roots are `e^{iθ}` with `θ = π·m/n`, where `m = 2k` for `x^n − 1`
+    // and `m = 2k + 1` for `x^n + 1`.
+    let angles: Vec<i64> = if minus {
+        (0..n).map(|k| 2 * k).collect()
+    } else {
+        (0..n).map(|k| 2 * k + 1).collect()
+    };
+
+    // Denominator derivative coefficients (low-to-high) for the residues.
+    let denom: Vec<f64> = (0..=degree).map(|i| factor.coeff(i).to_f64()).collect();
+    let deriv = derivative_coeffs(&denom);
+    let numer: Vec<f64> = coefficients.iter().map(|value| value.to_f64()).collect();
+    let variable: Node = Node::clone(variable);
+
+    let mut terms: Vec<Node> = Vec::new();
+    let mut consumed = vec![false; angles.len()];
+    for i in 0..angles.len() {
+        if consumed[i] {
+            continue;
+        }
+        let m = angles[i];
+        let theta = std::f64::consts::PI * m as f64 / n as f64;
+        let c = theta.cos();
+        let s = theta.sin();
+        // Real root (`θ = 0` or `θ = π`): a simple linear pole `A/(x − r)`.
+        if s.abs() < 1e-9 {
+            consumed[i] = true;
+            let r = if c >= 0.0 { 1.0 } else { -1.0 };
+            let z = Complex::from_real(crate::numeric::Real::from_f64(r));
+            let slope = poly_at_complex(&deriv, &z);
+            let a = poly_at_complex(&numer, &z) / slope;
+            let a_real = a.re().to_f64();
+            if a.im().to_f64().abs() > 1e-7 {
+                return None;
+            }
+            if a_real.abs() > 1e-12 {
+                let base = helpers::sub(variable.clone(), helpers::float(float_from(r)));
+                terms.push(helpers::multiply_by(
+                    helpers::function(Func::Ln, base),
+                    float_from(a_real),
+                ));
+            }
+            continue;
+        }
+        // Find the conjugate partner (`θ' = 2π − θ`, i.e. `m' = 2n − m`).
+        let partner_m = 2 * n - m;
+        let Some(partner_index) = angles.iter().position(|&x| x == partner_m) else {
+            return None;
+        };
+        if consumed[partner_index] {
+            return None;
+        }
+        consumed[i] = true;
+        consumed[partner_index] = true;
+
+        // Residue `A = N(z)/D'(z)` at `z = e^{iθ}`, computed with complex
+        // arithmetic so the real and imaginary parts are both meaningful.
+        let z = Complex::from_polar(
+            crate::numeric::Real::from_f64(1.0),
+            crate::numeric::Real::from_f64(theta),
+        );
+        let slope = poly_at_complex(&deriv, &z);
+        let a = poly_at_complex(&numer, &z) / slope;
+        let a_real = a.re().to_f64();
+        let a_imag = a.im().to_f64();
+        if a_real.abs() <= 1e-12 && a_imag.abs() <= 1e-12 {
+            continue;
+        }
+
+        let cos_node = cos_root_of_unity(m, n);
+        let sin_node = sin_root_of_unity(m, n);
+
+        // Logarithmic part: `Re(A)·ln(x² − 2cosθ·x + 1)`.
+        if a_real.abs() > 1e-12 {
+            let quadratic = helpers::add(
+                helpers::add(
+                    helpers::pow(variable.clone(), helpers::number(2)),
+                    helpers::multiply_by(
+                        helpers::mul(variable.clone(), cos_node.clone()),
+                        float_from(-2.0),
+                    ),
+                ),
+                helpers::one(),
+            );
+            terms.push(helpers::multiply_by(
+                helpers::function(Func::Ln, quadratic),
+                float_from(a_real),
+            ));
+        }
+
+        // Arctangent part: `−2·Im(A)·atan((x − cosθ)/sinθ)`.
+        if a_imag.abs() > 1e-12 {
+            let centre = helpers::sub(variable.clone(), cos_node);
+            let scaled = helpers::div(centre, sin_node);
+            terms.push(helpers::multiply_by(
+                helpers::function(Func::Atan, scaled),
+                float_from(-2.0 * a_imag),
+            ));
+        }
+    }
+
+    if terms.is_empty() {
+        return None;
+    }
+    Some(helpers::sum(terms))
+}
+
 /// Numeric integration of `N(x)/D(x)` for a denominator that has no real-surd
 /// factorisation, by splitting `D` over the complex numbers into real linear and
 /// irreducible-quadratic factors (decimal coefficients) and integrating each
@@ -719,6 +904,15 @@ fn quadratic_node(a: f64, b: f64, e: f64, variable: &Node) -> Node {
 /// the numeric verifier confirms the result.
 #[cfg(feature = "algebraic")]
 fn numeric_factor_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
+    // Exact path: a cyclotomic factor `x^n ± 1` has roots on the unit circle,
+    // so its integral can be written exactly in terms of roots of unity — the
+    // real quadratics then carry symbolic `cos(2πk/n)` / `sin(2πk/n)`
+    // coefficients instead of long decimals. Fall through to the numeric path
+    // when the exact form is not available (e.g. a translated cyclotomic).
+    if let Some(exact) = exact_root_of_unity_term(coefficients, factor, variable) {
+        return Some(exact);
+    }
+
     let degree = factor.degree()?;
     if degree < 1 {
         return None;
