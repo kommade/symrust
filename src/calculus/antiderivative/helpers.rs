@@ -15,7 +15,7 @@ use tracing::{debug, info};
 use crate::{
     numeric::Real,
     parse::lexer::{Func, Op, Token},
-    structs::node::{Node, NodeFunctions, NodeInner},
+    structs::expr::node::{Node, NodeFunctions, NodeInner},
     utils::float_math::FloatMath,
 };
 

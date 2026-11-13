@@ -11,7 +11,7 @@ use std::ops::Neg;
 use crate::numeric::Real;
 use crate::{
     parse::lexer::{Func, Op, Token},
-    structs::node::{Node, NodeFunctions, NodeInner, NodeValue},
+    structs::expr::node::{Node, NodeFunctions, NodeInner, NodeValue},
     utils::float_math::FloatMath,
 };
 
@@ -108,7 +108,7 @@ pub(crate) fn multiply_by(node: Node, factor: Real) -> Node {
     match crate::algebra::rational::Rat::from_float_simple(factor.as_inner()) {
         Some(value) if value.is_one() => node,
         Some(value) if !value.is_zero() => multiply_by_rational(node, value),
-        _ => node.distribute_constant(factor, crate::structs::node::MulType::OpMul),
+        _ => node.distribute_constant(factor, crate::structs::expr::node::MulType::OpMul),
     }
 }
 

@@ -13,11 +13,10 @@
 //! **Sturm-sequence isolation**, which is what lets the integrator factor
 //! irreducible factors of any degree.
 //!
-//! None of this is compiled unless the `algebraic` feature is enabled, so the
-//! default build pays nothing for it.
+//! Enabled by the `algebraic` feature.
 
 use super::{expr, polynomial::Poly, rational::Rat};
-use crate::structs::node::Node;
+use crate::structs::expr::node::Node;
 
 /// An element of a multiquadratic field `Q(sqrt k1, ..., sqrt kt)`.
 ///
@@ -30,6 +29,9 @@ use crate::structs::node::Node;
 ///
 /// It is `Copy` (fixed capacity) so it can be a [`Matrixable`] coefficient type
 /// with no changes to the linear-algebra code.
+/// 
+/// Requires a const generic `N` for the maximum number of radicands, which is
+/// the maximum number of nested square roots that can appear in the singular values.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Multiquadratic<const N: usize> where [(); 1 << N]: Sized {
     /// The distinct squarefree radicands; only the first `count` are used.

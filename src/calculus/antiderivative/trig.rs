@@ -8,7 +8,7 @@ use crate::algebra::{polynomial::Poly, rational::Rat};
 use crate::numeric::Real;
 use crate::{
     parse::lexer::{Func, Op, Token},
-    structs::node::{Node, NodeFunctions},
+    structs::expr::node::{Node, NodeFunctions},
 };
 
 #[derive(Clone, Debug)]

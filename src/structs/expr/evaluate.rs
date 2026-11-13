@@ -17,8 +17,7 @@ use arpfloat::{FP128, Float};
 
 use crate::numeric::{ExpressionScalar, FloatBridge};
 use crate::parse::lexer::{Const, Func, Op, Token};
-use crate::structs::expr::Expr;
-use crate::structs::node::Node;
+use crate::structs::expr::{Expr, Node, NodeInner, node::NodeValue};
 use crate::utils::float_math::FloatMath;
 
 /// Re-export of the evaluator's scalar bound, now defined in
@@ -97,11 +96,11 @@ fn evaluate_operand<T: Evaluable>(token: &Token, lookup: &dyn Fn(char) -> Option
     match token {
         Token::Number(number) => Step {
             value: Some(T::from_i64(*number)),
-            node: crate::structs::node::NodeInner::from_number(*number).wrap(),
+            node: NodeInner::from_number(*number).wrap(),
         },
         Token::Float(float) => Step {
             value: Some(T::from_float(float.clone().into())),
-            node: crate::structs::node::NodeInner::from_float(float.clone()).wrap(),
+            node: NodeInner::from_float(float.clone()).wrap(),
         },
         Token::Constant(constant) => Step {
             value: Some(constant_value(constant)),
@@ -114,7 +113,7 @@ fn evaluate_operand<T: Evaluable>(token: &Token, lookup: &dyn Fn(char) -> Option
                 let float = value.to_float();
                 Step {
                     value: Some(value),
-                    node: crate::structs::node::NodeInner::from_float(float.into()).wrap(),
+                    node: NodeInner::from_float(float.into()).wrap(),
                 }
             }
             None => Step {
@@ -137,7 +136,7 @@ fn constant_value<T: Evaluable>(constant: &Const) -> T {
 }
 
 fn node_for_token(token: &Token) -> Node {
-    crate::structs::node::NodeInner::operand(token.clone()).wrap()
+    NodeInner::operand(token.clone()).wrap()
 }
 
 fn evaluate_operator<T: Evaluable>(
@@ -151,13 +150,13 @@ fn evaluate_operator<T: Evaluable>(
 
     // Rebuild the substituted node first, keeping the exact same structure.
     let node = match token {
-        Token::Operator(op) => crate::structs::node::NodeInner::from_operation(
+        Token::Operator(op) => NodeInner::from_operation(
             op.clone(),
             left_step.node.clone(),
             right_step.node.clone(),
         ),
         Token::Function(func) => {
-            crate::structs::node::NodeInner::from_function(func.clone(), right_step.node.clone())
+            NodeInner::from_function(func.clone(), right_step.node.clone())
         }
         _ => node_for_token(token),
     };
@@ -188,10 +187,10 @@ fn apply_operator<T: Evaluable>(op: &Op, left: T, right_step: &Step<T>, right: T
         Op::Pow => match &right_step.node.inner.borrow().value {
             // Prefer the exact integer/float specialisations when the exponent
             // is literally a number, so exact types keep their precision.
-            crate::structs::node::NodeValue::Operand(Token::Number(exponent)) => {
+            NodeValue::Operand(Token::Number(exponent)) => {
                 left.pow_i64(*exponent)
             }
-            crate::structs::node::NodeValue::Operand(Token::Float(exponent)) => {
+            NodeValue::Operand(Token::Float(exponent)) => {
                 left.pow_float(exponent.clone().into())
             }
             _ => left.pow(right),

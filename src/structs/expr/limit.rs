@@ -23,7 +23,7 @@ use crate::calculus::derivative::Derivative;
 use crate::calculus::expr::{Shape, shape};
 use crate::numeric::{FloatBridge, Real};
 use crate::parse::lexer::{Const, Func, Op, Token};
-use crate::structs::node::Node;
+use crate::structs::expr::node::{Node, NodeInner};
 
 use super::Expr;
 
@@ -204,7 +204,7 @@ impl Expr<Real> {
 
         let f_prime = f.get_derivative();
         let g_prime = g.get_derivative();
-        let quotient = Expr::from_node(crate::structs::node::NodeInner::from_operation(
+        let quotient = Expr::from_node(NodeInner::from_operation(
             Op::Div,
             f_prime.tree,
             g_prime.tree,

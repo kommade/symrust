@@ -1,7 +1,7 @@
 use std::{error::Error, fmt::Display};
 
 use crate::numeric::{FloatType, Real};
-use crate::structs::node::{Node, NodeInner};
+use crate::structs::expr::node::{Node, NodeInner};
 
 use super::lexer::{Op, Token};
 
@@ -33,7 +33,7 @@ pub struct Parser<T = Real> {
 /// Whether a node is a literal zero (`0` or `0.0`), used for the division-by-zero
 /// guard without relying on any numeric evaluation (so it works for any `T`).
 fn right_is_literal_zero<T: FloatType + Display>(node: &Node<T>) -> bool {
-    use crate::structs::node::NodeValue;
+    use crate::structs::expr::node::NodeValue;
     match &node.inner.borrow().value {
         NodeValue::Operand(Token::Number(n)) => *n == 0,
         NodeValue::Operand(Token::Float(f)) => f.is_zero(),
@@ -123,7 +123,7 @@ impl<T: FloatType + Display> Parser<T> {
                     if tree.len() < 2 {
                         if *op == Op::Sub {
                             let right = tree.pop().unwrap();
-                            use crate::structs::node::NodeOperations;
+                            use crate::structs::expr::node::NodeOperations;
                             tree.push(NodeInner::zero().sub(right));
                             continue;
                         }

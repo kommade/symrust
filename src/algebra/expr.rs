@@ -9,7 +9,7 @@ use crate::numeric::Real;
 use super::rational::Rat;
 use crate::{
     parse::lexer::{Func, Op},
-    structs::node::{Node, NodeInner},
+    structs::expr::node::{Node, NodeInner},
 };
 
 pub(crate) fn zero() -> Node {

@@ -38,7 +38,7 @@ use crate::{
     },
     calculus::expr::float_from,
     parse::lexer::{Func, Op, Token},
-    structs::node::Node,
+    structs::expr::node::Node,
 };
 #[cfg(all(feature = "algebraic", feature = "complex"))]
 use crate::numeric::Complex;
@@ -733,7 +733,7 @@ fn root_of_unity_angle(m: i64, n: i64) -> Node {
     if m == 0 {
         return helpers::zero();
     }
-    let pi = crate::structs::node::Node::from_constant(Const::Pi);
+    let pi = crate::structs::expr::node::Node::from_constant(Const::Pi);
     let numer = helpers::mul(pi, helpers::number(m));
     if n == 1 {
         numer

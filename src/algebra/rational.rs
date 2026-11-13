@@ -8,7 +8,7 @@ use std::fmt::Display;
 
 use super::expr;
 use crate::numeric::ExactField;
-use crate::structs::node::Node;
+use crate::structs::expr::node::Node;
 use crate::utils::gcd_u128;
 
 fn integer_sqrt(value: u128) -> Option<u128> {

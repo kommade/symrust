@@ -1,7 +1,7 @@
 //! Polynomials over the rationals.
 
 use super::{expr, rational::Rat};
-use crate::structs::node::Node;
+use crate::structs::expr::node::Node;
 
 /// A polynomial with rational coefficients, stored lowest degree first.
 #[derive(Clone, Debug, Default)]

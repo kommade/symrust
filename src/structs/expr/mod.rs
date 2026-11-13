@@ -4,13 +4,12 @@ use std::ops::{Add, Div, Mul, Sub};
 
 use crate::numeric::{FloatType, Real};
 use crate::parse::{lexer::Lexer, parser::Parser};
-use crate::structs::node::NodeInner;
 
-use super::node::{MulType, Node, NodeError, NodeFunctions, NodeOperations};
-
+pub mod node;
 pub mod evaluate;
 pub mod limit;
 
+use node::{MulType, Node, NodeInner, NodeError, NodeFunctions, NodeOperations, NodeValue, OpNode};
 pub use evaluate::{Evaluable, Evaluated};
 pub use limit::Limit;
 

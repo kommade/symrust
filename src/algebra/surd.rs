@@ -9,7 +9,7 @@ use std::fmt::Display;
 
 use super::{expr, rational::Rat};
 use crate::numeric::ExactField;
-use crate::structs::node::Node;
+use crate::structs::expr::node::Node;
 
 /// `a + b sqrt(k)` with a squarefree `k`. A rational is stored with `k = 0`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

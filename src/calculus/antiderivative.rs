@@ -54,8 +54,10 @@ use crate::{
     algebra,
     parse::lexer::{Func, Op, Token},
     structs::{
-        expr::Expr,
-        node::{Node, NodeFunctions},
+        expr::{
+            Expr,
+            node::{Node, NodeFunctions},
+        },
     },
     utils::float_math::FloatMath,
 };

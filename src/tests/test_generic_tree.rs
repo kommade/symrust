@@ -4,8 +4,7 @@
 
 use crate::create_expr;
 use crate::parse::lexer::{Op, Token};
-use crate::structs::expr::Expr;
-use crate::structs::node::Node;
+use crate::structs::expr::{Expr, node::Node};
 
 #[test]
 fn macro_defaults_to_real() {
@@ -50,7 +49,7 @@ fn build_f32_tree_from_string_matches_real_structure() {
 fn string_literals_parse_directly_into_t() {
     // The lexer/parser build `Node<T>` straight from text, so a decimal literal
     // becomes a `Token::Float(T)` of the *chosen* type — no Real round-trip.
-    use crate::structs::node::NodeValue;
+    use crate::structs::expr::node::NodeValue;
 
     let expr: Expr<f64> = create_expr!("0.1"; f64).unwrap();
     let inner = expr.tree().inner.borrow();

@@ -7,8 +7,10 @@ use crate::{
     },
     parse::lexer::{Const, Func, Op, Token},
     structs::{
-        expr::Expr,
-        node::{MulType, Node, NodeFunctions, NodeOperations, NodeValue},
+        expr::{
+            Expr,
+            node::{MulType, Node, NodeFunctions, NodeOperations, NodeValue}
+        },
     },
     utils::float_math::FloatMath,
 };
