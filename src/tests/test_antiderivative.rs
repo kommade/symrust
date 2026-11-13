@@ -295,10 +295,7 @@ fn derivative_of_extended_functions() {
 fn try_custom() {
     super::setup();
     let expr = create_expr!("2x*sqrt(1-x) + sqrt(1-x)^3/3").unwrap();
-    match expr.get_antiderivative() {
-        Ok(antiderivative) => println!("antiderivative: {}", antiderivative.to_string()),
-        Err(error) => println!("no antiderivative: {error}"),
-    }
+    assert!(expr.get_antiderivative().is_ok(), "custom derivative failed");
 }
 
 /// With the `algebraic` feature, an irreducible cubic denominator that the

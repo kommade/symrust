@@ -37,6 +37,7 @@ use crate::{
         surd::{Surd, surd_quadratic_node, surd_sqrt_node},
     },
     calculus::expr::float_from,
+    numeric::Real,
     parse::lexer::{Func, Op, Token},
     structs::expr::node::Node,
 };
@@ -1396,6 +1397,166 @@ fn poly_exact_div(factors: &[Vec<f64>], skip: usize) -> Option<Vec<f64>> {
         product = next;
     }
     Some(product)
+}
+
+/// Integrate `P(x) · (a x + b)^p` (P a polynomial, p a constant real exponent,
+/// `a x + b` linear) by the substitution `u = a x + b`, so `x = (u − b)/a`.
+///
+/// This is the efficient route for integrands like `2x·sqrt(1 − x)` or
+/// `x^2·(3x+1)^(5/2)`: it avoids integration by parts. The polynomial `P` is
+/// carried in the `u`-variable, multiplied by `u^p`, and integrated termwise with
+/// the power rule, then substituted back. Returns `None` unless the integrand has
+/// exactly one non-polynomial factor `(linear)^p` and the rest is a polynomial.
+pub(super) fn linear_power_substitution(node: &Node, variable: &Node) -> Option<Node> {
+    let product = helpers::flatten_product(node);
+    if !product.denom.iter().all(helpers::is_constant) {
+        return None;
+    }
+    // Locate the single factor that is a power of a linear expression.
+    let mut radical_index = None;
+    let mut base_linear = None;
+    for (index, factor) in product.numer.iter().enumerate() {
+        if let Some((base, _exponent)) = linear_power_parts(factor) {
+            if radical_index.is_some() {
+                // More than one non-trivial factor: not this simple case.
+                return None;
+            }
+            radical_index = Some(index);
+            base_linear = Some(base);
+        }
+    }
+    let radical_index = radical_index?;
+    let (linear_base, exponent) = linear_power_parts(&product.numer[radical_index])?;
+    // The linear `a x + b` must use the integration variable.
+    let (slope_real, intercept_real) = helpers::linear_coefficients(&linear_base)?;
+    if slope_real.is_zero() {
+        return None;
+    }
+    let slope = Rat::from_real(&slope_real)?;
+    let intercept = Rat::from_real(&intercept_real)?;
+    // The remaining factors (over any numeric denominators) form `P(x)`.
+    let mut rest_factors: Vec<Node> = Vec::new();
+    for (index, factor) in product.numer.iter().enumerate() {
+        if index != radical_index {
+            rest_factors.push(factor.clone());
+        }
+    }
+    let rest_node = helpers::fraction(rest_factors, product.denom.clone());
+    let polynomial = RationalFunction::from_node(&rest_node)?;
+    if polynomial.denom.degree() != Some(0) {
+        return None;
+    }
+    let coefficients = polynomial.numer.coefficients();
+    let exponent_value = exponent;
+
+    // Substituting `x = (u − b)/a` in `P` gives a polynomial in `u`; multiply by
+    // `u^exponent` and integrate termwise. `dx = du / a`.
+    // Build the result directly: for each term `c_m (x)^m`, after substitution it
+    // is `c_m ((u − b)/a)^m`, which expands as `c_m / a^m · Σ_k C(m,k) u^k (−b)^(m−k)`.
+    let mut u_powers: Vec<Rat> = vec![Rat::from_i64(0)]; // coefficient of u^power
+    for (m, &coef) in coefficients.iter().enumerate() {
+        if coef.is_zero() {
+            continue;
+        }
+        // c_m / a^m
+        let mut scale = coef;
+        for _ in 0..m {
+            scale = scale.div(slope)?;
+        }
+        // (u − b)^m expansion coefficients: C(m,k) (−b)^(m−k) for u^k.
+        for k in 0..=m {
+            let binom = binomial(m as u64, k as u64)?;
+            let mut term = scale.mul(Rat::from_i64(binom as i64))?;
+            term = term.mul(intercept.pow((m - k) as i64)?)?;
+            if (m - k) % 2 == 1 {
+                term = term.neg();
+            }
+            let pos = k;
+            if u_powers.len() <= pos {
+                u_powers.resize(pos + 1, Rat::from_i64(0));
+            }
+            u_powers[pos] = u_powers[pos].add(term)?;
+        }
+    }
+
+    // ∫ (Σ c_k u^k) · u^p du, then substitute back u = a x + b.
+    let u_node = linear_base.clone();
+    let mut terms: Vec<Node> = Vec::new();
+    for (k, &coef_k) in u_powers.iter().enumerate() {
+        if coef_k.is_zero() {
+            continue;
+        }
+        let total = k as f64 + exponent_value.to_f64();
+        let new_exponent = total + 1.0;
+        if new_exponent.abs() < 1e-12 {
+            // ∫ u^{-1} du = ln|u|
+            let coefficient = coef_k.div(slope)?;
+            terms.push(helpers::multiply_by_rational(
+                helpers::function(Func::Ln, u_node.clone()),
+                coefficient,
+            ));
+            continue;
+        }
+        let coefficient = coef_k.div(slope)?.div(Rat::from_f64(new_exponent)?)?;
+        terms.push(helpers::multiply_by_rational(
+            helpers::pow(u_node.clone(), helpers::float(float_from(new_exponent))),
+            coefficient,
+        ));
+    }
+    if terms.is_empty() {
+        return None;
+    }
+    let result = helpers::sum(terms);
+    // Verify numerically; the derivation is exact but this guards any edge case.
+    if helpers::verify(node, &result) {
+        Some(result)
+    } else {
+        None
+    }
+}
+
+/// Split a factor into `(linear_base, exponent)` when it is `(linear)^p`,
+/// `sqrt(linear)`, or `(sqrt(linear))^k`.
+fn linear_power_parts(factor: &Node) -> Option<(Node, Real)> {
+    match helpers::shape(factor) {
+        Shape::Operator(Token::Function(Func::Sqrt), _, argument) => {
+            if helpers::linear_coefficients(&argument).is_some() {
+                return Some((argument, float_from(0.5)));
+            }
+            None
+        }
+        Shape::Operator(Token::Operator(Op::Pow), base, exponent) => {
+            // `(sqrt(linear))^k`
+            if let Shape::Operator(Token::Function(Func::Sqrt), _, argument) =
+                helpers::shape(&base)
+            {
+                if helpers::linear_coefficients(&argument).is_some() {
+                    let value = helpers::constant_value(&exponent)?;
+                    return Some((argument, value * float_from(0.5)));
+                }
+            }
+            // `(linear)^p`
+            if helpers::linear_coefficients(&base).is_some() {
+                let value = helpers::constant_value(&exponent)?;
+                return Some((base, value));
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Binomial coefficient `C(n, k)`.
+fn binomial(n: u64, k: u64) -> Option<u128> {
+    if k > n {
+        return None;
+    }
+    let k = k.min(n - k);
+    let mut result: u128 = 1;
+    for i in 0..k {
+        result = result.checked_mul((n - i) as u128)? / (i + 1) as u128;
+    }
+    Some(result)
 }
 
 fn quartic_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {

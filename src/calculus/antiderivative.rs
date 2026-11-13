@@ -556,6 +556,14 @@ impl Integrator {
         if let Some(result) = self.try_substitution(node)? {
             return Ok(result);
         }
+        // `P(x)·(a x + b)^p` by the u-substitution `u = a x + b` (avoids by parts).
+        if let Some(result) = rational::linear_power_substitution(node, &self.variable_node()) {
+            info!(
+                "Using the u-substitution u = the linear base to integrate {}",
+                describe(node)
+            );
+            return Ok(result);
+        }
         // Integration by parts.
         if let Some(result) = self.try_by_parts(node)? {
             return Ok(result);
@@ -586,6 +594,20 @@ impl Integrator {
                 ))
             }
             Shape::Operator(Token::Operator(Op::Pow), base, exponent) => {
+                // `(sqrt(u))^n` is `u^(n/2)` for a linear `u`, so it follows the
+                // power rule (e.g. `sqrt(1 - x) ^ 3` = `(1 - x)^(3/2)`).
+                if let Shape::Operator(Token::Function(Func::Sqrt), _, argument) =
+                    helpers::shape(&base)
+                {
+                    if helpers::linear_coefficients(&argument).is_some() {
+                        if let Some(value) = helpers::constant_value(&exponent) {
+                            let halved = helpers::float(value * float_from(0.5));
+                            if let Some(result) = self.power_of(argument, halved) {
+                                return Some(result);
+                            }
+                        }
+                    }
+                }
                 self.power_of(base, exponent)
             }
             Shape::Operator(Token::Operator(Op::Div), numerator, denominator) => {
