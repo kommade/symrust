@@ -691,6 +691,31 @@ impl NodeInner {
         !node.inner.borrow().has_indp
     }
 
+    /// `true` when the subtree contains a named constant such as `π` or `e`.
+    ///
+    /// The simplifier uses this to avoid folding expressions like `π / 8` down
+    /// to a decimal: keeping `π` symbolic is what lets generated antiderivatives
+    /// display exact angles (`cos(π/8)`) instead of long floats.
+    fn contains_named_constant(node: &Node) -> bool {
+        Self::contains_named_constant_inner(node, 0)
+    }
+
+    fn contains_named_constant_inner(node: &Node, depth: usize) -> bool {
+        if depth > 256 {
+            return false;
+        }
+        let borrow = node.inner.borrow();
+        match &borrow.value {
+            NodeValue::Operand(Token::Constant(_)) => true,
+            NodeValue::Operator(op_node) => {
+                let left = Self::contains_named_constant_inner(&op_node.left, depth + 1);
+                let right = Self::contains_named_constant_inner(&op_node.right, depth + 1);
+                left || right
+            }
+            _ => false,
+        }
+    }
+
     fn nodes_equal(left: &Node, right: &Node) -> bool {
         let left_borrow = left.inner.borrow();
         let right_borrow = right.inner.borrow();
@@ -1854,7 +1879,9 @@ impl NodeFunctions<Real> for Node {
                                     drop(left_borrow);
                                     return left.negate();
                                 }
-                                let left_const_val = if !left_borrow.has_indp {
+                                let left_const_val = if !left_borrow.has_indp
+                                    && !NodeInner::<Real>::contains_named_constant(&left)
+                                {
                                     left_borrow.evaluate()
                                 } else {
                                     None

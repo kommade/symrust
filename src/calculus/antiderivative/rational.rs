@@ -763,36 +763,20 @@ fn poly_at_complex(coefficients: &[f64], z: &Complex) -> Complex {
 /// result is exact rather than a long decimal.
 #[cfg(all(feature = "algebraic", feature = "complex"))]
 fn exact_root_of_unity_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
-    // Recognise `x^n + s` with `s = ±1`: monic, degree ≥ 2, all intermediate
-    // coefficients zero, constant term ±1.
     let degree = factor.degree()?;
     if degree < 2 {
         return None;
     }
-    let leading = factor.leading()?.to_f64();
-    if (leading - 1.0).abs() > 1e-12 {
+    // The factor must be a cyclotomic polynomial `Φ_d` for some order `d`; its
+    // roots are then the primitive `d`-th roots of unity `e^{2πik/d}`.
+    let order = cyclotomic_order(factor)? as i64;
+    // Primitive residues: `k` in `1..=d` with `gcd(k, d) == 1`. The angle is
+    // `θ = 2πk/d`, i.e. `π·(2k)/d` — handled by the `π·m/n` trig helpers below.
+    let primitive: Vec<i64> = (1..=order).filter(|&k| gcd(k, order) == 1).collect();
+    if primitive.len() != degree {
+        // Not a clean cyclotomic split; fall back to the numeric path.
         return None;
     }
-    for power in 1..degree {
-        if factor.coeff(power).to_f64().abs() > 1e-9 {
-            return None;
-        }
-    }
-    let constant = factor.coeff(0).to_f64();
-    let plus = (constant - 1.0).abs() < 1e-9;
-    let minus = (constant + 1.0).abs() < 1e-9;
-    if !plus && !minus {
-        return None;
-    }
-    let n = degree as i64;
-
-    // The `n` roots are `e^{iθ}` with `θ = π·m/n`, where `m = 2k` for `x^n − 1`
-    // and `m = 2k + 1` for `x^n + 1`.
-    let angles: Vec<i64> = if minus {
-        (0..n).map(|k| 2 * k).collect()
-    } else {
-        (0..n).map(|k| 2 * k + 1).collect()
-    };
 
     // Denominator derivative coefficients (low-to-high) for the residues.
     let denom: Vec<f64> = (0..=degree).map(|i| factor.coeff(i).to_f64()).collect();
@@ -801,13 +785,13 @@ fn exact_root_of_unity_term(coefficients: &[Rat], factor: &Poly, variable: &Node
     let variable: Node = Node::clone(variable);
 
     let mut terms: Vec<Node> = Vec::new();
-    let mut consumed = vec![false; angles.len()];
-    for i in 0..angles.len() {
+    let mut consumed = vec![false; primitive.len()];
+    for i in 0..primitive.len() {
         if consumed[i] {
             continue;
         }
-        let m = angles[i];
-        let theta = std::f64::consts::PI * m as f64 / n as f64;
+        let k = primitive[i];
+        let theta = std::f64::consts::TAU * k as f64 / order as f64;
         let c = theta.cos();
         let s = theta.sin();
         // Real root (`θ = 0` or `θ = π`): a simple linear pole `A/(x − r)`.
@@ -830,13 +814,13 @@ fn exact_root_of_unity_term(coefficients: &[Rat], factor: &Poly, variable: &Node
             }
             continue;
         }
-        // Find the conjugate partner (`θ' = 2π − θ`, i.e. `m' = 2n − m`).
-        let partner_m = 2 * n - m;
-        let Some(partner_index) = angles.iter().position(|&x| x == partner_m) else {
+        // Find the conjugate partner (`θ' = 2π − θ`, i.e. `k' = d − k`).
+        let partner_k = order - k;
+        let Some(partner_index) = primitive.iter().position(|&x| x == partner_k) else {
             return None;
         };
         if consumed[partner_index] {
-            return None;
+            continue;
         }
         consumed[i] = true;
         consumed[partner_index] = true;
@@ -855,8 +839,9 @@ fn exact_root_of_unity_term(coefficients: &[Rat], factor: &Poly, variable: &Node
             continue;
         }
 
-        let cos_node = cos_root_of_unity(m, n);
-        let sin_node = sin_root_of_unity(m, n);
+        // `cos(θ)` and `sin(θ)` as exact nodes: `θ = 2πk/d = π·(2k)/d`.
+        let cos_node = cos_root_of_unity(2 * k, order);
+        let sin_node = sin_root_of_unity(2 * k, order);
 
         // Logarithmic part: `Re(A)·ln(x² − 2cosθ·x + 1)`.
         if a_real.abs() > 1e-12 {
@@ -891,6 +876,66 @@ fn exact_root_of_unity_term(coefficients: &[Rat], factor: &Poly, variable: &Node
         return None;
     }
     Some(helpers::sum(terms))
+}
+
+/// The cyclotomic order `d` of a monic integer factor, i.e. the smallest `d`
+/// with `Φ_d | factor` (equivalently `factor | x^d − 1`). Returns `None` when
+/// the factor is not cyclotomic. Uses exact rational polynomial division so the
+/// test is exact; `d ≤ 2·deg` is a safe bound because `deg = φ(d) ≥ d / (e^γ
+/// ln ln d)` and in practice `d ≤ 2·deg + 2` for all `Φ_d` with `deg ≥ 2`.
+#[cfg(all(feature = "algebraic", feature = "complex"))]
+fn cyclotomic_order(factor: &Poly) -> Option<usize> {
+    let degree = factor.degree()?;
+    if degree == 0 {
+        return None;
+    }
+    // `factor` must be monic with constant term ±1 and integer coefficients.
+    let one = Rat::from_i64(1);
+    if factor.leading()? != one {
+        return None;
+    }
+    let constant = factor.coeff(0);
+    if constant != one && constant != Rat::from_i64(-1) {
+        return None;
+    }
+    for power in 0..=degree {
+        // An integer rational has denominator 1.
+        if factor.coeff(power).parts().1 != 1 {
+            return None;
+        }
+    }
+    // Smallest `d` in `degree..=2*degree + 2` with `factor | x^d − 1`.
+    let limit = 2 * degree + 2;
+    for d in degree..=limit {
+        let xd_minus_one = x_power_minus_one(d);
+        if let Some((_, remainder)) = xd_minus_one.div_rem(factor) {
+            if remainder.is_zero() {
+                return Some(d);
+            }
+        }
+    }
+    None
+}
+
+/// The polynomial `x^d − 1` over the rationals.
+#[cfg(all(feature = "algebraic", feature = "complex"))]
+fn x_power_minus_one(d: usize) -> Poly {
+    let mut coefficients = vec![Rat::from_i64(0); d + 1];
+    coefficients[d] = Rat::from_i64(1);
+    coefficients[0] = Rat::from_i64(-1);
+    Poly::new(coefficients)
+}
+
+/// Greatest common divisor of two positive integers.
+#[cfg(all(feature = "algebraic", feature = "complex"))]
+fn gcd(a: i64, b: i64) -> i64 {
+    let (mut a, mut b) = (a.abs(), b.abs());
+    while b != 0 {
+        let t = b;
+        b = a % b;
+        a = t;
+    }
+    a
 }
 
 /// Numeric integration of `N(x)/D(x)` for a denominator that has no real-surd
