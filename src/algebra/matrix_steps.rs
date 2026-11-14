@@ -3,8 +3,7 @@
 //! The guiding rule is that a [`Solution`] should account for **every stage** of
 //! a computation: either decomposed into elementary steps, or recorded as a
 //! single named step when it cannot sensibly be decomposed.
-//!
-//! * **Elementary row operations** — row echelon form, determinant, inverse —
+//!//! * **Elementary row operations** — row echelon form, determinant, inverse —
 //!   decompose into pivot selection, row swaps, row scaling and row
 //!   replacement, and each of those is recorded.
 //! * **Gram–Schmidt QR** decomposes into normalising a column and
@@ -20,15 +19,78 @@
 //!   step at all.
 //!
 //! These operations are concrete over [`Expr`]: an intermediate matrix is stored
-//! as an [`Expr`] whose tree is a
-//! [`Token::Matrix`][crate::parse::lexer::Token], so it renders and nests like
-//! any other expression.
+//! as an [`Expr`] whose tree is a single matrix token, so it renders and nests
+//! like any other expression.
+//!
+//! They are exposed as methods on `Matrix<Expr>` — [`Matrix::row_reduce_solution`],
+//! [`Matrix::determinant_solution`], [`Matrix::inverse_solution`],
+//! [`Matrix::qr_solution`], [`Matrix::svd_solution`] and
+//! [`Matrix::eigen_solution`] — alongside the plain algorithms on
+//! [`Matrix`]. The plain methods return only the answer; the `*_solution`
+//! methods return a [`Solution`] that also records every step.
 
 use crate::algebra::linear::{Matrix, SquareMatrixFns};
 use crate::numeric::ExactField;
 use crate::structs::expr::Expr;
 use crate::structs::expr::node::Node;
 use crate::structs::solution::{Recorder, Solution, StepRecorder};
+
+/// Step-tracked operations on a [`Matrix`] of expressions.
+impl Matrix<Expr> {
+    /// Row echelon form (reduced when `normalise`), recording each elementary
+    /// row operation.
+    ///
+    /// When `normalise` is set the pivot is also scaled to `1`; elimination
+    /// always divides by the *current* pivot so the target entry becomes
+    /// exactly zero.
+    #[must_use]
+    pub fn row_reduce_solution(&self, normalise: bool) -> Solution {
+        row_reduce_tracked(self, normalise)
+    }
+
+    /// The determinant by Gaussian elimination, recording the steps.
+    ///
+    /// Returns `None` when the matrix is not square.
+    #[must_use]
+    pub fn determinant_solution(&self) -> Option<Solution> {
+        determinant_tracked(self)
+    }
+
+    /// The inverse by Gauss-Jordan elimination of `[A | I]`, recording the
+    /// steps.
+    ///
+    /// Returns `None` when the matrix is not square or not invertible.
+    #[must_use]
+    pub fn inverse_solution(&self) -> Option<Solution> {
+        inverse_tracked(self)
+    }
+
+    /// QR factorisation by Gram–Schmidt, recording the orthogonalisation steps.
+    ///
+    /// Returns `None` when a column is linearly dependent on the earlier ones.
+    #[must_use]
+    pub fn qr_solution(&self) -> Option<Solution> {
+        qr_tracked(self)
+    }
+
+    /// Singular value decomposition, recording the route actually taken.
+    ///
+    /// Returns `None` when [`Matrix::svd`] has no decomposition for these
+    /// entries.
+    #[must_use]
+    pub fn svd_solution(&self) -> Option<Solution> {
+        svd_tracked(self)
+    }
+
+    /// Eigenvalues and eigenvectors, composing the steps that compute them.
+    ///
+    /// Returns `None` when the matrix is not diagonalisable over the
+    /// coefficient type.
+    #[must_use]
+    pub fn eigen_solution(&self) -> Option<Solution> {
+        eigen_tracked(self)
+    }
+}
 
 /// Wrap a matrix as an expression so it can be recorded as a step result.
 #[must_use]
@@ -151,12 +213,9 @@ fn eliminate_row(
 }
 
 /// Row echelon form (reduced when `normalise`), recording each elementary row
-/// operation.
-///
-/// The pivot is always made `1` only when `normalise` is set; elimination always
-/// divides by the *current* pivot so the target entry becomes exactly zero.
+/// operation. See [`Matrix::row_reduce_solution`].
 #[must_use]
-pub fn row_reduce_tracked(matrix: &Matrix<Expr>, normalise: bool) -> Solution {
+fn row_reduce_tracked(matrix: &Matrix<Expr>, normalise: bool) -> Solution {
     let mut work = matrix.clone();
     let mut recorder = StepRecorder::new(
         matrix_expr(matrix),
@@ -208,10 +267,9 @@ pub fn row_reduce_tracked(matrix: &Matrix<Expr>, normalise: bool) -> Solution {
 }
 
 /// The determinant by Gaussian elimination, recording the steps.
-///
-/// Returns `None` when the matrix is not square.
+/// See [`Matrix::determinant_solution`].
 #[must_use]
-pub fn determinant_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
+fn determinant_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
     if matrix.rows() != matrix.columns() {
         return None;
     }
@@ -272,8 +330,9 @@ pub fn determinant_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
 /// sync. The right-hand half of the reduced matrix is the inverse.
 ///
 /// Returns `None` when the matrix is not square or not invertible.
+/// See [`Matrix::inverse_solution`].
 #[must_use]
-pub fn inverse_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
+fn inverse_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
     if matrix.rows() != matrix.columns() {
         return None;
     }
@@ -354,9 +413,9 @@ pub fn inverse_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
 /// (`qⱼ − Σ (qⱼ·qᵢ) qᵢ`) and then normalised; both are recorded. `Q` is built up
 /// column by column, so every step shows the partially built basis. `R` is
 /// `QᵀA`. Returns `None` when a column is linearly dependent on the earlier
-/// ones (a zero norm).
+/// ones (a zero norm). See [`Matrix::qr_solution`].
 #[must_use]
-pub fn qr_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
+fn qr_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
     let (rows, columns) = (matrix.rows(), matrix.columns());
     let mut recorder = StepRecorder::new(matrix_expr(matrix), "QR factorisation (Gram-Schmidt)");
 
@@ -492,8 +551,9 @@ fn dot(left: &[Expr], right: &[Expr]) -> Expr {
 
 /// Singular value decomposition, recording the route actually taken.
 ///
-/// [`SquareMatrixFns::svd`] tries two routes. `Matrix<Expr>` is *not* a floating
-/// type, so the numerical Jacobi route is skipped and the exact route runs:
+/// [`Matrix::svd`][crate::algebra::linear::Matrix::svd] tries two routes.
+/// `Matrix<Expr>` is *not* a floating type, so the numerical Jacobi route is
+/// skipped and the exact route runs:
 ///
 /// 1. form `AᵀA`;
 /// 2. diagonalise it — reusing [`eigen_tracked`], so its characteristic
@@ -507,10 +567,10 @@ fn dot(left: &[Expr], right: &[Expr]) -> Expr {
 /// description; the step result stays a matrix because a `Solution` step holds a
 /// single expression.
 ///
-/// Returns `None` when [`SquareMatrixFns::svd`] has no decomposition for these
-/// entries.
+/// Returns `None` when [`Matrix::svd`][crate::algebra::linear::Matrix::svd] has
+/// no decomposition for these entries. See [`Matrix::svd_solution`].
 #[must_use]
-pub fn svd_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
+fn svd_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
     let decomposition = matrix.svd()?;
     let sigma = decomposition.sigma().clone();
     let left = decomposition.left_singular_vectors().clone();
@@ -594,9 +654,10 @@ fn multiply_matrix(left: &Matrix<Expr>, right: &Matrix<Expr>) -> Matrix<Expr> {
 /// interpolates it numerically, which is not a cofactor expansion a reader would
 /// follow), each shifted matrix `A − λI` is a step, and the null space of each
 /// is itself a row reduction — recorded as a nested sub-solution. Returns `None`
-/// when the matrix is not diagonalisable over the coefficient type.
+/// when the matrix is not diagonalisable over the coefficient type. See
+/// [`Matrix::eigen_solution`].
 #[must_use]
-pub fn eigen_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
+fn eigen_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
     if matrix.rows() != matrix.columns() {
         return None;
     }

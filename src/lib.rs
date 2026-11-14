@@ -21,11 +21,11 @@ macro_rules! calc_step {
 pub mod algebra;
 pub mod calculus;
 pub mod numeric;
-pub mod parse;
 pub mod structs;
+pub(crate) mod parse;
 #[cfg(test)]
 mod tests;
-mod utils;
+pub(crate) mod utils;
 
 /// Create an [`Expr`][crate::structs::expr::Expr] from a string. Takes an optional second argument for independent variable.
 /// # Examples
@@ -45,8 +45,10 @@ mod utils;
 ///
 /// The expression tree is generic over its leaf float type, which defaults to
 /// [`Real`][crate::numeric::Real]. To build an expression of a *different* float
-/// type, supply the type after a `;`. The string is parsed as [`Real`] and then
-/// re-typed into `T`:
+/// type, supply the type after a `;`. The string is then parsed directly into
+/// that type: numeric literals are converted through
+/// [`FloatType::parse_decimal`][crate::numeric::FloatType::parse_decimal], so
+/// there is no `Real` round-trip.
 ///
 /// ```
 /// use rust_calculus::create_expr;

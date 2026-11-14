@@ -1,10 +1,6 @@
 //! Step tracking for matrix operations.
 
 use crate::algebra::linear::{Matrix, SquareMatrixFns};
-use crate::algebra::matrix_steps::{
-    determinant_tracked, eigen_tracked, inverse_tracked, qr_tracked, row_reduce_tracked,
-    svd_tracked,
-};
 use crate::create_expr;
 use crate::structs::expr::Expr;
 use crate::structs::solution::SolutionStep;
@@ -52,7 +48,7 @@ fn assert_steps_progress(solution: &crate::structs::solution::Solution) {
 fn rref_records_steps() {
     super::setup();
     let source = matrix(&[&["1", "2"], &["3", "4"]]);
-    let solution = row_reduce_tracked(&source, true);
+    let solution = source.row_reduce_solution(true);
 
     assert_eq!(solution.problem_type(), "reduced row echelon form");
     assert_steps_progress(&solution);
@@ -78,7 +74,7 @@ fn rref_records_steps() {
 fn rref_symbolic_records_steps() {
     super::setup();
     let source = matrix(&[&["x", "1"], &["2", "3"]]);
-    let solution = row_reduce_tracked(&source, true);
+    let solution = source.row_reduce_solution(true);
     assert_steps_progress(&solution);
     assert!(!solution.is_empty());
 }
@@ -87,7 +83,7 @@ fn rref_symbolic_records_steps() {
 fn determinant_records_steps_and_matches() {
     super::setup();
     let source = matrix(&[&["1", "2"], &["3", "4"]]);
-    let solution = determinant_tracked(&source).expect("square matrix");
+    let solution = source.determinant_solution().expect("square matrix");
 
     assert_eq!(solution.problem_type(), "determinant");
     // det([[1,2],[3,4]]) = -2
@@ -100,7 +96,7 @@ fn determinant_records_steps_and_matches() {
 fn determinant_of_singular_matrix_is_zero() {
     super::setup();
     let source = matrix(&[&["1", "2"], &["2", "4"]]);
-    let solution = determinant_tracked(&source).expect("square matrix");
+    let solution = source.determinant_solution().expect("square matrix");
     assert_eq!(solution.result().to_string(), "0");
 }
 
@@ -108,7 +104,7 @@ fn determinant_of_singular_matrix_is_zero() {
 fn inverse_records_steps_and_matches() {
     super::setup();
     let source = matrix(&[&["1", "2"], &["3", "4"]]);
-    let solution = inverse_tracked(&source).expect("invertible");
+    let solution = source.inverse_solution().expect("invertible");
 
     assert_eq!(
         solution.problem_type(),
@@ -138,15 +134,15 @@ fn inverse_records_steps_and_matches() {
 fn singular_matrix_has_no_inverse_solution() {
     super::setup();
     let source = matrix(&[&["1", "2"], &["2", "4"]]);
-    assert!(inverse_tracked(&source).is_none());
+    assert!(source.inverse_solution().is_none());
 }
 
 #[test]
 fn non_square_matrices_are_rejected() {
     super::setup();
     let source = matrix(&[&["1", "2", "3"], &["4", "5", "6"]]);
-    assert!(determinant_tracked(&source).is_none());
-    assert!(inverse_tracked(&source).is_none());
+    assert!(source.determinant_solution().is_none());
+    assert!(source.inverse_solution().is_none());
 }
 
 /// The solution renders as text with its steps, without panicking.
@@ -154,7 +150,7 @@ fn non_square_matrices_are_rejected() {
 fn solution_displays_with_steps() {
     super::setup();
     let source = matrix(&[&["1", "2"], &["3", "4"]]);
-    let text = row_reduce_tracked(&source, true).to_string();
+    let text = source.row_reduce_solution(true).to_string();
     assert!(text.contains("reduced row echelon form"), "got {text}");
     assert!(text.contains("row"), "got {text}");
 }
@@ -165,7 +161,7 @@ fn solution_displays_with_steps() {
 fn qr_records_elementary_steps() {
     super::setup();
     let source = matrix(&[&["1", "1"], &["1", "0"]]);
-    let solution = qr_tracked(&source).expect("columns are independent");
+    let solution = source.qr_solution().expect("columns are independent");
     assert_eq!(solution.problem_type(), "QR factorisation (Gram-Schmidt)");
     let names: Vec<&str> = solution
         .steps()
@@ -212,7 +208,7 @@ fn qr_records_elementary_steps() {
 fn qr_rejects_dependent_columns() {
     super::setup();
     let source = matrix(&[&["1", "2"], &["2", "4"]]);
-    assert!(qr_tracked(&source).is_none());
+    assert!(source.qr_solution().is_none());
 }
 
 /// The SVD is recorded through the route that `Matrix<Expr>` actually takes —
@@ -224,7 +220,9 @@ fn qr_rejects_dependent_columns() {
 fn svd_records_the_exact_route() {
     super::setup();
     let source = matrix(&[&["1", "0"], &["0", "1"]]);
-    let solution = svd_tracked(&source).expect("the identity decomposes exactly");
+    let solution = source
+        .svd_solution()
+        .expect("the identity decomposes exactly");
 
     assert_eq!(solution.problem_type(), "singular value decomposition");
 
@@ -286,18 +284,19 @@ fn svd_agrees_with_untracked() {
     ] {
         assert_eq!(
             source.svd().is_some(),
-            svd_tracked(&source).is_some(),
-            "svd and svd_tracked disagree"
+            source.svd_solution().is_some(),
+            "svd and svd_solution disagree"
         );
     }
 }
 
-/// Known limitation: `diagonalize()`/`svd()` on `Matrix<Expr>` currently return
-/// `None` even for numerically trivial inputs like the identity.
+/// `diagonalize()`/`svd()` on `Matrix<Expr>` succeed for numerically
+/// determined matrices, where entries are zero numerically even if they are not
+/// the literal zero node.
 ///
-/// Fixing this needs `Expr` to decide "is this entry exactly zero?" numerically
-/// rather than structurally; `ExactField::is_zero_value` now does that, and the
-/// elimination routines use it.
+/// The elimination routines decide zero-ness with
+/// `ExactField::is_zero_value`, which simplifies and evaluates rather than
+/// comparing structurally.
 #[test]
 fn symbolic_diagonalization_of_the_identity() {
     super::setup();
@@ -313,7 +312,7 @@ fn symbolic_diagonalization_of_the_identity() {
     // Its SVD should now be available too.
     assert!(identity.svd().is_some(), "identity SVD should succeed");
     assert!(
-        svd_tracked(&identity).is_some(),
+        identity.svd_solution().is_some(),
         "tracked SVD should succeed"
     );
 }
@@ -334,7 +333,7 @@ fn eigen_composes_shift_and_null_space_steps() {
     super::setup();
     // A diagonal matrix has clean eigenvalues, so the steps must appear.
     let source = matrix(&[&["1", "0"], &["0", "2"]]);
-    let Some(solution) = eigen_tracked(&source) else {
+    let Some(solution) = source.eigen_solution() else {
         panic!("a diagonal matrix is diagonalisable");
     };
     assert_eq!(solution.problem_type(), "eigen-decomposition");

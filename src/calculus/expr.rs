@@ -565,7 +565,7 @@ pub(crate) fn split_constant(node: &Node) -> Split {
 
 /// Apply `op` to two constant factors, folding them when possible.
 ///
-/// Unlike the old node-level helper this does not `unwrap` the evaluation: a
+/// Unlike the node-level builder this does not `unwrap` the evaluation: a
 /// constant that cannot be folded numerically (such as `ln(2)`) is kept as a
 /// product instead of panicking.
 fn combine_constants(op: &Op, left: Node, right: Node) -> Node {

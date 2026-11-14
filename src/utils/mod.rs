@@ -1,10 +1,10 @@
-pub mod float_math;
-pub mod fmt;
+pub(crate) mod float_math;
+pub(crate) mod fmt;
 
 /// The greatest common divisor of two unsigned integers.
 ///
-/// Shared by the `Float` helpers and the exact rational arithmetic in
-/// [`crate::algebra`], which would otherwise each carry their own copy.
+/// Both the `Float` helpers and the exact rational arithmetic in
+/// [`crate::algebra`] need this, so it is defined once here.
 pub(crate) fn gcd_u128(mut left: u128, mut right: u128) -> u128 {
     while right != 0 {
         let remainder = left % right;

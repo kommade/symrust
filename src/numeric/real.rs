@@ -222,7 +222,7 @@ impl Real {
     }
 
     /// The greatest common divisor and the reduced `(self, other)` pair, when
-    /// both are integers. Mirrors the old `FloatMath::gcd`.
+    /// both are integers. The same algorithm as `FloatMath::gcd`.
     #[must_use]
     pub fn gcd(&self, other: &Self) -> (u64, i64, i64) {
         if !self.is_integer() || !other.is_integer() {

@@ -1,6 +1,7 @@
 use std::{error::Error, fmt::Display};
 
 use crate::algebra::linear::Matrix;
+use crate::algebra::linear::Vector;
 use crate::numeric::{FloatType, Real};
 use crate::structs::expr::Expr;
 
@@ -14,8 +15,8 @@ use crate::structs::expr::Expr;
 /// Σ_{Z : p(Z) = 0}  N(Z) · ln|x − Z| / p'(Z)
 /// ```
 ///
-/// This leaf node renders exactly that sum, so the answer no longer has to be
-/// expanded into decimal `atan`/`cos` terms. The polynomial coefficients are
+/// This leaf node renders exactly that sum, so the answer is given in closed
+/// form instead of being expanded into decimal `atan`/`cos` terms. The polynomial coefficients are
 /// stored exactly (as [`Rat`]s), so the display is exact and the value can also
 /// be evaluated numerically for verification.
 #[derive(Debug, Clone)]
@@ -215,6 +216,12 @@ pub enum Token<T = Real> {
     /// a leaf like [`RootSumData`]: concrete rather than generic over `T`, since
     /// a matrix is not itself a scalar of the tree's leaf type.
     Matrix(Matrix<Expr>),
+    /// A vector literal, `[a, b, c]`.
+    ///
+    /// A vector is a distinct value, not a one-column matrix, and its entries
+    /// are expressions like a matrix's. It is concrete rather than generic over
+    /// `T` for the same reason [`Token::Matrix`] is.
+    Vector(Vector<Expr>),
     /// The opening `[` of a matrix literal.
     LBracket,
     /// The closing `]` of a matrix literal.
@@ -236,6 +243,7 @@ impl<T: FloatType + Display> Display for Token<T> {
             Self::Indp(c) | Self::Var(c) => write!(f, "{c}"),
             Self::RootSum(data) => write!(f, "{data}"),
             Self::Matrix(matrix) => write!(f, "{matrix}"),
+            Self::Vector(vector) => write!(f, "{vector}"),
             Self::LBracket => write!(f, "["),
             Self::RBracket => write!(f, "]"),
             Self::Comma => write!(f, ","),
@@ -268,6 +276,10 @@ impl<T> Token<T> {
     pub fn from_matrix(matrix: Matrix<Expr>) -> Self {
         Self::Matrix(matrix)
     }
+    /// A vector literal token, with [`Expr`] entries.
+    pub fn from_vector(vector: Vector<Expr>) -> Self {
+        Self::Vector(vector)
+    }
     pub const fn is_implicitly_mul(&self) -> bool {
         matches!(
             self,
@@ -279,12 +291,14 @@ impl<T> Token<T> {
                 | Self::Function(_)
                 | Self::RootSum(_)
                 | Self::Matrix(_)
+                | Self::Vector(_)
                 | Self::LPar
         )
     }
 }
 
-#[derive(Debug)]
+/// Why a source string could not be tokenised.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LexError {
     UnexpectedEOF(String),
     ParseError(String),

@@ -17,6 +17,8 @@ mod test_matrixable_sqrt;
 mod test_symbolic_matrix;
 mod test_matrix_literal;
 mod test_matrix_steps;
+mod test_expr_matrix;
+mod test_expr_vector;
 mod test_symbolic_eigen;
 mod test_eigen;
 mod test_vector;

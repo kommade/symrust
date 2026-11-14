@@ -13,10 +13,10 @@
 //!   which records every step the computation took.
 //!
 //! Both forms share a single implementation. Internally the work is done by a
-//! function that writes its progress into a [`Recorder`]: the answer-only entry
-//! point passes [`NoSteps`], a zero-sized type whose methods do nothing, so the
-//! optimizer removes the step machinery entirely and the answer-only path costs
-//! exactly what it did before step tracking existed.
+//! function that writes its progress into a recorder: the answer-only entry
+//! point passes a zero-sized recorder whose methods do nothing, so the
+//! optimizer removes the step machinery entirely and the answer-only path pays
+//! no runtime cost for step tracking.
 
 use std::fmt::{self, Display};
 
@@ -206,7 +206,9 @@ impl Display for ElementaryStep {
 /// The derivative works at the [`Node`][crate::structs::expr::node::Node] level
 /// and the integrator at the [`Expr`] level; this trait lets
 /// [`calc_step!`][crate::calc_step] accept either.
-pub trait IntoStepResult {
+///
+/// This is an implementation detail of the step-recording machinery.
+pub(crate) trait IntoStepResult {
     /// The expression to record for this step.
     fn into_step_result(self) -> Expr;
 }
@@ -231,7 +233,9 @@ impl IntoStepResult for crate::structs::expr::node::Node {
 ///
 /// The description and result are closures so a recording implementation can
 /// store them while a no-op implementation discards them without allocating.
-pub trait Recorder {
+///
+/// This is an implementation detail of the step-recording machinery.
+pub(crate) trait Recorder {
     /// Record an elementary step. `step_name` names the rule, `description`
     /// explains it and `result` is the expression the rule produced.
     fn record(
@@ -261,7 +265,7 @@ pub trait Recorder {
 /// against `Recorder` compiles to the same code when it is passed `NoSteps` as
 /// it would without the step machinery at all.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct NoSteps;
+pub(crate) struct NoSteps;
 
 impl Recorder for NoSteps {
     #[inline]
@@ -284,7 +288,7 @@ impl Recorder for NoSteps {
 
 /// Collects steps into a [`Solution`].
 #[derive(Debug, Clone)]
-pub struct StepRecorder {
+pub(crate) struct StepRecorder {
     solution: Solution,
 }
 
@@ -328,55 +332,3 @@ impl Recorder for StepRecorder {
     }
 }
 
-/// The recorder used by the calculus routines: either a [`StepRecorder`] that
-/// collects steps or [`NoSteps`], chosen once by the entry point.
-///
-/// The calculus code is generic over [`Recorder`], so passing `NoSteps` is the
-/// answer-only path and passing a [`StepRecorder`] is the tracked path.
-/// `Steps` is a convenience for code that wants to hold both possibilities in
-/// one value.
-pub enum Steps<'a> {
-    /// Steps are being recorded into this recorder.
-    On(&'a mut StepRecorder),
-    /// Steps are discarded.
-    Off(NoSteps),
-}
-
-impl Steps<'_> {
-    /// Whether steps are being recorded.
-    #[must_use]
-    pub fn is_recording(&self) -> bool {
-        match self {
-            Self::On(recorder) => recorder.is_recording(),
-            Self::Off(no_steps) => no_steps.is_recording(),
-        }
-    }
-}
-
-impl Recorder for Steps<'_> {
-    #[inline]
-    fn record(
-        &mut self,
-        step_name: &str,
-        description: impl FnOnce() -> String,
-        result: impl FnOnce() -> Expr,
-    ) {
-        match self {
-            Self::On(recorder) => recorder.record(step_name, description, result),
-            Self::Off(no_steps) => no_steps.record(step_name, description, result),
-        }
-    }
-
-    #[inline]
-    fn record_sub_solution(&mut self, solution: impl FnOnce() -> Solution) {
-        match self {
-            Self::On(recorder) => recorder.record_sub_solution(solution),
-            Self::Off(no_steps) => no_steps.record_sub_solution(solution),
-        }
-    }
-
-    #[inline]
-    fn is_recording(&self) -> bool {
-        matches!(self, Self::On(_))
-    }
-}

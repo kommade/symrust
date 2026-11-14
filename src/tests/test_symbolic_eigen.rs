@@ -2,7 +2,6 @@
 //! radical roots.
 
 use crate::algebra::linear::Matrix;
-use crate::algebra::matrix_steps::eigen_tracked;
 use crate::algebra::symbolic_eigen::{characteristic_polynomial, eigenvalues, roots};
 use crate::create_expr;
 use crate::structs::expr::Expr;
@@ -164,10 +163,10 @@ fn sqrt_of_a_non_square_stays() {
 }
 
 #[test]
-fn eigen_tracked_uses_symbolic_roots() {
+fn eigen_solution_uses_symbolic_roots() {
     super::setup();
     let source = matrix(&[&["1", "0"], &["0", "x"]]);
-    let solution = eigen_tracked(&source).expect("symbolic eigenvalues available");
+    let solution = source.eigen_solution().expect("symbolic eigenvalues available");
 
     // The characteristic polynomial step must mention λ and the roots.
     let text = solution.to_string();
@@ -176,9 +175,9 @@ fn eigen_tracked_uses_symbolic_roots() {
 }
 
 #[test]
-fn eigen_tracked_still_works_for_numeric_matrices() {
+fn eigen_solution_still_works_for_numeric_matrices() {
     super::setup();
     let source = matrix(&[&["1", "0"], &["0", "2"]]);
-    let solution = eigen_tracked(&source).expect("numeric path");
+    let solution = source.eigen_solution().expect("numeric path");
     assert_eq!(solution.problem_type(), "eigen-decomposition");
 }

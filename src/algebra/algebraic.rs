@@ -1,4 +1,4 @@
-//! Exact real algebraic numbers (Option B), enabled by the `algebraic` feature.
+//! Exact real algebraic numbers, enabled by the `algebraic` feature.
 //!
 //! A real algebraic number is a real root of a polynomial with rational
 //! coefficients. Representing one exactly only needs two things:

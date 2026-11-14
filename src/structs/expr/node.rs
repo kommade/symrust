@@ -7,28 +7,32 @@ use crate::{
     utils::fmt::unnecessary_brackets,
 };
 
-#[derive(Clone, Copy)]
+/// Whether a distribution multiplies or divides.
+///
+/// This is a parameter of [`NodeFunctions::distribute_constant`] and
+/// [`NodeFunctions::distribute_expr`], so it is part of the public API.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MulType {
     OpMul,
     OpDiv,
 }
 
 #[derive(Clone, Debug)]
-pub struct OpNode<T = Real> {
+pub(crate) struct OpNode<T = Real> {
     pub token: Token<T>,
     pub left: Node<T>,
     pub right: Node<T>,
 }
 
 #[derive(Clone, Debug)]
-pub enum NodeValue<T = Real> {
+pub(crate) enum NodeValue<T = Real> {
     Operand(Token<T>),
     Operator(OpNode<T>),
     Empty,
 }
 
 #[derive(Clone, Debug)]
-pub struct NodeInner<T = Real> {
+pub(crate) struct NodeInner<T = Real> {
     pub(crate) value: NodeValue<T>,
     pub(crate) has_indp: bool,
     pub(crate) has_const: bool,
@@ -97,7 +101,7 @@ impl<T: FloatType + Display> Node<T> {
     pub fn independent(name: char) -> Self {
         NodeInner::operand(Token::Indp(name)).wrap()
     }
-    /// A formal `Σ_{Z : p(Z) = 0}` root-sum leaf (see [`RootSumData`]).
+    /// A formal `Σ_{Z : p(Z) = 0}` root-sum leaf.
     #[must_use]
     pub fn root_sum(data: crate::parse::lexer::RootSumData) -> Self {
         NodeInner::operand(Token::RootSum(data)).wrap()
@@ -120,11 +124,18 @@ impl<T: FloatType + Display> Node<T> {
     }
     /// A matrix-literal leaf, e.g. `[[1, 2], [3, 4]]`.
     ///
-    /// Matrices are stored as [`Token::Matrix`] operands, which is what lets a
+    /// Matrices are stored as a single matrix token, which is what lets a
     /// matrix participate in an expression tree (and be a step result).
     #[must_use]
     pub fn matrix(matrix: crate::algebra::linear::Matrix<crate::structs::expr::Expr>) -> Self {
         NodeInner::operand(Token::Matrix(matrix)).wrap()
+    }
+    /// A vector-literal leaf, e.g. `[1, 2, 3]`.
+    ///
+    /// A vector is its own kind of value, distinct from a one-column matrix.
+    #[must_use]
+    pub fn vector(vector: crate::algebra::linear::Vector<crate::structs::expr::Expr>) -> Self {
+        NodeInner::operand(Token::Vector(vector)).wrap()
     }
     /// A binary operation node, e.g. `left + right`.
     #[must_use]
@@ -157,9 +168,9 @@ impl<T: FloatType + Display> Node<T> {
     /// Convert a `Node<T>` of any leaf type into a `Node<Real>`.
     ///
     /// The inverse of [`from_real`](Self::from_real): numeric leaves are carried
-    /// across through [`FloatType::to_float`], and the symbolic structure is
-    /// preserved exactly. Used when a matrix literal, lexed at the caller's leaf
-    /// type, is stored as a concrete `Expr` (that is, `Expr<Real>`).
+    /// across the float bridge, and the symbolic structure is preserved
+    /// exactly. Used when a matrix literal, lexed at the caller's leaf type, is
+    /// stored as a concrete `Expr` (that is, `Expr<Real>`).
     #[must_use]
     pub fn from_typed(source: &Node<T>) -> Node<Real> {        fn convert_token<T: FloatType + Display>(token: &Token<T>) -> Token<Real> {
             use crate::numeric::FloatBridge;
@@ -187,6 +198,7 @@ impl<T: FloatType + Display> Node<T> {
                 Token::Var(c) => Token::Var(*c),
                 Token::RootSum(data) => Token::RootSum(data.clone()),
                 Token::Matrix(matrix) => Token::Matrix(matrix.clone()),
+                Token::Vector(vector) => Token::Vector(vector.clone()),
                 Token::LBracket => Token::LBracket,
                 Token::RBracket => Token::RBracket,
                 Token::Comma => Token::Comma,
@@ -216,8 +228,8 @@ fn from_typed_node<T: FloatType + Display>(source: &Node<T>) -> Node<Real> {
 impl<T: FloatType + Display> Node<T> {
     /// Convert a concrete `Node<Real>` (as produced by the parser) into a
     /// `Node<T>` by re-typing every float leaf (`Token::Float` and
-    /// `Func::Log`) through [`FloatBridge`]. Symbolic structure is preserved
-    /// exactly; only the numeric leaves change type.
+    /// `Func::Log`). Symbolic structure is preserved exactly; only the numeric
+    /// leaves change type.
     ///
     /// This is what lets [`Expr::<T>::parse`][crate::structs::expr::Expr::parse]
     /// build a tree of a caller-chosen number type from a string.
@@ -250,6 +262,7 @@ impl<T: FloatType + Display> Node<T> {
                 Token::Var(c) => Token::Var(*c),
                 Token::RootSum(data) => Token::RootSum(data.clone()),
                 Token::Matrix(matrix) => Token::Matrix(matrix.clone()),
+                Token::Vector(vector) => Token::Vector(vector.clone()),
                 Token::LBracket => Token::LBracket,
                 Token::RBracket => Token::RBracket,
                 Token::Comma => Token::Comma,
@@ -271,7 +284,7 @@ impl<T: FloatType + Display> Node<T> {
 }
 
 #[derive(Debug)]
-pub enum NodeError {
+pub(crate) enum NodeError {
     NotOperator,
     WrongToken(String),
 }
@@ -423,6 +436,22 @@ fn matrix_to_latex(matrix: &crate::algebra::linear::Matrix<Expr>) -> String {
     format!(
         r"\begin{{pmatrix}} {} \end{{pmatrix}}",
         rows.join(r" \\ ")
+    )
+}
+
+/// Render a vector of expressions as a LaTeX column vector.
+///
+/// A vector is its own kind of value, so it renders as a column rather than as
+/// a one-column `pmatrix`.
+fn vector_to_latex(vector: &crate::algebra::linear::Vector<Expr>) -> String {
+    let entries: Vec<String> = vector
+        .as_slice()
+        .iter()
+        .map(|entry| entry.to_latex().unwrap_or_else(|_| entry.to_string()))
+        .collect();
+    format!(
+        r"\begin{{pmatrix}} {} \end{{pmatrix}}",
+        entries.join(r" \\ ")
     )
 }
 
@@ -603,6 +632,7 @@ impl NodeInner {
                     ),
                 )),
                 Token::Matrix(matrix) => Ok(matrix_to_latex(matrix)),
+                Token::Vector(vector) => Ok(vector_to_latex(vector)),
                 _ => Err(NodeError::WrongToken("operand".to_string())),
             },
             NodeValue::Operator(op_node) => {

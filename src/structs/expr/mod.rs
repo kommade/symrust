@@ -5,11 +5,14 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 use crate::numeric::{ExactField, FloatType, Real};
 use crate::parse::{lexer::Lexer, parser::Parser};
 
+pub mod error;
 pub mod node;
 pub mod evaluate;
 pub mod limit;
+mod matrix;
 
 use node::{MulType, Node, NodeInner, NodeError, NodeFunctions, NodeOperations, NodeValue, OpNode};
+pub use error::ExprError;
 pub use evaluate::{Evaluable, Evaluated};
 pub use limit::Limit;
 
@@ -39,9 +42,8 @@ impl<T: Clone> Clone for Expr<T> {
 /// Expressions compare equal when their trees render identically.
 ///
 /// Structural equality is not meaningful for the shared, mutable node tree, so
-/// equality follows the same rule as [`NodeInner`]'s `PartialEq`: the LaTeX
-/// rendering must match. This is what makes [`Expr`] usable as a matrix
-/// coefficient and in the linear-algebra code.
+/// equality follows the same rule as the node's own `PartialEq`: the LaTeX
+/// rendering must match.
 impl PartialEq for Expr<Real> {
     fn eq(&self, other: &Self) -> bool {
         self.tree.inner.borrow().eq(&*other.tree.inner.borrow())
@@ -145,7 +147,7 @@ impl Expr<Real> {
     /// Create a new expression from a string. Takes an optional second argument for independent variable.
     /// `None` can be passed as the second argument to use the default independent variable `x`.
     /// Prefer using the macro [`create_expr!`][crate::create_expr] for a more concise syntax.
-    pub fn new(str: String, indp_var: Option<char>) -> Result<Self, Box<dyn Error>> {
+    pub fn new(str: String, indp_var: Option<char>) -> Result<Self, ExprError> {
         let mut lexer = Lexer::new(str, indp_var);
         let lexed = lexer.lex()?;
         let mut parser = Parser::new(lexed);
@@ -165,7 +167,7 @@ impl<T: FloatType + Display> Expr<T> {
     /// [`Expr::new`]. This is the constructor the [`create_expr!`][crate::create_expr]
     /// macro calls when a number type is supplied explicitly, e.g.
     /// `create_expr!("2x^2"; f64)`.
-    pub fn parse(str: String, indp_var: Option<char>) -> Result<Self, Box<dyn Error>> {
+    pub fn parse(str: String, indp_var: Option<char>) -> Result<Self, ExprError> {
         let mut lexer = Lexer::<T>::new(str, indp_var);
         let lexed = lexer.lex()?;
         let mut parser = Parser::<T>::new(lexed);
@@ -219,8 +221,8 @@ impl Expr<Real> {
     }
     /// Returns the LaTeX representation of the expression.
     #[must_use]
-    pub fn to_latex(&self) -> Result<String, NodeError> {
-        self.tree.inner.borrow().to_latex()
+    pub fn to_latex(&self) -> Result<String, ExprError> {
+        Ok(self.tree.inner.borrow().to_latex()?)
     }
 }
 

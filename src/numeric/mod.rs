@@ -21,16 +21,16 @@
 //!   number here supports.
 //! * [`ExactField`] is what the linear-algebra module needs: a `Clone`,
 //!   comparable, invertible field element with a multiplicative identity and a
-//!   (best-effort) square root. This is what [`Matrixable`] really is.
+//!   (best-effort) square root.
 //! * [`ExpressionScalar`] is what the evaluator needs: a scalar closed under the
 //!   calculus language (powers, trigonometric and logarithmic functions, the
 //!   constants `π` and `e`). This is the `arpfloat`-free part of [`Evaluable`].
 //! * [`FloatBridge`] isolates the one thing that must talk to the float engine
 //!   ([`arpfloat::Float`]), so the *math* traits never mention it directly.
 //!
-//! [`Evaluable`] and [`Matrixable`] are kept as the public names (as blanket
-//! supertraits over the new layers) so existing `where T: Evaluable` /
-//! `where T: Matrixable` bounds keep working unchanged.
+//! [`Evaluable`] and [`Matrixable`] are blanket supertraits, so a `where T:
+//! Evaluable` or `where T: Matrixable` bound can be written in place of the
+//! finer-grained one above.
 
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
@@ -228,8 +228,8 @@ pub trait ExpressionScalar: NumCore + FloatBridge {
 }
 
 /// A coefficient type for the exact linear algebra in
-/// [`crate::algebra::linear`]. This is a thin alias for [`ExactField`], kept as
-/// the public name the matrix API is written against.
+/// [`crate::algebra::linear`]. This is a thin alias for [`ExactField`], so any
+/// exact field element can be a matrix entry.
 pub trait Matrixable: ExactField {}
 
 impl<T: ExactField> Matrixable for T {}

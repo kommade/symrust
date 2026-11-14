@@ -5,7 +5,8 @@ use crate::structs::expr::node::{Node, NodeInner};
 
 use super::lexer::{Op, Token};
 
-#[derive(Debug)]
+/// Why a source string could not be turned into an expression.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
     MismatchedParentheses,
     InvalidExpression(String),
@@ -55,8 +56,14 @@ fn collapse_matrix_literals<T: FloatType + Display>(
             return Err(ParseError::MismatchedParentheses);
         };
         let inner = &tokens[index + 1..end];
-        let matrix = parse_matrix_rows(inner)?;
-        result.push(Token::Matrix(matrix));
+        // A group of nested `[ ... ]` rows is a matrix; a flat list of values is
+        // a vector.
+        let token = if inner.iter().any(|token| matches!(token, Token::LBracket)) {
+            Token::Matrix(parse_matrix_rows(inner)?)
+        } else {
+            Token::Vector(parse_vector_entries(inner)?)
+        };
+        result.push(token);
         index = end + 1;
     }
     Ok(result)
@@ -122,6 +129,24 @@ fn parse_matrix_rows<T: FloatType + Display>(
     debug_assert_eq!(values.len(), row_count);
     debug_assert!(values.iter().all(|row| row.len() == column_count));
     Ok(Matrix::from_rows(values))
+}
+
+/// Parse the inside of a `[a, b, c]` literal into a `Vector<Expr>`.
+fn parse_vector_entries<T: FloatType + Display>(
+    tokens: &[Token<T>],
+) -> Result<crate::algebra::linear::Vector<crate::structs::expr::Expr>, ParseError> {
+    use crate::algebra::linear::Vector;
+
+    let entries: Vec<crate::structs::expr::Expr> = split_on_commas(tokens)
+        .into_iter()
+        .map(parse_entry)
+        .collect::<Result<_, _>>()?;
+    if entries.is_empty() {
+        return Err(ParseError::InvalidExpression(
+            "a vector needs at least one entry".to_string(),
+        ));
+    }
+    Ok(Vector::from_vec(entries))
 }
 
 /// Split a token slice on top-level commas.
@@ -213,6 +238,7 @@ impl<T: FloatType + Display> Parser<T> {
                 | Token::Var(_)
                 | Token::RootSum(_)
                 | Token::Matrix(_)
+                | Token::Vector(_)
                 | Token::Indp(_) => {
                     output.push(token);
                     continue;
@@ -278,6 +304,7 @@ impl<T: FloatType + Display> Parser<T> {
                 | Token::Var(_)
                 | Token::RootSum(_)
                 | Token::Matrix(_)
+                | Token::Vector(_)
                 | Token::Indp(_) => {
                     tree.push(NodeInner::operand(token.clone()).wrap());
                 }

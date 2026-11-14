@@ -1,11 +1,11 @@
-//! Evaluate an [`Expr`][crate::structs::expr::Expr] at concrete values.
+//! Evaluate an [`Expr`] at concrete values.
 //!
 //! The public entry points are [`Expr::evaluate`][crate::structs::expr::Expr::evaluate]
 //! and [`Expr::evaluate_with`][crate::structs::expr::Expr::evaluate_with]. Both
 //! work over *any* numeric type `T` that implements [`Evaluable`]: a type that
-//! can represent every operation and function an expression may contain
-//! (the ones listed in [`Token`][crate::parse::lexer::Token]) and that knows how
-//! to mix in plain `i64` and [`Float`] values.
+//! can represent every operation and function an expression may contain (the
+//! ones listed in the `Token` enum) and that knows how to mix in plain `i64`
+//! and `Float` values.
 //!
 //! The result is an [`Evaluated`]: either the fully-collapsed value `T` (when
 //! nothing but the substituted variables were left) or a symbolic expression
@@ -20,8 +20,10 @@ use crate::parse::lexer::{Const, Func, Op, Token};
 use crate::structs::expr::{Expr, Node, NodeInner, node::NodeValue};
 use crate::utils::float_math::FloatMath;
 
-/// Re-export of the evaluator's scalar bound, now defined in
-/// [`crate::numeric`] as a blanket over [`ExpressionScalar`].
+/// The scalar bound the evaluator works over.
+///
+/// Defined in [`crate::numeric`] as a blanket over [`ExpressionScalar`];
+/// re-exported here next to the evaluator that uses it.
 pub use crate::numeric::Evaluable;
 
 /// The outcome of [evaluating][crate::structs::expr::Expr::evaluate] an

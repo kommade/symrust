@@ -10,8 +10,11 @@ thread_local! {
     static ALGEBRAIC_NEEDED: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Whether, since the last reset, an integral was blocked only by the disabled
-/// `algebraic` feature.
+/// Whether the most recent integration attempt was blocked only by the
+/// disabled `algebraic` feature.
+///
+/// The flag is cleared before each attempt, so this describes that attempt
+/// alone.
 pub(super) fn algebraic_was_needed() -> bool {
     ALGEBRAIC_NEEDED.with(|flag| flag.get())
 }

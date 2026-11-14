@@ -93,9 +93,7 @@ fn expr_simplify() {
 }
 
 /// `simplify` must collapse `sqrt(a)^n` for even `n` and parse `a^-n` as
-/// `a^(-n)`. Both were broken: `2^-2` used to parse as `(2^0) - 2 = -1`, and
-/// the surd-power rules were missing, so exact Gram–Schmidt steps kept forms
-/// like `sqrt(2) ^ -4`.
+/// `a^(-n)` rather than as a subtraction.
 #[test]
 fn surd_powers_collapse() {
     super::setup();
