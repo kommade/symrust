@@ -559,6 +559,13 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
         // Integrate sums term by term.
         if let Some(terms) = helpers::sum_terms(node) {
             let term_count = terms.len();
+            // Record the split before the sub-integrals run, so the solution
+            // reads as a derivation: the decision comes first, the work it
+            // causes follows. Recording afterwards printed the children's
+            // answers above the step that asked for them.
+            self.step_without_result("linearity", || {
+                format!("Split {} into {term_count} terms", describe(node))
+            });
             let mut total = zero();
             for (negated, term) in terms {
                 let mut integral = self.integrate(&term)?;
@@ -567,11 +574,6 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
                 }
                 total = helpers::add(total, integral);
             }
-            self.step(
-                "linearity",
-                || format!("Split {} into {term_count} terms", describe(node)),
-                || total.clone(),
-            );
             return Ok(total);
         }
         // Cancel common factors so that the techniques below see a clean
@@ -590,15 +592,17 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
                 if helpers::is_one(&dependent) {
                     return Ok(helpers::multiply_by(self.variable_node(), value));
                 }
-                let integral = self.integrate(&dependent)?;
-                let scaled = helpers::scale(integral.clone(), value.clone());
+                // Decide before integrating the dependent part, so the reader
+                // sees the factor being pulled out and then the smaller
+                // integral it leaves.
                 let description = format!(
-                    "{} => constant = {}, dependent = {}",
-                    describe_signed(node),
+                    "pull the constant {} out of {}",
                     describe_number(&value),
-                    describe_signed(&dependent)
+                    describe_signed(node)
                 );
-                self.step("constant multiple", || description, || scaled.clone());
+                self.step_without_result("constant multiple", || description);
+                let integral = self.integrate(&dependent)?;
+                let scaled = helpers::scale(integral, value.clone());
                 return Ok(scaled);
             }
         }
@@ -1179,8 +1183,12 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
     }
 
     fn try_by_parts(&mut self, node: &Node) -> Result<Option<Node>, IntegrationError> {
-        let result = self.integrate_by_parts(node)?;
-        Ok(self.record_technique("integration by parts", node, result))
+        // `integrate_by_parts` records its own steps — the choice of `u` and
+        // `dv`, then the assembled `u v` term — before running the
+        // sub-integrals they cause. Wrapping it in `record_technique` would add
+        // a second, later step for the same rule and put the parent below the
+        // children it produced.
+        self.integrate_by_parts(node)
     }
 
     fn integrate_by_parts(&mut self, node: &Node) -> Result<Option<Node>, IntegrationError> {
@@ -1219,6 +1227,13 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
                 .map(|(_, factor)| factor.clone())
                 .collect();
             let rest = helpers::product_of(&rest);
+            // Record the choice of `u` and `dv` first: that decision is what
+            // drives the two sub-integrals below, so it must come before them.
+            let candidate_text = describe_signed(&candidate);
+            let rest_text = describe_signed(&rest);
+            self.step_without_result("integration by parts", || {
+                format!("u = {candidate_text}, dv = {rest_text} dx")
+            });
             let v = match self.integrate(&rest) {
                 Ok(value) => value,
                 Err(IntegrationError::Timeout) => return Err(IntegrationError::Timeout),
@@ -1230,21 +1245,12 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
                 continue;
             };
             let du = helpers::simplify_deep(&du);
-            // Record the assembled formula before solving the remaining
-            // integral so the solution reads top down.
             let uv = helpers::mul(candidate.clone(), v.clone());
             let inner_integrand = helpers::mul(v.clone(), du.clone());
-            let du_text = if helpers::is_one(&du) {
-                String::from("dx")
-            } else {
-                format!("{} dx", describe_signed(&du))
-            };
-            let candidate_text = describe_signed(&candidate);
-            self.step(
-                "integration by parts",
-                || format!("u = {candidate_text}, du = {du_text}"),
-                || uv.clone(),
-            );
+            // The assembled `uv` term, before the remaining integral is solved.
+            self.step("assemble", || format!("u v = {candidate_text} v"), || {
+                uv.clone()
+            });
             self.parts_depth += 1;
             let inner_result = self.integrate(&inner_integrand);
             self.parts_depth -= 1;
