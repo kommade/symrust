@@ -3,7 +3,10 @@ use std::{cell::RefCell, cmp::Ordering, error::Error, fmt::Display, ops::Neg, rc
 
 
 
-use crate::{math::numeric::{FloatType, Real},
+use crate::{
+    math::algebra::matrix_steps::tidy,
+    math::algebra::rational::Rat,
+    math::numeric::{FloatType, Real},
     math::parse::lexer::{Const, Func, Op, Token},
     math::structs::expr::Expr,
     math::utils::fmt::unnecessary_brackets,
@@ -48,7 +51,115 @@ fn is_atom(rendered: &str) -> bool {
     !rendered.contains([' ', '+', '/'])
 }
 
-pub(crate) fn matrix_to_latex(matrix: &crate::math::algebra::linear::Matrix<Expr>) -> String {    let mut rows = Vec::with_capacity(matrix.rows());
+/// Render a matrix of expressions, pulling a factor shared by every entry out
+/// in front of the brackets.
+///
+/// A step that normalises a column to `[1/5, 2/5, 2/5, 4/5]` reads far better as
+/// `1/5 [1 2 2 4]`. Only a factor that divides *every* entry is taken out, so the
+/// rendering never misrepresents the matrix. Entries that are not exact
+/// rationals (a surd, a symbolic term) leave the matrix printed as it is.
+fn write_matrix_with_factor(
+    matrix: &crate::math::algebra::linear::Matrix<Expr>,
+    f: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    match common_factor(matrix) {
+        Some(factor) => {
+            let divisor = Expr::from_node(factor.clone());
+            // Render the factor through the normal expression printer so a
+            // fractional factor reads as `1 / 5` rather than as a raw tree.
+            write!(f, "{} ", factor.inner.borrow())?;
+            write_matrix_entries(matrix, Some(&divisor), f)
+        }
+        None => write_matrix_entries(matrix, None, f),
+    }
+}
+
+/// Write the matrix entries, each divided by `divisor` when it is given.
+fn write_matrix_entries(
+    matrix: &crate::math::algebra::linear::Matrix<Expr>,
+    divisor: Option<&Expr>,
+    f: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    for row in 0..matrix.rows() {
+        write!(f, "[")?;
+        for column in 0..matrix.columns() {
+            if column > 0 {
+                write!(f, " ")?;
+            }
+            let entry = matrix[row][column].clone();
+            let shown = match divisor {
+                Some(divisor) => tidy(Expr::from_node(
+                    entry.tree().clone().div(divisor.tree().clone()),
+                )),
+                None => entry,
+            };
+            write!(f, "{shown}")?;
+        }
+        writeln!(f, "]")?;
+    }
+    Ok(())
+}
+
+/// A factor that divides every entry of the matrix, if there is a useful one.
+///
+/// Returns `None` when the matrix is all zeros, when any entry is not an exact
+/// rational, or when the only common factor is a unit (`±1`), since writing
+/// `1 [[1 2], [3 4]]` would help nobody.
+fn common_factor(matrix: &crate::math::algebra::linear::Matrix<Expr>) -> Option<Node<Real>> {
+    // Track the running greatest common divisor as an exact fraction.
+    let mut numerator = 0i128;
+    let mut denominator = 1i128;
+    let mut seen = false;
+    for row in 0..matrix.rows() {
+        for column in 0..matrix.columns() {
+            let entry = &matrix[row][column];
+            if entry.has_independent() {
+                return None;
+            }
+            let value = entry.tree().inner.borrow().evaluate()?;
+            let rational = Rat::from_real(&value)?;
+            if rational.is_zero() {
+                continue;
+            }
+            let (num, den) = rational.parts();
+            if seen {
+                // gcd(p/q, r/s) = gcd(p*s, r*q) / (q*s), then reduced.
+                numerator = integer_gcd(numerator * den, num * denominator);
+                denominator = denominator * den;
+                let reduce = integer_gcd(numerator, denominator);
+                numerator /= reduce;
+                denominator /= reduce;
+            } else {
+                numerator = num;
+                denominator = den;
+                seen = true;
+            }
+        }
+    }
+    if !seen {
+        return None;
+    }
+    let factor = Rat::new(numerator, denominator)?;
+    if factor.is_one() {
+        return None;
+    }
+    Some(factor.to_node())
+}
+
+/// Greatest common divisor of two integers, always non-negative.
+fn integer_gcd(mut a: i128, mut b: i128) -> i128 {
+    a = a.abs();
+    b = b.abs();
+    while b != 0 {
+        let remainder = a % b;
+        a = b;
+        b = remainder;
+    }
+    if a == 0 { 1 } else { a }
+}
+
+pub(crate) fn matrix_to_latex(matrix: &crate::math::algebra::linear::Matrix<Expr>) -> String {
+    let mut rows = Vec::with_capacity(matrix.rows());
     for row in 0..matrix.rows() {
         let mut entries = Vec::with_capacity(matrix.columns());
         for column in 0..matrix.columns() {
@@ -252,6 +363,9 @@ impl NodeInner {
 impl Display for NodeInner<Real> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.value {
+            NodeValue::Operand(Token::Matrix(ref matrix)) => {
+                write_matrix_with_factor(matrix, f)
+            }
             NodeValue::Operand(ref token) => write!(f, "{token}"),
             NodeValue::Operator(ref op_node) => {
                 let left = op_node.left.inner.borrow();

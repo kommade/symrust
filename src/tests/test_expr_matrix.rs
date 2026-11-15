@@ -254,3 +254,35 @@ fn latex_errors_use_the_expression_error_type() {
     let latex: Result<String, ExprError> = create_expr!("[[1, 2], [3, 4]]").unwrap().to_latex();
     assert!(latex.unwrap().contains("pmatrix"));
 }
+
+/// A matrix whose entries share a factor renders with that factor pulled out,
+/// so a row of fractions reads as one factor and a small integer matrix.
+#[test]
+fn a_shared_factor_is_pulled_out_of_the_printed_matrix() {
+    super::setup();
+
+    // A common fraction: `1/5 [1 2]` rather than `[1/5 2/5]`.
+    let fraction = create_expr!("[[1/5, 2/5], [2/5, 4/5]]").unwrap();
+    assert_eq!(fraction.to_string(), "1 / 5 [1 2]\n[2 4]\n");
+
+    // A common integer factor.
+    let integer = create_expr!("[[2, 4], [6, 8]]").unwrap();
+    assert_eq!(integer.to_string(), "2 [1 2]\n[3 4]\n");
+
+    // Mixed signs keep the factor positive, so a sign stays on the entry.
+    let signed = create_expr!("[[-2, 4], [6, -8]]").unwrap();
+    assert_eq!(signed.to_string(), "2 [-1 2]\n[3 -4]\n");
+
+    // No shared factor beyond a unit: printed exactly as written.
+    let plain = create_expr!("[[1, 2], [3, 4]]").unwrap();
+    assert_eq!(plain.to_string(), "[1 2]\n[3 4]\n");
+}
+
+/// Pulling a factor out is presentation only: the matrix still means what it
+/// did before, so reading the entries back gives the original values.
+#[test]
+fn factored_rendering_preserves_the_matrix_value() {
+    super::setup();
+    let matrix = create_expr!("[[1/5, 2/5], [2/5, 4/5]]").unwrap();
+    assert_entries(&matrix, &[&[0.2, 0.4], &[0.4, 0.8]]);
+}
