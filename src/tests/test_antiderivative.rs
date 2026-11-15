@@ -390,6 +390,52 @@ fn decision_steps_record_no_result() {
     );
 }
 
+/// A technique that has nothing to contribute must not appear in the solution.
+///
+/// The trig reduction pass used to report success by handing the integrand back
+/// unchanged, so a rational function recorded `trigonometric reduction: u => u`
+/// even though trigonometry played no part.
+#[test]
+fn techniques_that_do_nothing_record_no_step() {
+    use crate::math::structs::solution::SolutionStep;
+
+    super::setup();
+    for input in ["1/(x^2-1)", "1/(x^4+1)", "x/(x^2+2x+5)"] {
+        let solution = create_expr!(input)
+            .unwrap()
+            .get_antiderivative_solution()
+            .unwrap();
+        let names: Vec<&str> = solution
+            .steps()
+            .iter()
+            .filter_map(|step| match step {
+                SolutionStep::Elementary(step) => Some(step.step_name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !names.contains(&"trigonometric reduction"),
+            "{input} should not record a trig step it never used, got {names:?}"
+        );
+    }
+}
+
+/// A rule that leaves the integrand unchanged is still a real step, because it
+/// *is* the answer: `∫ e^x dx = e^x`. Such a solution must not be empty.
+#[test]
+fn a_self_identical_rule_still_records_a_step() {
+    super::setup();
+    let solution = create_expr!("e^x")
+        .unwrap()
+        .get_antiderivative_solution()
+        .unwrap();
+    assert_eq!(solution.result().to_string(), "e ^ x");
+    assert!(
+        !solution.steps().is_empty(),
+        "e^x is its own antiderivative, but the rule that established it must be recorded"
+    );
+}
+
 /// With the `algebraic` feature, an irreducible cubic denominator that the
 /// rational/surd methods give up on is integrated using an exact real root
 /// (Sturm-sequence isolation). Without the feature this same integral fails,

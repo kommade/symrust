@@ -681,7 +681,10 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
     /// Record the outcome of a named technique, then return it.
     ///
     /// A technique that did not apply records nothing, so a `Solution` only
-    /// contains the rules that actually ran.
+    /// contains the rules that actually ran. Note that a *legitimate* rule can
+    /// leave the integrand unchanged — `∫ e^x dx = e^x` — so this cannot filter
+    /// on "the result differs from the input"; the individual techniques are
+    /// responsible for returning `None` when they have nothing to contribute.
     fn record_technique(
         &mut self,
         step_name: &'static str,

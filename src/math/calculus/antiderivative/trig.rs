@@ -142,13 +142,16 @@ pub(super) fn try_integrate<R: Recorder + ?Sized>(
     integrator: &mut Integrator<'_, R>,
     node: &Node,
 ) -> Option<Node> {
-    let result = integrate_trig(integrator, node);
+    // `integrate_trig` returns `None` when it has nothing to contribute; it used
+    // to report success by handing back the integrand unchanged, which made every
+    // rational integral record a `trigonometric reduction: u => u` step.
+    let result = integrate_trig(integrator, node)?;
     integrator.step(
         "trigonometric reduction",
         || super::describe_signed(node),
-        || result.clone().unwrap_or_else(|| node.clone()),
+        || result.clone(),
     );
-    result
+    Some(result)
 }
 
 fn integrate_trig<R: Recorder + ?Sized>(
