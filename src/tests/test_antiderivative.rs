@@ -320,6 +320,76 @@ fn try_custom() {
     assert!(expr.get_antiderivative().is_ok(), "custom derivative failed");
 }
 
+/// `integrate_solution` returns the same value as `integrate`, and records how
+/// the antiderivative was found.
+#[test]
+fn integrate_solution_matches_integrate_and_records_steps() {
+    use crate::math::numeric::Real;
+
+    super::setup();
+    let expr = create_expr!("2x").unwrap();
+    let (lower, upper) = (Real::from_i64(0), Real::from_i64(3));
+
+    let plain = expr.integrate(lower.clone(), upper.clone()).unwrap();
+    assert_eq!(plain, Real::from_i64(9));
+
+    let solution = expr
+        .integrate_solution(lower, upper)
+        .expect("2x integrates over [0, 3]");
+    let recorded: Real = solution
+        .result()
+        .evaluate(0.0_f64)
+        .value()
+        .map(Real::from_f64)
+        .expect("the solution result is numeric");
+    assert_eq!(recorded, plain, "the recorded value must match `integrate`");
+    assert!(
+        !solution.steps().is_empty(),
+        "the solution should record the search steps"
+    );
+    assert!(
+        solution.result_comment().contains("definite integral"),
+        "the result should explain it is a definite integral, got: {}",
+        solution.result_comment()
+    );
+}
+
+/// A step that only reports a decision — such as factoring the denominator —
+/// records no expression, so it does not render a placeholder `=> 0`.
+#[test]
+fn decision_steps_record_no_result() {
+    use crate::math::structs::solution::SolutionStep;
+
+    super::setup();
+    let solution = create_expr!("1/(x^2+1)")
+        .unwrap()
+        .get_antiderivative_solution()
+        .unwrap();
+    let factoring = solution
+        .steps()
+        .iter()
+        .filter_map(|step| match step {
+            SolutionStep::Elementary(step) if step.step_name == "factor the denominator" => {
+                Some(step)
+            }
+            _ => None,
+        })
+        .next()
+        .expect("the rational path should record a factoring step");
+    assert!(
+        factoring.step_result.is_none(),
+        "a decision step should carry no expression, got {:?}",
+        factoring.step_result
+    );
+
+    // Every recorded step still renders, and none shows a placeholder result.
+    let rendered = solution.to_string();
+    assert!(
+        !rendered.contains("=> 0"),
+        "no step may render a placeholder zero result:\n{rendered}"
+    );
+}
+
 /// With the `algebraic` feature, an irreducible cubic denominator that the
 /// rational/surd methods give up on is integrated using an exact real root
 /// (Sturm-sequence isolation). Without the feature this same integral fails,

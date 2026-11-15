@@ -31,7 +31,11 @@ fn assert_steps_progress(solution: &crate::math::structs::solution::Solution) {
     let mut changes = 0;
     for step in solution.steps() {
         if let SolutionStep::Elementary(step) = step {
-            let current = step.step_result.to_string();
+            // A step that only records a decision cannot advance the matrix.
+            let Some(result) = &step.step_result else {
+                continue;
+            };
+            let current = result.to_string();
             assert_ne!(
                 current, previous,
                 "step '{}' left the matrix unchanged: {current}",
@@ -188,7 +192,10 @@ fn qr_records_elementary_steps() {
     // not `sqrt(2) ^ -2`, so no entry may end in a negative exponent.
     for step in solution.steps() {
         if let SolutionStep::Elementary(step) = step {
-            let text = step.step_result.to_string();
+            let Some(result) = &step.step_result else {
+                continue;
+            };
+            let text = result.to_string();
             assert!(
                 !text.contains("000000000000000") && !text.contains("999999999999999"),
                 "step '{}' leaked floating-point error: {text}",

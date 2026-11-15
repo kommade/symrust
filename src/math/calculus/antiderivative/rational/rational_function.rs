@@ -108,17 +108,15 @@ impl RationalFunction {
         })?;
         let denominator_degree = self.denom.degree()?;
         let factor_count = factorization.factors.len();
-        integrator.step(
-            "factor the denominator",
-            || {
-                format!(
-                    "Factored the denominator of degree {denominator_degree:?} into \
-                     {factor_count} factor(s) with leading coefficient {}",
-                    factorization.leading.to_f64()
-                )
-            },
-            || helpers::zero(),
-        );
+        // Factoring is a decision, not a value: the description carries the
+        // detail and the step records no expression of its own.
+        integrator.step_without_result("factor the denominator", || {
+            format!(
+                "Factored the denominator of degree {denominator_degree:?} into \
+                 {factor_count} factor(s) with leading coefficient {}",
+                factorization.leading.to_f64()
+            )
+        });
 
         // Verify the factorization before relying on it.
         let mut rebuilt = Poly::constant(factorization.leading);

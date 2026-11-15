@@ -160,6 +160,44 @@ pub trait Antiderivative {
     fn integrate<T>(&self, lower: T, upper: T) -> Result<T, IntegrationError>
     where
         Self: Sized,
+        T: crate::math::numeric::FloatType + Display
+    {
+        self.integrate_with_context(lower, upper, IntegratorContext::default())
+    }
+
+    /// Evaluate a definite integral with a custom search context.
+    ///
+    /// See [`Antiderivative::integrate`] for the result and
+    /// [`IntegratorContext`] for the context fields.
+    fn integrate_with_context<T>(
+        &self,
+        lower: T,
+        upper: T,
+        context: IntegratorContext,
+    ) -> Result<T, IntegrationError>
+    where
+        Self: Sized,
+        T: crate::math::numeric::FloatType + Display;
+
+    /// Evaluate a definite integral, recording every step the search applies.
+    ///
+    /// The answer is the same as [`Antiderivative::integrate`]; the returned
+    /// [`Solution`] additionally records how the antiderivative was found, and
+    /// its final result is the numeric value of the definite integral.
+    /// # Examples
+    /// ```rust
+    /// use rust_calculus::math::numeric::Real;
+    /// use rust_calculus::{create_expr, math::calculus::antiderivative::Antiderivative};
+    /// let expr = create_expr!("2x").unwrap();
+    /// let solution = expr
+    ///     .integrate_solution(Real::from_i64(0), Real::from_i64(3))
+    ///     .unwrap();
+    /// assert_eq!(solution.result().to_string(), "9");
+    /// assert!(!solution.steps().is_empty());
+    /// ```
+    fn integrate_solution<T>(&self, lower: T, upper: T) -> Result<Solution, IntegrationError>
+    where
+        Self: Sized,
         T: crate::math::numeric::FloatType + Display;
 }
 
@@ -229,41 +267,87 @@ impl Antiderivative for Expr {
     where
         T: crate::math::numeric::FloatType + Display,
     {
-        let antiderivative = self.get_antiderivative()?;
-        let variable = crate::math::calculus::expr::independent_variable(&antiderivative.tree);
-
-        // Evaluate the antiderivative at a bound: a plain substitution when the
-        // bound is finite, otherwise a limit toward ±∞ (improper integral).
-        let value_at = |bound: &T| -> Result<Real, IntegrationError> {
-            let bound = Real::from(bound.to_float());
-            let value = if bound.is_infinite() {
-                match antiderivative.limit(variable, bound.clone()) {
-                    crate::math::structs::expr::limit::Limit::Finite(value) => value,
-                    crate::math::structs::expr::limit::Limit::PosInfinity
-                    | crate::math::structs::expr::limit::Limit::NegInfinity => {
-                        // The antiderivative diverges at the bound, so the
-                        // definite integral does not converge.
-                        return Err(IntegrationError::BoundNotEvaluable(bound.to_string()));
-                    }
-                    crate::math::structs::expr::limit::Limit::DoesNotExist => {
-                        return Err(IntegrationError::BoundNotEvaluable(bound.to_string()));
-                    }
-                }
-            } else {
-                antiderivative
-                    .evaluate(bound.clone())
-                    .value()
-                    .ok_or_else(|| IntegrationError::BoundNotEvaluable(bound.to_string()))?
-            };
-            Ok(value)
-        };
-
-        let upper_value = value_at(&upper)?;
-        let lower_value = value_at(&lower)?;
-        // `F(upper) - F(lower)`, computed in Real, then cast to the caller's type.
-        let result = upper_value - lower_value;
-        Ok(T::from_float(result.to_float()))
+        self.integrate_with_context(lower, upper, IntegratorContext::default())
     }
+
+    fn integrate_with_context<T>(
+        &self,
+        lower: T,
+        upper: T,
+        context: IntegratorContext,
+    ) -> Result<T, IntegrationError>
+    where
+        T: crate::math::numeric::FloatType + Display,
+    {
+        let antiderivative = self.get_antiderivative_with_context(context)?;
+        evaluate_definite_integral(&antiderivative, lower, upper)
+    }
+
+    fn integrate_solution<T>(&self, lower: T, upper: T) -> Result<Solution, IntegrationError>
+    where
+        T: crate::math::numeric::FloatType + Display,
+    {
+        // Format the comment before the bounds are moved into the evaluation.
+        let comment = format!(
+            "the antiderivative evaluated over [{}, {}]; the constant of \
+             integration cancels in a definite integral.",
+            lower, upper
+        );
+        let solution = self.get_antiderivative_solution()?;
+        let value = evaluate_definite_integral(solution.result(), lower, upper)?;
+        let mut solution = solution;
+        solution.set_result_comment(comment);
+        Ok(solution.finish(Expr::from_node(crate::math::algebra::expr::float(
+            Real::from(value.to_float()),
+        ))))
+    }
+}
+
+/// Evaluate `antiderivative` over `[lower, upper]` as `F(upper) - F(lower)`.
+///
+/// A finite bound is a plain substitution. An infinite bound is taken as a
+/// limit, which lets an improper integral converge or report that it does not.
+fn evaluate_definite_integral<T>(
+    antiderivative: &Expr,
+    lower: T,
+    upper: T,
+) -> Result<T, IntegrationError>
+where
+    T: crate::math::numeric::FloatType + Display,
+{
+    let variable = crate::math::calculus::expr::independent_variable(&antiderivative.tree);
+
+    // Evaluate the antiderivative at a bound: a plain substitution when the
+    // bound is finite, otherwise a limit toward ±∞ (improper integral).
+    let value_at = |bound: &T| -> Result<Real, IntegrationError> {
+        let bound = Real::from(bound.to_float());
+        let value = if bound.is_infinite() {
+            match antiderivative.limit(variable, bound.clone()) {
+                crate::math::structs::expr::limit::Limit::Finite(value) => value,
+                crate::math::structs::expr::limit::Limit::PosInfinity
+                | crate::math::structs::expr::limit::Limit::NegInfinity => {
+                    // The antiderivative diverges at the bound, so the
+                    // definite integral does not converge.
+                    return Err(IntegrationError::BoundNotEvaluable(bound.to_string()));
+                }
+                crate::math::structs::expr::limit::Limit::DoesNotExist => {
+                    return Err(IntegrationError::BoundNotEvaluable(bound.to_string()));
+                }
+            }
+        } else {
+            antiderivative
+                .evaluate(bound.clone())
+                .value()
+                .ok_or_else(|| IntegrationError::BoundNotEvaluable(bound.to_string()))?
+        };
+        Ok(value)
+    };
+
+    let upper_value = value_at(&upper)?;
+    let lower_value = value_at(&lower)?;
+    // `F(upper) - F(lower)`, computed in Real, then cast to the caller's type.
+    let result = upper_value - lower_value;
+    Ok(T::from_float(result.to_float()))
 }
 
 /// A single integration run can be configured with a context that sets the
@@ -359,6 +443,19 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
             description,
             || Expr::from_node(result()).simplify(false),
         );
+    }
+
+    /// Record a step that reports a decision but has no expression of its own.
+    ///
+    /// Use this for steps such as factoring the denominator: the description
+    /// carries the detail, and the rendered step does not invent a result.
+    pub(super) fn step_without_result(
+        &mut self,
+        step_name: &str,
+        description: impl FnOnce() -> String,
+    ) {
+        let recorder = &mut *self.recorder;
+        recorder.record_without_result(step_name, description, Expr::default);
     }
 
     pub(super) fn variable_node(&self) -> Node {

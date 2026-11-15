@@ -33,8 +33,13 @@ pub struct ElementaryStep {
     pub step_name: String,
     /// A human readable description of what happened in this step.
     pub description: String,
-    /// The expression this step produced.
-    pub step_result: Expr,
+    /// The expression this step produced, when it produced one.
+    ///
+    /// Some steps only report a decision or an intermediate fact — factoring a
+    /// denominator, choosing a substitution — and have no expression of their
+    /// own. Those record `None` rather than a placeholder, so the rendered step
+    /// does not show a misleading `=> 0`.
+    pub step_result: Option<Expr>,
 }
 
 /// One entry in a [`Solution`].
@@ -112,12 +117,26 @@ impl Solution {
         &self.result_comment
     }
 
-    /// Record an elementary step.
+    /// Record an elementary step that produced an expression.
     pub fn push_step(
         &mut self,
         step_name: impl Into<String>,
         description: impl Into<String>,
         step_result: Expr,
+    ) {
+        self.push_step_without_result(step_name, description, Some(step_result));
+    }
+
+    /// Record an elementary step, optionally carrying the expression it
+    /// produced.
+    ///
+    /// Pass `None` for a step that only makes a decision, such as factoring the
+    /// denominator, so the rendered output does not show a placeholder result.
+    pub fn push_step_without_result(
+        &mut self,
+        step_name: impl Into<String>,
+        description: impl Into<String>,
+        step_result: Option<Expr>,
     ) {
         self.steps.push(SolutionStep::Elementary(ElementaryStep {
             step_name: step_name.into(),
@@ -167,14 +186,25 @@ impl Display for Solution {
         for (index, step) in self.steps.iter().enumerate() {
             match step {
                 SolutionStep::Elementary(step) => {
-                    writeln!(
-                        f,
-                        "  {}. {}: {} => {}",
-                        index + 1,
-                        step.step_name,
-                        step.description,
-                        step.step_result
-                    )?;
+                    match &step.step_result {
+                        Some(result) => writeln!(
+                            f,
+                            "  {}. {}: {} => {}",
+                            index + 1,
+                            step.step_name,
+                            step.description,
+                            result
+                        )?,
+                        // A step that only records a decision: show what it
+                        // concluded without inventing an expression for it.
+                        None => writeln!(
+                            f,
+                            "  {}. {}: {}",
+                            index + 1,
+                            step.step_name,
+                            step.description
+                        )?,
+                    }
                 }
                 SolutionStep::SubSolution(solution) => {
                     for line in solution.to_string().lines() {
@@ -193,11 +223,10 @@ impl Display for Solution {
 
 impl Display for ElementaryStep {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}: {} => {}",
-            self.step_name, self.description, self.step_result
-        )
+        match &self.step_result {
+            Some(result) => write!(f, "{}: {} => {}", self.step_name, self.description, result),
+            None => write!(f, "{}: {}", self.step_name, self.description),
+        }
     }
 }
 
@@ -244,6 +273,24 @@ pub(crate) trait Recorder {
         description: impl FnOnce() -> String,
         result: impl FnOnce() -> Expr,
     );
+
+    /// Record a step that reports a decision but produces no expression.
+    ///
+    /// Used for steps such as factoring the denominator, where showing an
+    /// expression would mean inventing one. The default implementation records
+    /// nothing, so an implementation that only overrides [`record`](Self::record)
+    /// keeps working.
+    fn record_without_result(
+        &mut self,
+        step_name: &str,
+        description: impl FnOnce() -> String,
+        _result: impl FnOnce() -> Expr,
+    ) {
+        if self.is_recording() {
+            let description = description();
+            self.record(step_name, || description, || Expr::default());
+        }
+    }
 
     /// Record a nested solution.
     fn record_sub_solution(&mut self, solution: impl FnOnce() -> Solution) {
@@ -329,6 +376,17 @@ impl Recorder for StepRecorder {
         let description = description();
         let step_result = result();
         self.solution.push_step(step_name, description, step_result);
+    }
+
+    fn record_without_result(
+        &mut self,
+        step_name: &str,
+        description: impl FnOnce() -> String,
+        _result: impl FnOnce() -> Expr,
+    ) {
+        let description = description();
+        self.solution
+            .push_step_without_result(step_name, description, None);
     }
 }
 
