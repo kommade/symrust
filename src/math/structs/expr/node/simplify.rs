@@ -63,6 +63,28 @@ impl NodeInner {
                                 }
                                 return None;
                             }
+                            // A negation `0 - x` is `-1 * x`; treating it as a
+                            // negative coefficient lets `-(a b) + c d` combine
+                            // the same way `c d - a b` does.
+                            if *op == Op::Sub {
+                                let left = op_node.left.clone();
+                                let right = op_node.right.clone();
+                                drop(borrow);
+                                if left.inner.borrow().is_zero() {
+                                    if let Some(mut inner) =
+                                        Self::extract_pow_components(&right, extract_fns)
+                                    {
+                                        inner.coefficient = Self::from_operation(
+                                            Op::ImplicitMul,
+                                            Self::from_number(-1).wrap(),
+                                            inner.coefficient,
+                                        )
+                                        .simplify(false, extract_fns);
+                                        return Some(inner);
+                                    }
+                                }
+                                return None;
+                            }
                             if *op == Op::Div {
                                 let left = op_node.left.clone();
                                 let right = op_node.right.clone();
