@@ -1,9 +1,9 @@
 //! Step tracking for matrix operations.
 
-use crate::algebra::linear::{Matrix, SquareMatrixFns};
+use crate::math::algebra::linear::{Matrix, SquareMatrixFns};
 use crate::create_expr;
-use crate::structs::expr::Expr;
-use crate::structs::solution::SolutionStep;
+use crate::math::structs::expr::Expr;
+use crate::math::structs::solution::SolutionStep;
 
 /// Build a matrix from expression strings, row-major.
 fn matrix(rows: &[&[&str]]) -> Matrix<Expr> {
@@ -15,9 +15,9 @@ fn matrix(rows: &[&[&str]]) -> Matrix<Expr> {
 }
 
 /// Read the matrix back out of a solution's result expression.
-fn matrix_of_result(solution: &crate::structs::solution::Solution) -> Matrix<Expr> {
-    use crate::parse::lexer::Token;
-    use crate::structs::expr::node::NodeValue;
+fn matrix_of_result(solution: &crate::math::structs::solution::Solution) -> Matrix<Expr> {
+    use crate::math::parse::lexer::Token;
+    use crate::math::structs::expr::node::NodeValue;
     let result = solution.result();
     match &result.tree().inner.borrow().value {
         NodeValue::Operand(Token::Matrix(matrix)) => matrix.clone(),
@@ -26,7 +26,7 @@ fn matrix_of_result(solution: &crate::structs::solution::Solution) -> Matrix<Exp
 }
 
 /// Every step must change the matrix, and the last one must be the result.
-fn assert_steps_progress(solution: &crate::structs::solution::Solution) {
+fn assert_steps_progress(solution: &crate::math::structs::solution::Solution) {
     let mut previous = solution.start().to_string();
     let mut changes = 0;
     for step in solution.steps() {

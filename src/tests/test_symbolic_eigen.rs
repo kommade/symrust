@@ -1,10 +1,10 @@
 //! Symbolic eigenvalues: the characteristic polynomial over `Expr` and its
 //! radical roots.
 
-use crate::algebra::linear::Matrix;
-use crate::algebra::symbolic_eigen::{characteristic_polynomial, eigenvalues, roots};
+use crate::math::algebra::linear::Matrix;
+use crate::math::algebra::symbolic_eigen::{characteristic_polynomial, eigenvalues, roots};
 use crate::create_expr;
-use crate::structs::expr::Expr;
+use crate::math::structs::expr::Expr;
 
 /// Build a matrix from expression strings, row-major.
 fn matrix(rows: &[&[&str]]) -> Matrix<Expr> {

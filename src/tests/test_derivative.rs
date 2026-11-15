@@ -1,6 +1,6 @@
 use super::EXAMPLE_FUNCTIONS;
 use crate::create_expr;
-use crate::{calculus::derivative::Derivative, structs::expr::Expr};
+use crate::{math::calculus::derivative::Derivative, math::structs::expr::Expr};
 
 #[test]
 fn try_derivative() {

@@ -1,6 +1,6 @@
 //! Tests for the runtime [`Vector`] type and the [`VectorSet`] container.
 
-use crate::algebra::{
+use crate::math::algebra::{
     linear::{Matrix, StaticMatrix, StaticVector, Vector, VectorSet},
     rational::Rat,
 };

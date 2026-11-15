@@ -5,7 +5,7 @@
 //! both the successful calls and the error each invalid call reports.
 
 use crate::create_expr;
-use crate::structs::expr::{Expr, ExprError};
+use crate::math::structs::expr::{Expr, ExprError};
 
 /// Read a matrix expression back out as an `f64` grid for numeric comparison.
 fn entries(expr: &Expr) -> Vec<Vec<f64>> {

@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use arpfloat::{FP128, Float};
 
 use crate::create_expr;
-use crate::structs::expr::evaluate::Evaluated;
-use crate::structs::expr::Expr;
+use crate::math::structs::expr::evaluate::Evaluated;
+use crate::math::structs::expr::Expr;
 
 #[test]
 fn evaluate_polynomial_f64() {
@@ -112,7 +112,7 @@ fn evaluate_default_trait_methods() {
 
 #[test]
 fn evaluate_rational_exact() {
-    use crate::algebra::rational::Rat;
+    use crate::math::algebra::rational::Rat;
     super::setup();
     // (1/2)x + 1/3 evaluated at x = 1/6 stays exact: 1/12 + 1/3 = 5/12.
     let expr = create_expr!("(1/2)x + 1/3").unwrap();
@@ -129,11 +129,11 @@ fn evaluate_rational_exact() {
 
 #[test]
 fn evaluate_surd_exact_sqrt() {
-    use crate::algebra::surd::Surd;
+    use crate::math::algebra::surd::Surd;
     super::setup();
     // sqrt(x) at x = 4 is exactly 2 (stays rational).
     let expr = create_expr!("sqrt(x)").unwrap();
-    let four = Surd::rational(crate::algebra::rational::Rat::from_i64(4));
+    let four = Surd::rational(crate::math::algebra::rational::Rat::from_i64(4));
     let value = expr.evaluate(four).value().unwrap();
     assert_eq!(value.to_f64(), 2.0);
 }
@@ -141,7 +141,7 @@ fn evaluate_surd_exact_sqrt() {
 #[cfg(feature = "algebraic")]
 #[test]
 fn evaluate_multiquadratic_exact() {
-    use crate::algebra::algebraic::Multiquadratic;
+    use crate::math::algebra::algebraic::Multiquadratic;
     super::setup();
     // x^2 at x = sqrt(2) is exactly 2.
     let expr = create_expr!("x^2").unwrap();

@@ -1,6 +1,6 @@
-//! Tests for the [`Complex`](crate::numeric::Complex) numeric type.
+//! Tests for the [`Complex`](crate::math::numeric::Complex) numeric type.
 
-use crate::numeric::{Complex, Real};
+use crate::math::numeric::{Complex, Real};
 
 fn approx(value: &Complex, re: f64, im: f64) -> bool {
     (value.re().to_f64() - re).abs() < 1e-9 && (value.im().to_f64() - im).abs() < 1e-9
@@ -50,7 +50,7 @@ fn exp_and_ln_round_trip() {
     let value = c(0.0, std::f64::consts::PI).exp();
     assert!(approx(&value, -1.0, 0.0), "e^(iπ) = {value}");
     // ln(-1) = iπ (principal value, arg -1 = π)
-    use crate::numeric::ExpressionScalar;
+    use crate::math::numeric::ExpressionScalar;
     let log = c(-1.0, 0.0).ln();
     assert!(approx(&log, 0.0, std::f64::consts::PI), "ln(-1) = {log}");
 }

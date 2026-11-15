@@ -1,9 +1,9 @@
-//! Tests for the runtime-sized matrix in [`crate::algebra::linear`].
+//! Tests for the runtime-sized matrix in [`crate::math::algebra::linear`].
 //!
 //! These mirror the static matrix tests so that the shared algorithms are
 //! checked through both storages.
 
-use crate::algebra::{
+use crate::math::algebra::{
     linear::{Matrix, MatrixMul, SquareMatrixFns, StaticMatrix, StaticSquareMatrixFns, Vector},
     rational::Rat,
 };

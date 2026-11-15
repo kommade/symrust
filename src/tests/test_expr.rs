@@ -1,6 +1,6 @@
 use super::EXAMPLE_FUNCTIONS;
 use crate::create_expr;
-use crate::structs::expr::{Expr, node::NodeFunctions};
+use crate::math::structs::expr::{Expr, node::NodeFunctions};
 
 #[test]
 fn create_expr() {
@@ -122,6 +122,6 @@ fn surd_powers_collapse() {
 #[test]
 fn expr_linearise() {
     let expr = create_expr!("-2 * sin(x) / cos(x)").unwrap();
-    let split = crate::calculus::expr::split_constant(&expr.tree);
+    let split = crate::math::calculus::expr::split_constant(&expr.tree);
     println!("{split}");
 }

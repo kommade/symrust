@@ -4,7 +4,7 @@
 
 #![cfg(feature = "algebraic")]
 
-use crate::algebra::{
+use crate::math::algebra::{
     algebraic::{Multiquadratic, real_roots},
     linear::Matrix,
     polynomial::Poly,
@@ -87,7 +87,7 @@ fn multiquadratic_elaborate_inverse() {
 
 #[test]
 fn multiquadratic_exact_square_roots() {
-    use crate::numeric::ExactField;
+    use crate::math::numeric::ExactField;
     // sqrt(6) stays sqrt(6), sqrt(3) stays sqrt(3), sqrt(4) is rational 2.
     let six = Multiquadratic::<3>::from_rat(Rat::from_i64(6));
     let root_six = six.try_sqrt().expect("sqrt 6 is in the field");
@@ -107,7 +107,7 @@ fn multiquadratic_exact_square_roots() {
 
 #[test]
 fn multiquadratic_diagonalizes_a_rational_symmetric_matrix() {
-    use crate::algebra::linear::SquareMatrixFns;
+    use crate::math::algebra::linear::SquareMatrixFns;
     let q = |value| Multiquadratic::<3>::from_rat(Rat::from_i64(value));
     // A^T A from the 4x3 sqrt(2) example: eigenvalues 0, 3, 6.
     let matrix = Matrix::<Multiquadratic<3>>::from_vec(

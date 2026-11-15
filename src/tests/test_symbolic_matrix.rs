@@ -1,8 +1,8 @@
 //! Linear algebra over symbolic entries (`Matrix<Expr>`).
 
-use crate::algebra::linear::{Matrix, SquareMatrixFns};
+use crate::math::algebra::linear::{Matrix, SquareMatrixFns};
 use crate::create_expr;
-use crate::structs::expr::Expr;
+use crate::math::structs::expr::Expr;
 
 /// Build a 2x2 symbolic matrix.
 fn symbolic() -> Matrix<Expr> {
@@ -58,7 +58,7 @@ fn symbolic_matrix_determinant_is_symbolic() {
 /// Differentiating the symbolic determinant must work: `d/dx (x^3 - 2) = 3x^2`.
 #[test]
 fn symbolic_determinant_can_be_differentiated() {
-    use crate::calculus::derivative::Derivative;
+    use crate::math::calculus::derivative::Derivative;
 
     super::setup();
     let determinant = symbolic().det();

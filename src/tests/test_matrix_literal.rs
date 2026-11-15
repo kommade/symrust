@@ -1,10 +1,10 @@
 //! Parsing matrix literals, `[[a, b], [c, d]]`.
 
-use crate::algebra::linear::{Matrix, SquareMatrixFns};
+use crate::math::algebra::linear::{Matrix, SquareMatrixFns};
 use crate::create_expr;
-use crate::parse::lexer::Token;
-use crate::structs::expr::Expr;
-use crate::structs::expr::node::NodeValue;
+use crate::math::parse::lexer::Token;
+use crate::math::structs::expr::Expr;
+use crate::math::structs::expr::node::NodeValue;
 
 /// Pull the matrix token out of a parsed expression that is exactly a matrix.
 fn matrix_of(expr: &Expr) -> Matrix<Expr> {
@@ -39,7 +39,7 @@ fn parses_a_symbolic_matrix() {
 /// The determinant of a parsed symbolic matrix is symbolic and differentiable.
 #[test]
 fn parsed_matrix_determinant_differentiates() {
-    use crate::calculus::derivative::Derivative;
+    use crate::math::calculus::derivative::Derivative;
 
     super::setup();
     let matrix = matrix_of(&create_expr!("[[x, 1], [2, x^2]]").unwrap());

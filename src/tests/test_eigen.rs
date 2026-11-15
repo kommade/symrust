@@ -1,4 +1,4 @@
-use crate::algebra::{
+use crate::math::algebra::{
     linear::{StaticMatrix, StaticSquareMatrixFns},
     rational::Rat,
 };

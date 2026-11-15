@@ -1,4 +1,4 @@
-use crate::utils::float_math::FloatMath;
+use crate::math::utils::float_math::FloatMath;
 use arpfloat::{FP128, Float};
 
 fn close(left: &Float, right: f64) -> bool {

@@ -1,9 +1,8 @@
 use std::time::Instant;
 
 use crate::{
-    calculus::{antiderivative::Antiderivative, derivative::Derivative},
-    create_expr,
-    structs::expr::Expr,
+    create_expr, math::calculus::{antiderivative::Antiderivative, derivative::Derivative},
+    math::structs::expr::Expr,
 };
 
 /// `(integrand, antiderivative)` pairs. The constant of integration is
@@ -379,7 +378,7 @@ fn default_build_warns_that_the_algebraic_feature_is_required() {
     super::setup();
     let expr = create_expr!("1/(x^3-2)").unwrap();
     match expr.get_antiderivative() {
-        Err(crate::calculus::antiderivative::IntegrationError::FeatureRequired { feature, .. }) => {
+        Err(crate::math::calculus::antiderivative::IntegrationError::FeatureRequired { feature, .. }) => {
             assert_eq!(feature, "algebraic");
         }
         other => panic!("expected FeatureRequired, got {other:?}"),

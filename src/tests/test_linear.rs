@@ -1,6 +1,6 @@
-//! Tests for the exact linear algebra in [`crate::algebra::linear`].
+//! Tests for the exact linear algebra in [`crate::math::algebra::linear`].
 
-use crate::algebra::{
+use crate::math::algebra::{
     linear::{RatMatrix, RatVector, StaticMatrix, StaticMatrixMul, StaticSquareMatrixFns},
     rational::Rat,
 };

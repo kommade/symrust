@@ -1,9 +1,9 @@
 //! Tests for [`Expr::limit`] and improper definite integrals.
 
-use crate::calculus::antiderivative::Antiderivative;
+use crate::math::calculus::antiderivative::Antiderivative;
 use crate::create_expr;
-use crate::numeric::Real;
-use crate::structs::expr::limit::Limit;
+use crate::math::numeric::Real;
+use crate::math::structs::expr::limit::Limit;
 
 fn approx(limit: Limit<Real>, expected: f64) -> bool {
     match limit {

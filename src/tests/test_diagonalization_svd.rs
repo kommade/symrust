@@ -4,7 +4,7 @@
 //! exercised by [`StaticMatrix`] (compile-time dimensions) and [`Matrix`]
 //! (runtime dimensions).
 
-use crate::algebra::{
+use crate::math::algebra::{
     linear::{Matrix, MatrixMul, SquareMatrixFns, StaticMatrix, StaticSquareMatrixFns},
     rational::Rat,
 };
@@ -234,7 +234,7 @@ fn custom2() {
     //        [ -sqrt2   1/sqrt2  0 ]
     //        [   0        1     -1 ]
     //        [   0       -1      1 ]
-    use crate::algebra::algebraic::Multiquadratic as A;
+    use crate::math::algebra::algebraic::Multiquadratic as A;
 
     let sqrt_two = A::<3>::sqrt_of(2).unwrap();
     let sqrt_three = A::sqrt_of(3).unwrap();

@@ -1,4 +1,4 @@
-use crate::utils::float_math::FloatMath;
+use crate::math::utils::float_math::FloatMath;
 use arpfloat::{FP128, Float};
 
 static RANDOM_INTEGERS: [i64; 20] = [

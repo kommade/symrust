@@ -5,7 +5,7 @@
 //! any expression.
 
 use crate::create_expr;
-use crate::structs::expr::{Expr, ExprError};
+use crate::math::structs::expr::{Expr, ExprError};
 
 /// Evaluate a scalar expression to an `f64`.
 fn value(expr: &Expr) -> f64 {
