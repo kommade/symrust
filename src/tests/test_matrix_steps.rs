@@ -160,9 +160,10 @@ fn solution_displays_with_steps() {
 #[test]
 fn qr_records_elementary_steps() {
     super::setup();
-    let source = matrix(&[&["1", "1"], &["1", "0"]]);
+    let source = matrix(&[&["1", "-2", "-1"], &["2", "0", "1"], &["2", "-4", "2"], &["4", "0", "0"]]);
     let solution = source.qr_solution().expect("columns are independent");
     assert_eq!(solution.problem_type(), "QR factorisation (Gram-Schmidt)");
+    println!("solution: {solution}");
     let names: Vec<&str> = solution
         .steps()
         .iter()
@@ -180,12 +181,11 @@ fn qr_records_elementary_steps() {
         "expected normalise steps, got {names:?}"
     );
 
-    // The steps must stay exact. `q1` is `(1/√2, 1/√2)`, so the projection of
-    // column 2 onto it is `1/√2` and the residual in row 1 is exactly `1/2`.
-    // No step may contain a long `0.50000000000000011102…` style expansion: that
-    // was the symptom of `tidy` evaluating the surd `√(1/2)` to a decimal.
-    // Exactness now also means surd powers collapse — `√2^-2` is `1/2`, not
-    // `sqrt(2) ^ -4`.
+    // The steps must stay exact. No step may contain a long
+    // `0.50000000000000011102…` style expansion: that was the symptom of `tidy`
+    // evaluating a fraction such as `1/5` (or the surd `√(1/2)`) into a decimal.
+    // Exactness also means a surd power must have collapsed — `√2^-2` is `1/2`,
+    // not `sqrt(2) ^ -2`, so no entry may end in a negative exponent.
     for step in solution.steps() {
         if let SolutionStep::Elementary(step) = step {
             let text = step.step_result.to_string();
@@ -194,11 +194,13 @@ fn qr_records_elementary_steps() {
                 "step '{}' leaked floating-point error: {text}",
                 step.step_name
             );
-            assert!(
-                !text.contains("-4") && !text.contains("-3"),
-                "step '{}' left an unfolded surd power: {text}",
-                step.step_name
-            );
+            for entry in text.split(['[', ']', ' ']).filter(|part| !part.is_empty()) {
+                assert!(
+                    !entry.starts_with("^ -") && !entry.contains("^ -"),
+                    "step '{}' left an unfolded surd power: {text}",
+                    step.step_name
+                );
+            }
         }
     }
 }

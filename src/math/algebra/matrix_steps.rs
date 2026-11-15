@@ -30,6 +30,7 @@
 //! methods return a [`Solution`] that also records every step.
 
 use crate::math::algebra::linear::{Matrix, SquareMatrixFns};
+use crate::math::algebra::rational::Rat;
 use crate::math::numeric::ExactField;
 use crate::math::structs::expr::Expr;
 use crate::math::structs::expr::node::Node;
@@ -103,35 +104,43 @@ fn one() -> Expr {
     Expr::from_f64(1.0)
 }
 
-/// Simplify an entry, and fold it to a plain number when it is fully numeric.
+/// Simplify an entry, and reduce it to a tidy closed value when it is fully
+/// numeric.
 ///
 /// Elementary row operations repeatedly build expressions like `-2 / -2` or
-/// `0 - 2 * (1 / -2)`. Symbolic simplification leaves those partly unevaluated
-/// (it will not fold mixed float/integer forms), which makes a recorded step
-/// hard to read. Evaluating a *closed* (variable-free) expression back to a
-/// number keeps every step showing clean values, while genuinely symbolic
-/// entries are left as simplified expressions.
+/// `0 - 2 * (1 / -2)`. Symbolic simplification leaves those partly unevaluated,
+/// which makes a recorded step hard to read. A *closed* (variable-free)
+/// expression is therefore reduced here, while genuinely symbolic entries are
+/// left as simplified expressions.
 ///
-/// The fold is deliberately narrow: a value is only replaced by a decimal when
-/// the *symbolic* evaluator (`Node::evaluate`) is willing to fold it. That
-/// evaluator refuses `sqrt` and fractional powers precisely so radicals survive,
-/// and we must respect that here. Otherwise `sqrt(1/2)` would be turned into
-/// `0.7071…`, and the very next step would compute `0.5 - (0.7071…)²` as
-/// `1.1e-16` instead of the exact `0`. Keeping the surd means the subtraction
-/// simplifies to `0` symbolically, and no rounding error ever appears in a step.
+/// The reduction has two stages, and the order matters:
+///
+/// 1. An exact rational value is written back as an integer when the
+///    denominator is `1`, and as the fraction `p / q` otherwise. This keeps
+///    `1 / 5` readable: folding it into a decimal would produce
+///    `0.2000000000000000111…`, because `1/5` has no exact binary form.
+/// 2. Only when no exact rational value exists — because the entry contains a
+///    radical, which `Node::evaluate` refuses to fold — is the entry left in its
+///    simplified symbolic form. That is what keeps a surd such as `sqrt(2)`
+///    exact rather than turning it into `1.4142…`.
 pub(crate) fn tidy(entry: Expr) -> Expr {
     let simplified = entry.simplify(true);
     if simplified.has_independent() {
         return simplified;
     }
-    let exact = simplified.tree().inner.borrow().evaluate();
-    if let Some(value) = exact
-        && !value.is_nan()
-        && !value.is_infinite()
-    {
-        return Expr::from_f64(value.to_f64());
+    let Some(value) = simplified.tree().inner.borrow().evaluate() else {
+        return simplified;
+    };
+    if value.is_nan() || value.is_infinite() {
+        return simplified;
     }
-    simplified
+    // Prefer an exact rational rendering so fractions stay fractions.
+    match Rat::from_real(&value) {
+        Some(rational) => Expr::from_node(rational.to_node()),
+        // No exact rational form but the value is still finite: this happens
+        // for a float leaf that was already decimal, so keep the decimal.
+        None => Expr::from_f64(value.to_f64()),
+    }
 }
 
 /// Swap rows `a` and `b`, recording the step.
