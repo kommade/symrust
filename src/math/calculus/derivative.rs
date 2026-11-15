@@ -295,13 +295,19 @@ impl<R: Recorder> DerivativeInternal<R> for Node {
                     "power_rule cannot be used for this node, try exp_rule"
                 );
                 let new_exp = right.clone().sub(one()).inner.borrow().evaluate();
-                let result = match new_exp {
+                let inner_derivative = left.clone().get_derivative(steps);
+                let power_part = match new_exp {
                     None => panic!("evaluating the new exponent failed"),
                     Some(exp) if exp.get_sign() => panic!("new exponent is negative"),
                     Some(exp) if exp.is_zero() => one(),
                     Some(exp) if exp.is_one() => right.impl_mul(left),
                     Some(exp) => mul(right, pow(left, float(exp))),
                 };
+                // `d/dx u^n = n u^(n-1) u'`. The `u'` factor is the chain-rule
+                // part: it is `1` only when `u` is the independent variable, so
+                // for a base such as `sin(x)` it must not be dropped — doing so
+                // silently differentiates `sin(x)^2` to `2 sin(x)`.
+                let result = power_part.impl_mul(inner_derivative);
                 calc_step!(
                     steps,
                     "power rule",
