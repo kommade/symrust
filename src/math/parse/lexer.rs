@@ -193,7 +193,7 @@ impl Const {
 impl Display for Const {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::Pi => write!(f, "π"),
+            Self::Pi => write!(f, "pi"),
             Self::E => write!(f, "e"),
         }
     }
@@ -589,6 +589,45 @@ impl<T: FloatType + Display> Lexer<T> {
                             | Token::RPar
                     );
                 if unary {
+                    // Which operand does the minus negate? Everything up to the
+                    // next operator of `+`/`-` precedence (or the end), while
+                    // keeping bracketed groups together.
+                    let operand_end = Self::negated_operand_end(&tokens, index + 1);
+                    // A unary minus binds less tightly than `*`, `/` and `^`, so
+                    // when it follows one of those the rewrite `0 - <operand>`
+                    // would let the tighter operator take the operand first: for
+                    // `2 * -3` that yields `2 * 0 - 3`, i.e. `-3`, losing the
+                    // factor. The same holds for `a - -b`, where `a - 0 - b`
+                    // nests as `(a - 0) - b` instead of `a - (0 - b)`. Bracketing
+                    // keeps the negation whole in both cases.
+                    let previous = tokens.get(index.wrapping_sub(1));
+                    let binds_loosely = matches!(
+                        previous,
+                        Some(Token::Operator(
+                            Op::Mul | Op::Div | Op::Pow | Op::ImplicitMul
+                        ))
+                    );
+                    // `a - -b` has the shape `<operand> - - <operand>`: the token
+                    // before this minus is a binary `-`. Keep the negated operand
+                    // together so the second `-` cannot be read as the binary one.
+                    let follows_binary_minus = index >= 2
+                        && matches!(tokens[index - 1], Token::Operator(Op::Sub))
+                        && matches!(
+                            tokens[index - 2],
+                            Token::Number(_)
+                                | Token::Float(_)
+                                | Token::Constant(_)
+                                | Token::Indp(_)
+                                | Token::Var(_)
+                                | Token::RPar
+                        );
+                    if (binds_loosely || follows_binary_minus) && operand_end > index + 1 {
+                        tokens.insert(operand_end, Token::RPar);
+                        tokens.insert(index, Token::LPar);
+                        tokens.insert(index + 1, Token::from_num(0));
+                        index += 3;
+                        continue;
+                    }
                     tokens.insert(index, Token::from_num(0));
                     index += 1;
                 }
@@ -626,5 +665,30 @@ impl<T: FloatType + Display> Lexer<T> {
             i += 1;
         }
         Ok(tokens)
+    }
+
+    /// The index just past the operand that a unary minus at `start` negates.
+    ///
+    /// Scanning stops at the end of the token list or at a top-level `+`/`-`,
+    /// which bind as loosely as the negation itself, so `-a + b` negates only
+    /// `a`. Bracketed groups are kept whole.
+    fn negated_operand_end(tokens: &[Token<T>], start: usize) -> usize {
+        let mut depth = 0usize;
+        let mut index = start;
+        while index < tokens.len() {
+            match tokens[index] {
+                Token::LPar => depth += 1,
+                Token::RPar => {
+                    if depth == 0 {
+                        return index;
+                    }
+                    depth -= 1;
+                }
+                Token::Operator(Op::Add | Op::Sub) if depth == 0 => return index,
+                _ => {}
+            }
+            index += 1;
+        }
+        index
     }
 }

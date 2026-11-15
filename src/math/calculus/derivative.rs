@@ -64,13 +64,39 @@ impl Derivative for Expr {
     }
 }
 
+/// Whether `candidate` reads worse than `reference` as an answer.
+///
+/// Factoring usually improves an answer, but it can also leave a stray
+/// subtraction of a product (`cos(x)^2 - (sin(x) sin(x))`) where expanding had
+/// already produced a plain sum. Treat a result as worse when it introduces a
+/// `- (` or a double negation that the other form does not have.
+fn reads_worse_than(candidate: &Expr, reference: &Expr) -> bool {
+    let candidate = candidate.to_string();
+    let reference = reference.to_string();
+    let unwanted = |text: &str| text.contains("- (") || text.contains("- -");
+    !unwanted(&reference) && unwanted(&candidate)
+}
+
 /// Differentiate `expression`, writing every rule application into `steps`.
 fn differentiation(expression: Expr, steps: &mut impl Recorder) -> Expr {
     let simplified = expression.simplify(false);
     let derivative_tree = simplified.tree.get_derivative(steps);
+
+    // Expand: this folds the products and powers the rules produced and cancels
+    // the double negations that `u'v + uv'` introduces.
     let expanded = Expr::from_node(derivative_tree).simplify(true);
-    let factored_tree = expanded.tree.factorise();
-    let simplified_result = Expr::from_node(factored_tree).simplify(false);
+
+    // Factor: this gives a tidier answer for expressions such as
+    // `3 sin(x) + 3 cos(x)`. Re-simplifying without expanding is essential,
+    // otherwise the factoring is immediately undone.
+    let factored = Expr::from_node(expanded.tree.clone().factorise()).simplify(false);
+
+    // Both forms are correct; keep the factored one unless it reads worse.
+    let simplified_result = if reads_worse_than(&factored, &expanded) {
+        expanded
+    } else {
+        factored
+    };
     calc_step!(
         steps,
         "simplify",

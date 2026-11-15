@@ -119,22 +119,19 @@ fn one() -> Expr {
 /// `0.7071…`, and the very next step would compute `0.5 - (0.7071…)²` as
 /// `1.1e-16` instead of the exact `0`. Keeping the surd means the subtraction
 /// simplifies to `0` symbolically, and no rounding error ever appears in a step.
-fn tidy(entry: Expr) -> Expr {
+pub(crate) fn tidy(entry: Expr) -> Expr {
     let simplified = entry.simplify(true);
     if simplified.has_independent() {
         return simplified;
     }
-    // Only fold to a decimal when the symbolic evaluator agrees the expression
-    // is exactly representable (integers, plain arithmetic, integer powers). For
-    // anything it declines — `sqrt`, fractional powers, functions — keep the
-    // exact form so surds do not collapse into inexact decimals.
     let exact = simplified.tree().inner.borrow().evaluate();
-    match exact {
-        Some(value) if !value.is_nan() && !value.is_infinite() => {
-            Expr::from_f64(value.to_f64())
-        }
-        _ => simplified,
+    if let Some(value) = exact
+        && !value.is_nan()
+        && !value.is_infinite()
+    {
+        return Expr::from_f64(value.to_f64());
     }
+    simplified
 }
 
 /// Swap rows `a` and `b`, recording the step.
@@ -176,6 +173,7 @@ fn scale_row(
         matrix[row][column] = tidy(matrix[row][column].clone() * factor.clone());
     }
     let result = matrix_expr(matrix);
+    let factor = tidy(factor);
     recorder.record(
         "row scaling",
         || format!("{why}: multiplied row {} by {}", row + 1, factor),
@@ -198,15 +196,22 @@ fn eliminate_row(
         );
     }
     let result = matrix_expr(matrix);
+    // Show the multiple in its reduced form so the description reads
+    // `row 2 -= 2 * row 1` rather than `row 2 -= (2 / 1) * row 1`.
+    let multiple = tidy(multiple);
     recorder.record(
         "row replacement",
         || {
-            format!(
-                "{why}: row {} -= ({}) * row {}",
-                target + 1,
-                multiple,
-                source + 1
-            )
+            if multiple == one() {
+                format!("{why}: row {} -= row {}", target + 1, source + 1)
+            } else {
+                format!(
+                    "{why}: row {} -= {} * row {}",
+                    target + 1,
+                    multiple,
+                    source + 1
+                )
+            }
         },
         || result,
     );

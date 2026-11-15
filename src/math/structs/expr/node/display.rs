@@ -14,8 +14,41 @@ use super::inspect::*;
 use super::simplify::*;
 use super::functions::{NodeFunctions, NodeOperations};
 
-pub(crate) fn matrix_to_latex(matrix: &crate::math::algebra::linear::Matrix<Expr>) -> String {
-    let mut rows = Vec::with_capacity(matrix.rows());
+/// Render `node` as `-x` when it is a negation, that is `0 - x`.
+///
+/// Negation is stored as a subtraction from zero, so without this a product
+/// such as `2 * -x` would render its left factor and then the raw `0 - x`.
+/// Returns `None` when the node is not a negation.
+fn negated_operand(node: &Node<Real>) -> Option<String> {
+    let borrow = node.inner.borrow();
+    let NodeValue::Operator(op_node) = &borrow.value else {
+        return None;
+    };
+    if !matches!(op_node.token, Token::Operator(Op::Sub)) {
+        return None;
+    }
+    if !op_node.left.inner.borrow().is_zero() {
+        return None;
+    }
+    let inner = op_node.right.inner.borrow();
+    let rendered = format!("{inner}");
+    drop(inner);
+    drop(borrow);
+    // `-(a + b)` needs the brackets kept; a bare atom does not.
+    if rendered.starts_with('-') || is_atom(&rendered) {
+        Some(format!("-{rendered}"))
+    } else {
+        Some(format!("-({rendered})"))
+    }
+}
+
+/// Whether a rendered expression is a single atom, so that prefixing `-` needs
+/// no brackets.
+fn is_atom(rendered: &str) -> bool {
+    !rendered.contains([' ', '+', '/'])
+}
+
+pub(crate) fn matrix_to_latex(matrix: &crate::math::algebra::linear::Matrix<Expr>) -> String {    let mut rows = Vec::with_capacity(matrix.rows());
     for row in 0..matrix.rows() {
         let mut entries = Vec::with_capacity(matrix.columns());
         for column in 0..matrix.columns() {
@@ -273,7 +306,13 @@ impl Display for NodeInner<Real> {
                                     }
                                 }
                                 if left_str == "0" && *op == Op::Sub {
-                                    if right.is_operator() {
+                                    // `0 - x` is the internal form of a negation.
+                                    // A function call or a plain atom reads best
+                                    // as `-x`; anything that is itself a sum,
+                                    // product or power needs brackets so the
+                                    // negation cannot be misread as a
+                                    // subtraction from the left operand.
+                                    if right.is_operator() && !right.is_fn() {
                                         format!("-({right_str})")
                                     } else {
                                         format!("-{right_str}")
@@ -287,7 +326,27 @@ impl Display for NodeInner<Real> {
                                             right_str = stripped.to_string();
                                         }
                                     }
-                                    format!("({left_str} {op} {right_str})")
+                                    // Subtracting a negation is adding: `a - (-b)`
+                                    // reads better as `a + b`, and `a - (-(b c))`
+                                    // as `a + b c`. Without this the inner `0 -`
+                                    // would surface as `a - 0 - b c`.
+                                    if let Some(positive) = negated_operand(&op_node.right) {
+                                        // The negation may itself be negated;
+                                        // cancel all the leading minus signs.
+                                        let mut positive = positive;
+                                        while let Some(rest) = positive.strip_prefix('-') {
+                                            positive = rest.to_string();
+                                        }
+                                        let positive = positive
+                                            .strip_prefix('(')
+                                            .and_then(|s| s.strip_suffix(')'))
+                                            .filter(|inner| !inner.contains(" + ") && !inner.contains(" - "))
+                                            .unwrap_or(&positive)
+                                            .to_string();
+                                        format!("({left_str} + {positive})")
+                                    } else {
+                                        format!("({left_str} {op} {right_str})")
+                                    }
                                 }
                             }
                             Op::ImplicitMul | Op::Mul => {
@@ -333,12 +392,45 @@ impl Display for NodeInner<Real> {
                                 }
                                 let left_is_one = left.is_one();
                                 let right_is_one = right.is_one();
+                                // A negation is stored as `0 - x`. Pull the minus
+                                // out in front of the whole product instead of
+                                // letting it sit between the factors: `sin(x) *
+                                // -sin(x)` must not render as `sin(x) -sin(x)`,
+                                // which reads as a subtraction.
+                                let left_negated = negated_operand(&op_node.left);
+                                let right_negated = negated_operand(&op_node.right);
                                 if left_is_neg_one && right_is_neg_one {
                                     String::from("1")
+                                } else if left_is_neg_one && right_negated.is_some() {
+                                    right_negated.unwrap_or_default()
+                                } else if right_is_neg_one && left_negated.is_some() {
+                                    left_negated.unwrap_or_default()
                                 } else if left_is_neg_one {
                                     format!("-{right_str}")
                                 } else if right_is_neg_one {
                                     format!("-{left_str}")
+                                } else if left_is_one && right_negated.is_some() {
+                                    right_negated.unwrap_or_default()
+                                } else if right_is_one && left_negated.is_some() {
+                                    left_negated.unwrap_or_default()
+                                } else if let Some(negated) = left_negated {
+                                    let positive = negated.strip_prefix('-').unwrap_or(&negated);
+                                    if right_is_one {
+                                        format!("-{positive}")
+                                    } else if right.is_fn() || right.is_operand() {
+                                        format!("-{positive} {right_str}")
+                                    } else {
+                                        format!("-({positive} {right_str})")
+                                    }
+                                } else if let Some(negated) = right_negated {
+                                    let positive = negated.strip_prefix('-').unwrap_or(&negated);
+                                    if left_is_one {
+                                        format!("-{positive}")
+                                    } else if left.is_fn() || left.is_operand() {
+                                        format!("-{left_str} {positive}")
+                                    } else {
+                                        format!("-({left_str} {positive})")
+                                    }
                                 } else if left_is_one && right_is_one {
                                     String::from("1")
                                 } else if left_is_one {
