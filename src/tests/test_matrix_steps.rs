@@ -362,3 +362,26 @@ fn eigen_composes_shift_and_null_space_steps() {
     assert!(has_shift, "expected a shifted-matrix step");
     assert!(nested > 0, "expected a nested row-reduction per eigenvalue");
 }
+
+/// A [`Solution`] records any `Display` value, not only an `Expr`, so a
+/// computation over another coefficient type can keep its steps.
+#[test]
+fn solution_is_generic_over_its_value() {
+    let mut solution = crate::math::structs::solution::Solution::<i32>::new(2, "sum");
+    solution.push_step("add", "added one", 3);
+    solution.push_step_without_result("decide", "chose to stop", None);
+    let solution = solution.finish(7);
+
+    assert_eq!(solution.result(), &7);
+    assert_eq!(solution.steps().len(), 2);
+
+    let rendered = solution.to_string();
+    assert!(rendered.contains("sum: 2"), "got:\n{rendered}");
+    assert!(rendered.contains("added one => 3"), "got:\n{rendered}");
+    assert!(rendered.contains("chose to stop"), "got:\n{rendered}");
+    assert!(
+        !rendered.contains("chose to stop =>"),
+        "a decision step must not print an arrow, got:\n{rendered}"
+    );
+    assert!(rendered.contains("= 7"), "got:\n{rendered}");
+}
