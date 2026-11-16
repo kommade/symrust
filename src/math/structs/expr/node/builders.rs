@@ -111,14 +111,11 @@ impl<T: FloatType + std::fmt::Display> Node<T> {
     }
 }
 
-impl Node<Real> {
+impl<T: FloatType + std::fmt::Display + std::fmt::Debug> Node<T> {
     /// `node` multiplied by an exact rational.
     ///
     /// A rational is written with a trailing division rather than a decimal, so
     /// the result stays exact: `3/4 x` becomes `3 x / 4`, never `0.75 x`.
-    ///
-    /// This is `Real`-only because the coefficient is built by
-    /// [`Rat::integer_node`], which produces a `Node<Real>`.
     #[must_use]
     pub fn multiply_by_rational(node: Self, value: Rat) -> Self {
         let (numerator, denominator) = value.parts();
@@ -134,9 +131,7 @@ impl Node<Real> {
         }
         result
     }
-}
 
-impl<T: FloatType + std::fmt::Display + std::fmt::Debug> Node<T> {
     /// Whether this node is the literal number zero.
     ///
     /// Both an integer `0` and a float `0.0` leaf count, which matches what the

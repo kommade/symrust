@@ -387,11 +387,21 @@ impl Rat {
         Self::new(num_root, den_root)
     }
 
-    pub fn integer_node(value: i128) -> Node {
+    /// The integer `value` as a leaf of a `Node<T>`.
+    ///
+    /// A value that fits `i64` becomes an exact `Number` leaf; anything larger
+    /// becomes a float leaf, because there is no wider integer token.
+    pub fn integer_node<T>(value: i128) -> Node<T>
+    where
+        T: crate::math::numeric::FloatType + std::fmt::Display,
+    {
         if value >= i64::MIN as i128 && value <= i64::MAX as i128 {
             Node::number(value as i64)
         } else {
-            Node::float(arpfloat::Float::from_f64(value as f64).cast(arpfloat::FP128))
+            use crate::math::numeric::FloatBridge;
+            Node::float(T::from_float(
+                arpfloat::Float::from_f64(value as f64).cast(arpfloat::FP128),
+            ))
         }
     }
 
@@ -399,7 +409,12 @@ impl Rat {
         (self.num, self.den)
     }
 
-    pub fn to_node(self) -> Node {
+    /// This rational as an expression leaf: a trailing division, so the value
+    /// stays exact.
+    pub fn to_node<T>(self) -> Node<T>
+    where
+        T: crate::math::numeric::FloatType + std::fmt::Display,
+    {
         let numerator = Self::integer_node(self.num);
         if self.den == 1 {
             numerator

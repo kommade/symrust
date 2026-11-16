@@ -44,18 +44,22 @@ impl<T: Clone> Clone for Expr<T> {
 ///
 /// Structural equality is not meaningful for the shared, mutable node tree, so
 /// equality follows the same rule as the node's own `PartialEq`: the LaTeX
-/// rendering must match.
+/// rendering must match. That makes `1` and `1.0` equal, which the step-recording
+/// code relies on when deciding whether an operation changed anything.
+///
+/// This stays on `Real` until `Display for NodeInner<T>` is generic; the other
+/// leaf types can then follow.
 impl PartialEq for Expr<Real> {
     fn eq(&self, other: &Self) -> bool {
         self.tree.inner.borrow().eq(&*other.tree.inner.borrow())
     }
 }
 
-impl Neg for Expr<Real> {
+impl<T: FloatType + Display + Neg<Output = T> + std::fmt::Debug> Neg for Expr<T> {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
-        Self::from_node(self.tree.negate())
+        Self::from_node(NodeFunctions::negate(self.tree))
     }
 }
 
