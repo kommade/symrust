@@ -10,16 +10,17 @@
 //! form is [`NodeOperations`](super::NodeOperations), which builds the same node
 //! from an existing receiver).
 //!
-//! Every constructor here is for the default [`Real`] leaf type; a tree over a
-//! different float type is built by [`Node::from_typed`](super::Node::from_typed)
-//! or by the generic constructors on [`NodeInner`](super::NodeInner).
+//! Every constructor is generic over the leaf type, so a `Node<f64>` and a
+//! `Node<Real>` are built the same way. The one exception is
+//! [`Node::multiply_by_rational`], which builds its coefficient through
+//! [`Rat::integer_node`] and therefore only exists for [`Real`].
 
 use super::{Node, NodeInner, NodeValue};
 use crate::math::algebra::rational::Rat;
-use crate::math::numeric::{FloatType, Real};
+use crate::math::numeric::{FloatType, FloatBridge, Real};
 use crate::math::parse::lexer::{Func, Op, Token};
 
-impl Node<Real> {
+impl<T: FloatType + std::fmt::Display> Node<T> {
     /// The number `value` as an integer leaf.
     #[must_use]
     pub fn number(value: i64) -> Self {
@@ -27,8 +28,12 @@ impl Node<Real> {
     }
 
     /// A float leaf.
+    ///
+    /// Accepts the leaf type itself or anything that converts to it. A decimal
+    /// literal parses into every leaf type, so `f64` values convert too; that
+    /// path goes through the same [`FloatBridge`] the parser uses.
     #[must_use]
-    pub fn float(value: impl Into<Real>) -> Self {
+    pub fn float(value: impl Into<T>) -> Self {
         NodeInner::from_float(value.into()).wrap()
     }
 
@@ -85,7 +90,7 @@ impl Node<Real> {
     /// This is the raw constructor; `calculus::expr::function` applies the
     /// simplifications that generated formulas need.
     #[must_use]
-    pub fn call(func: Func, arg: Self) -> Self {
+    pub fn call(func: Func<T>, arg: Self) -> Self {
         NodeInner::from_function(func, arg)
     }
 
@@ -104,11 +109,16 @@ impl Node<Real> {
         }
         acc
     }
+}
 
+impl Node<Real> {
     /// `node` multiplied by an exact rational.
     ///
     /// A rational is written with a trailing division rather than a decimal, so
     /// the result stays exact: `3/4 x` becomes `3 x / 4`, never `0.75 x`.
+    ///
+    /// This is `Real`-only because the coefficient is built by
+    /// [`Rat::integer_node`], which produces a `Node<Real>`.
     #[must_use]
     pub fn multiply_by_rational(node: Self, value: Rat) -> Self {
         let (numerator, denominator) = value.parts();
