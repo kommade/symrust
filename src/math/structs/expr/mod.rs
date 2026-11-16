@@ -40,20 +40,27 @@ impl<T: Clone> Clone for Expr<T> {
     }
 }
 
-/// Expressions compare equal when their trees render identically.
+/// Expressions compare equal when their trees have the same structure.
 ///
-/// Structural equality is not meaningful for the shared, mutable node tree, so
-/// equality follows the same rule as the node's own `PartialEq`: the LaTeX
-/// rendering must match. That makes `1` and `1.0` equal, which the step-recording
-/// code relies on when deciding whether an operation changed anything.
+/// This is a structural comparison ([`Node::same_tree`]), not a mathematical
+/// one: `x + x` and `2x` are different trees, and so are `a + b` and `b + a`.
+/// The only exception is numeric leaves, where `1` and `1.0` are equal because
+/// they denote the same number.
 ///
-/// This stays on `Real` until `Display for NodeInner<T>` is generic; the other
-/// leaf types can then follow.
-impl PartialEq for Expr<Real> {
+/// The previous implementation compared LaTeX renderings. That was a stopgap:
+/// it conflated distinct trees that happened to print alike (such as `(a+b)+c`
+/// and `a+(b+c)`) and could not distinguish a matrix from an equal-looking list.
+impl<T: FloatType + Display> PartialEq for Expr<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.tree.inner.borrow().eq(&*other.tree.inner.borrow())
+        self.tree.same_tree(&other.tree)
     }
 }
+
+/// Expressions are equal when their trees are equal.
+///
+/// This is sound because [`PartialEq`] compares structure: if two trees are
+/// equal the comparison is reflexive, symmetric and transitive.
+impl<T: FloatType + Display> Eq for Expr<T> {}
 
 impl<T: FloatType + Display + Neg<Output = T> + std::fmt::Debug> Neg for Expr<T> {
     type Output = Self;

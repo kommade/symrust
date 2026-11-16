@@ -19,7 +19,7 @@ use crate::math::structs::expr::Expr;
 /// form instead of being expanded into decimal `atan`/`cos` terms. The polynomial coefficients are
 /// stored exactly (as [`Rat`]s), so the display is exact and the value can also
 /// be evaluated numerically for verification.
-#[derive(Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub struct RootSumData {
     /// The root symbol the sum is taken over, e.g. `Z`.
     pub root_symbol: char,
@@ -100,7 +100,7 @@ pub(crate) fn poly_text(coefficients: &[crate::math::algebra::rational::Rat], sy
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Func<T = Real> {
     Sin,
     Cos,
@@ -175,7 +175,7 @@ impl Display for Op {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Const {
     Pi,
     E,
@@ -199,7 +199,7 @@ impl Display for Const {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum Token<T = Real> {
     Function(Func<T>),
     Operator(Op),

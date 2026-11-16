@@ -111,7 +111,7 @@ impl<T: FloatType + std::fmt::Display> Node<T> {
     }
 }
 
-impl<T: FloatType + std::fmt::Display + std::fmt::Debug> Node<T> {
+impl<T: FloatType + std::fmt::Display> Node<T> {
     /// `node` multiplied by an exact rational.
     ///
     /// A rational is written with a trailing division rather than a decimal, so
@@ -148,11 +148,48 @@ impl<T: FloatType + std::fmt::Display + std::fmt::Debug> Node<T> {
 
     /// Whether two nodes have the same structure and leaf values.
     ///
-    /// `PartialEq` on `Node` is implemented only for `Real` (it compares LaTeX
-    /// renderings), so this is the generic structural comparison the
-    /// coefficient-agnostic algorithms need.
+    /// This is a real structural comparison: the token kinds must match, the
+    /// operator and function must match, and both operands must be structurally
+    /// equal in the same order. `a + b` and `b + a` are therefore *not* equal —
+    /// this compares trees, not values.
+    ///
+    /// Numeric leaves compare by value rather than by token kind, so a
+    /// `Number(1)` and a `Float(1.0)` of the same value are equal. That is the
+    /// one place where the representation is deliberately not part of the
+    /// comparison: the two spellings mean the same number, and the tree builder
+    /// freely produces either.
     #[must_use]
     pub fn same_tree(&self, other: &Self) -> bool {
-        format!("{:?}", self.inner.borrow()) == format!("{:?}", other.inner.borrow())
+        let left = self.inner.borrow();
+        let right = other.inner.borrow();
+        match (&left.value, &right.value) {
+            (NodeValue::Empty, NodeValue::Empty) => true,
+            (NodeValue::Operand(a), NodeValue::Operand(b)) => tokens_equal(a, b),
+            (NodeValue::Operator(a), NodeValue::Operator(b)) => {
+                a.token.to_string() == b.token.to_string()
+                    && a.left.same_tree(&b.left)
+                    && a.right.same_tree(&b.right)
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Whether two operand tokens denote the same leaf.
+///
+/// Numeric leaves compare by value, so `Number(1)` equals `Float(1.0)`. Every
+/// other token compares by its display form, which is exact for the token kinds
+/// that can appear as operands (variables, constants, root sums).
+fn tokens_equal<T>(left: &Token<T>, right: &Token<T>) -> bool
+where
+    T: FloatType + std::fmt::Display,
+{
+    match (left, right) {
+        (Token::Number(a), Token::Number(b)) => a == b,
+        (Token::Float(a), Token::Float(b)) => a.to_string() == b.to_string(),
+        (Token::Number(n), Token::Float(f)) | (Token::Float(f), Token::Number(n)) => {
+            f.to_string() == n.to_string()
+        }
+        _ => left.to_string() == right.to_string(),
     }
 }
