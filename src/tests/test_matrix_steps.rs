@@ -406,13 +406,53 @@ fn solution_steps_and_result_may_differ() {
         ],
     )
     .unwrap();
-    let mut solution = Solution::<Matrix<Rat>, Rat>::new(matrix.clone(), "determinant");    solution.push_step("row swap", "exchanged rows", matrix);
+    let mut solution = Solution::<Matrix<Rat>, Rat>::new(matrix.clone(), "determinant");
+    // The step that does the work reports the scalar it produced, while the
+    // computation as a whole started from a matrix.
+    solution.push_step(
+        "multiply the diagonal",
+        "product of the diagonal",
+        Rat::from_i64(-2),
+    );
     let solution = solution.finish(Rat::from_i64(-2));
 
     assert_eq!(solution.result(), &Rat::from_i64(-2));
     assert_eq!(solution.steps().len(), 1);
     let rendered = solution.to_string();
     assert!(rendered.contains("determinant"), "got:\n{rendered}");
-    assert!(rendered.contains("exchanged rows"), "got:\n{rendered}");
+    assert!(rendered.contains("product of the diagonal"), "got:\n{rendered}");
     assert!(rendered.contains("= -2"), "got:\n{rendered}");
+}
+
+/// An elementary step knows the type it was applied to even though it stores
+/// only the value it produced, and a step may produce a different kind of value
+/// from the one the computation started with.
+#[test]
+fn elementary_step_carries_the_step_type() {
+    use crate::math::algebra::linear::Matrix;
+    use crate::math::algebra::rational::Rat;
+    use crate::math::structs::solution::{ElementaryStep, Solution};
+
+    // Applied to a matrix, producing a scalar.
+    let step: ElementaryStep<Matrix<Rat>, Rat> = ElementaryStep::new(
+        "determinant",
+        "product of the diagonal",
+        Some(Rat::from_i64(-2)),
+    );
+    assert_eq!(step.step_result, Some(Rat::from_i64(-2)));
+    assert_eq!(
+        step.to_string(),
+        "determinant: product of the diagonal => -2"
+    );
+
+    // A decision step carries no value at all.
+    let decision: ElementaryStep<Matrix<Rat>, Rat> =
+        ElementaryStep::new("factor", "factored the denominator", None);
+    assert!(decision.step_result.is_none());
+    assert_eq!(decision.to_string(), "factor: factored the denominator");
+
+    // With the default, both parameters are the same.
+    let mut solution = Solution::<i32>::new(0, "sum");
+    solution.push_step("add", "added two", 2);
+    assert_eq!(solution.finish(2).result(), &2);
 }

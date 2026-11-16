@@ -19,6 +19,7 @@
 //! no runtime cost for step tracking.
 
 use std::fmt::{self, Display};
+use std::marker::PhantomData;
 
 use crate::math::structs::expr::Expr;
 
@@ -28,11 +29,16 @@ use crate::math::structs::expr::Expr;
 /// steps: the name of the rule that was applied, a human readable description,
 /// and the value that rule produced.
 ///
-/// The recorded value is generic so a computation over any coefficient type can
-/// keep steps — a `Matrix<Rat>` reduction records its matrices, and an
-/// expression calculation records `Expr`. Both render through `Display`.
+/// `T` is the type the computation's steps run over, `S` the type this
+/// particular step yields; they default to the same type. A step can therefore
+/// produce a different kind of value from the one the computation started with —
+/// the final step of a determinant turns a matrix into a scalar.
+///
+/// `T` is only a marker: it records what the step was applied to, so the type
+/// appears in the signature even though no field stores it. Hence the
+/// `PhantomData`.
 #[derive(Debug, Clone)]
-pub struct ElementaryStep<T = Expr> {
+pub struct ElementaryStep<T = Expr, S = T> {
     /// The name of the rule or technique that was applied, e.g. `power rule`.
     pub step_name: String,
     /// A human readable description of what happened in this step.
@@ -43,19 +49,41 @@ pub struct ElementaryStep<T = Expr> {
     /// denominator, choosing a substitution — and have no value of their own.
     /// Those record `None` rather than a placeholder, so the rendered step does
     /// not show a misleading `=> 0`.
-    pub step_result: Option<T>,
+    pub step_result: Option<S>,
+    /// Marks the type the step was applied to.
+    marker: PhantomData<T>,
+}
+
+impl<T, S> ElementaryStep<T, S> {
+    /// Build a step, recording the value it produced (if any).
+    ///
+    /// Prefer this over a struct literal: the marker field is not part of the
+    /// public surface.
+    #[must_use]
+    pub fn new(
+        step_name: impl Into<String>,
+        description: impl Into<String>,
+        step_result: Option<S>,
+    ) -> Self {
+        Self {
+            step_name: step_name.into(),
+            description: description.into(),
+            step_result,
+            marker: PhantomData,
+        }
+    }
 }
 
 /// One entry in a [`Solution`].
 ///
-/// The parameters mirror [`Solution`]'s: `T` is the type an elementary step
-/// records, `S` the type the enclosing computation answers with. A nested
+/// The parameters mirror [`Solution`]'s: `T` is the type the computation's
+/// steps run over, `S` the type the computation answers with. A nested
 /// sub-solution keeps its own pair, so `SubSolution` carries a full
 /// `Solution<T, S>`.
 #[derive(Debug, Clone)]
 pub enum SolutionStep<T = Expr, S = T> {
     /// A single rule application.
-    Elementary(ElementaryStep<T>),
+    Elementary(ElementaryStep<T, S>),
     /// A nested solution, for a sub-problem that was solved in its own right.
     SubSolution(Solution<T, S>),
 }
@@ -135,12 +163,12 @@ impl<T, S> Solution<T, S> {
         &self.result_comment
     }
 
-    /// Record an elementary step.
+    /// Record an elementary step and the value it produced.
     pub fn push_step(
         &mut self,
         step_name: impl Into<String>,
         description: impl Into<String>,
-        step_result: T,
+        step_result: S,
     ) {
         self.push_step_without_result(step_name, description, Some(step_result));
     }
@@ -153,13 +181,11 @@ impl<T, S> Solution<T, S> {
         &mut self,
         step_name: impl Into<String>,
         description: impl Into<String>,
-        step_result: Option<T>,
+        step_result: Option<S>,
     ) {
-        self.steps.push(SolutionStep::Elementary(ElementaryStep {
-            step_name: step_name.into(),
-            description: description.into(),
-            step_result,
-        }));
+        self.steps.push(SolutionStep::Elementary(
+            ElementaryStep::<T, S>::new(step_name, description, step_result),
+        ));
     }
 
     /// Record a nested solution.
@@ -238,7 +264,7 @@ impl<T: Display, S: Display> Display for Solution<T, S> {
     }
 }
 
-impl<T: Display> Display for ElementaryStep<T> {
+impl<T: Display, S: Display> Display for ElementaryStep<T, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.step_result {
             Some(result) => write!(f, "{}: {} => {}", self.step_name, self.description, result),
