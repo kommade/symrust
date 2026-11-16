@@ -266,40 +266,45 @@ impl IntoStepResult for crate::math::structs::expr::node::Node {
 /// points pass [`NoSteps`], which compiles to nothing, so no step tracking work
 /// is done unless the caller asked for a [`Solution`].
 ///
+/// The recorded value is a type parameter so a computation over any coefficient
+/// type can report progress; the calculus entry points use the `Expr` default.
+///
 /// The description and result are closures so a recording implementation can
 /// store them while a no-op implementation discards them without allocating.
 ///
 /// This is an implementation detail of the step-recording machinery.
-pub(crate) trait Recorder {
+pub(crate) trait Recorder<T = Expr> {
     /// Record an elementary step. `step_name` names the rule, `description`
-    /// explains it and `result` is the expression the rule produced.
+    /// explains it and `result` is the value the rule produced.
     fn record(
         &mut self,
         step_name: &str,
         description: impl FnOnce() -> String,
-        result: impl FnOnce() -> Expr,
+        result: impl FnOnce() -> T,
     );
 
-    /// Record a step that reports a decision but produces no expression.
+    /// Record a step that reports a decision but produces no value.
     ///
-    /// Used for steps such as factoring the denominator, where showing an
-    /// expression would mean inventing one. The default implementation records
-    /// nothing, so an implementation that only overrides [`record`](Self::record)
-    /// keeps working.
+    /// Used for steps such as factoring the denominator, where showing a result
+    /// would mean inventing one. The default implementation records nothing, so
+    /// an implementation that only overrides [`record`](Self::record) keeps
+    /// working.
     fn record_without_result(
         &mut self,
         step_name: &str,
         description: impl FnOnce() -> String,
-        _result: impl FnOnce() -> Expr,
-    ) {
+        _result: impl FnOnce() -> T,
+    ) where
+        T: Default,
+    {
         if self.is_recording() {
             let description = description();
-            self.record(step_name, || description, || Expr::default());
+            self.record(step_name, || description, T::default);
         }
     }
 
     /// Record a nested solution.
-    fn record_sub_solution(&mut self, solution: impl FnOnce() -> Solution) {
+    fn record_sub_solution(&mut self, solution: impl FnOnce() -> Solution<T>) {
         let _ = solution;
     }
 
@@ -320,18 +325,18 @@ pub(crate) trait Recorder {
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct NoSteps;
 
-impl Recorder for NoSteps {
+impl<T> Recorder<T> for NoSteps {
     #[inline]
     fn record(
         &mut self,
         _step_name: &str,
         _description: impl FnOnce() -> String,
-        _result: impl FnOnce() -> Expr,
+        _result: impl FnOnce() -> T,
     ) {
     }
 
     #[inline]
-    fn record_sub_solution(&mut self, _solution: impl FnOnce() -> Solution) {}
+    fn record_sub_solution(&mut self, _solution: impl FnOnce() -> Solution<T>) {}
 
     #[inline]
     fn is_recording(&self) -> bool {
@@ -372,12 +377,12 @@ impl<T: Default> StepRecorder<T> {
     }
 }
 
-impl Recorder for StepRecorder {
+impl<T> Recorder<T> for StepRecorder<T> {
     fn record(
         &mut self,
         step_name: &str,
         description: impl FnOnce() -> String,
-        result: impl FnOnce() -> Expr,
+        result: impl FnOnce() -> T,
     ) {
         let description = description();
         let step_result = result();
@@ -388,11 +393,15 @@ impl Recorder for StepRecorder {
         &mut self,
         step_name: &str,
         description: impl FnOnce() -> String,
-        _result: impl FnOnce() -> Expr,
+        _result: impl FnOnce() -> T,
     ) {
         let description = description();
         self.solution
             .push_step_without_result(step_name, description, None);
+    }
+
+    fn record_sub_solution(&mut self, solution: impl FnOnce() -> Solution<T>) {
+        self.solution.push_sub_solution(solution());
     }
 }
 
