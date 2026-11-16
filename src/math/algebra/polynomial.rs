@@ -5,32 +5,32 @@ use crate::math::structs::expr::node::Node;
 
 /// A polynomial with rational coefficients, stored lowest degree first.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Poly {
+pub struct Poly {
     coeffs: Vec<Rat>,
 }
 
 impl Poly {
-    pub(crate) fn new(coeffs: Vec<Rat>) -> Self {
+    pub fn new(coeffs: Vec<Rat>) -> Self {
         let mut poly = Self { coeffs };
         poly.trim();
         poly
     }
 
-    pub(crate) fn zero() -> Self {
+    pub fn zero() -> Self {
         Self { coeffs: Vec::new() }
     }
 
-    pub(crate) fn one() -> Self {
+    pub fn one() -> Self {
         Self {
             coeffs: vec![Rat::ONE],
         }
     }
 
-    pub(crate) fn constant(value: Rat) -> Self {
+    pub fn constant(value: Rat) -> Self {
         Self::new(vec![value])
     }
 
-    pub(crate) fn variable() -> Self {
+    pub fn variable() -> Self {
         Self::new(vec![Rat::ZERO, Rat::ONE])
     }
 
@@ -40,27 +40,27 @@ impl Poly {
         }
     }
 
-    pub(crate) fn is_zero(&self) -> bool {
+    pub fn is_zero(&self) -> bool {
         self.coeffs.is_empty()
     }
 
-    pub(crate) fn degree(&self) -> Option<usize> {
+    pub fn degree(&self) -> Option<usize> {
         self.coeffs.len().checked_sub(1)
     }
 
-    pub(crate) fn coeff(&self, index: usize) -> Rat {
+    pub fn coeff(&self, index: usize) -> Rat {
         self.coeffs.get(index).copied().unwrap_or(Rat::ZERO)
     }
 
-    pub(crate) fn coefficients(&self) -> &[Rat] {
+    pub fn coefficients(&self) -> &[Rat] {
         &self.coeffs
     }
 
-    pub(crate) fn leading(&self) -> Option<Rat> {
+    pub fn leading(&self) -> Option<Rat> {
         self.coeffs.last().copied()
     }
 
-    pub(crate) fn add(&self, other: &Self) -> Option<Self> {
+    pub fn add(&self, other: &Self) -> Option<Self> {
         let length = self.coeffs.len().max(other.coeffs.len());
         let mut coeffs = Vec::with_capacity(length);
         for index in 0..length {
@@ -69,7 +69,7 @@ impl Poly {
         Some(Self::new(coeffs))
     }
 
-    pub(crate) fn sub(&self, other: &Self) -> Option<Self> {
+    pub fn sub(&self, other: &Self) -> Option<Self> {
         let length = self.coeffs.len().max(other.coeffs.len());
         let mut coeffs = Vec::with_capacity(length);
         for index in 0..length {
@@ -78,7 +78,7 @@ impl Poly {
         Some(Self::new(coeffs))
     }
 
-    pub(crate) fn mul(&self, other: &Self) -> Option<Self> {
+    pub fn mul(&self, other: &Self) -> Option<Self> {
         if self.is_zero() || other.is_zero() {
             return Some(Self::zero());
         }
@@ -93,7 +93,7 @@ impl Poly {
         Some(Self::new(coeffs))
     }
 
-    pub(crate) fn scale(&self, factor: Rat) -> Option<Self> {
+    pub fn scale(&self, factor: Rat) -> Option<Self> {
         let mut coeffs = Vec::with_capacity(self.coeffs.len());
         for coefficient in &self.coeffs {
             coeffs.push(coefficient.mul(factor)?);
@@ -101,7 +101,7 @@ impl Poly {
         Some(Self::new(coeffs))
     }
 
-    pub(crate) fn pow(&self, exponent: u32) -> Option<Self> {
+    pub fn pow(&self, exponent: u32) -> Option<Self> {
         if exponent > 64 {
             return None;
         }
@@ -112,7 +112,7 @@ impl Poly {
         Some(result)
     }
 
-    pub(crate) fn div_rem(&self, divisor: &Self) -> Option<(Self, Self)> {
+    pub fn div_rem(&self, divisor: &Self) -> Option<(Self, Self)> {
         let divisor_degree = divisor.degree()?;
         let divisor_leading = divisor.leading()?;
         if divisor_leading.is_zero() {
@@ -137,7 +137,7 @@ impl Poly {
         Some((Self::new(quotient), remainder))
     }
 
-    pub(crate) fn div_exact(&self, divisor: &Self) -> Option<Self> {
+    pub fn div_exact(&self, divisor: &Self) -> Option<Self> {
         let (quotient, remainder) = self.div_rem(divisor)?;
         if remainder.is_zero() {
             Some(quotient)
@@ -147,7 +147,7 @@ impl Poly {
     }
 
     /// The formal derivative.
-    pub(crate) fn derivative(&self) -> Option<Self> {
+    pub fn derivative(&self) -> Option<Self> {
         let mut coeffs = Vec::with_capacity(self.coeffs.len().saturating_sub(1));
         for (degree, coefficient) in self.coeffs.iter().enumerate().skip(1) {
             coeffs.push(coefficient.mul(Rat::from_i64(degree as i64))?);
@@ -156,7 +156,7 @@ impl Poly {
     }
 
     /// The same polynomial rescaled to have leading coefficient `1`.
-    pub(crate) fn monic(&self) -> Option<Self> {
+    pub fn monic(&self) -> Option<Self> {
         match self.leading() {
             Some(leading) if !leading.is_zero() => self.scale(leading.recip()?),
             _ => Some(self.clone()),
@@ -164,7 +164,7 @@ impl Poly {
     }
 
     /// The monic greatest common divisor, computed by the Euclidean algorithm.
-    pub(crate) fn gcd(&self, other: &Self) -> Option<Self> {
+    pub fn gcd(&self, other: &Self) -> Option<Self> {
         let mut left = self.clone();
         let mut right = other.clone();
         while !right.is_zero() {
@@ -175,7 +175,7 @@ impl Poly {
         left.monic()
     }
 
-    pub(crate) fn evaluate(&self, value: Rat) -> Option<Rat> {
+    pub fn evaluate(&self, value: Rat) -> Option<Rat> {
         let mut result = Rat::ZERO;
         for coefficient in self.coeffs.iter().rev() {
             result = result.mul(value)?.add(*coefficient)?;
@@ -185,7 +185,7 @@ impl Poly {
 
     /// The polynomial in `y = x^2`, if only even powers appear.
     /// Replace `y` with `x^2`, used when reversing the `y = x^2` substitution.
-    pub(crate) fn substitute_square(&self) -> Option<Self> {
+    pub fn substitute_square(&self) -> Option<Self> {
         let mut coeffs = vec![Rat::ZERO; self.coeffs.len() * 2];
         for (degree, coefficient) in self.coeffs.iter().enumerate() {
             coeffs[2 * degree] = *coefficient;
@@ -193,7 +193,7 @@ impl Poly {
         Some(Self::new(coeffs))
     }
 
-    pub(crate) fn even_part(&self) -> Option<Self> {
+    pub fn even_part(&self) -> Option<Self> {
         let mut coeffs = Vec::with_capacity(self.coeffs.len() / 2 + 1);
         for (degree, coefficient) in self.coeffs.iter().enumerate() {
             if degree % 2 == 1 {
@@ -208,7 +208,7 @@ impl Poly {
     }
 
     /// The polynomial square root, when one exists.
-    pub(crate) fn square_root(&self) -> Option<Self> {
+    pub fn square_root(&self) -> Option<Self> {
         let degree = self.degree()?;
         if degree == 0 || degree % 2 != 0 {
             return None;
@@ -241,7 +241,7 @@ impl Poly {
         }
     }
 
-    pub(crate) fn integrate(&self) -> Option<Self> {
+    pub fn integrate(&self) -> Option<Self> {
         let mut coeffs = vec![Rat::ZERO];
         for (degree, coefficient) in self.coeffs.iter().enumerate() {
             coeffs.push(coefficient.div(Rat::from_i64((degree + 1) as i64))?);
@@ -250,7 +250,7 @@ impl Poly {
     }
 }
 
-pub(crate) fn poly_to_node(poly: &Poly, variable: &Node) -> Node {
+pub fn poly_to_node(poly: &Poly, variable: &Node) -> Node {
     let mut terms = Vec::new();
     for (degree, coefficient) in poly.coeffs.iter().enumerate() {
         if coefficient.is_zero() {
@@ -271,7 +271,7 @@ pub(crate) fn poly_to_node(poly: &Poly, variable: &Node) -> Node {
 }
 
 /// `(x - root)`, `(x + root)` or `x`.
-pub(crate) fn describe_linear(root: Rat) -> String {
+pub fn describe_linear(root: Rat) -> String {
     let value = root.to_f64();
     if value == 0.0 {
         String::from("x")
@@ -283,7 +283,7 @@ pub(crate) fn describe_linear(root: Rat) -> String {
 }
 
 /// `x^2 + linear x + constant`.
-pub(crate) fn describe_quadratic(linear: Rat, constant: Rat) -> String {
+pub fn describe_quadratic(linear: Rat, constant: Rat) -> String {
     let mut description = String::from("x^2");
     let slope = linear.to_f64();
     if slope != 0.0 {
@@ -304,7 +304,7 @@ pub(crate) fn describe_quadratic(linear: Rat, constant: Rat) -> String {
     description
 }
 
-pub(crate) fn describe_polynomial(poly: &Poly) -> String {
+pub fn describe_polynomial(poly: &Poly) -> String {
     let mut parts: Vec<String> = Vec::new();
     for degree in (0..=poly.degree().unwrap_or(0)).rev() {
         let coefficient = poly.coeff(degree);

@@ -12,7 +12,8 @@ pub(crate) mod expr;
 pub(crate) mod factorization;
 pub mod linear;
 pub(crate) mod matrix_steps;
-pub(crate) mod polynomial;
+/// Polynomials over the rationals: the `Poly` coefficient container.
+pub mod polynomial;
 /// Exact rational arithmetic: the `Rat` coefficient type.
 pub mod rational;
 pub mod symbolic_eigen;
