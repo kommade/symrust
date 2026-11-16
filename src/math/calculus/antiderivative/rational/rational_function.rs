@@ -8,9 +8,7 @@
 use crate::{math::algebra::{
         factorization::{Factor, Factorization, factorise},
         linear::{Matrix, Vector},
-        polynomial::{
-            Poly, describe_linear, describe_polynomial, describe_quadratic, poly_to_node,
-        },
+        polynomial::Poly,
         rational::Rat,
         surd::Surd,
     },
@@ -76,7 +74,7 @@ impl RationalFunction {
         let mut terms = Vec::new();
         if !quotient.is_zero() {
             let degree = quotient.degree();
-            let polynomial_part = poly_to_node(&quotient.integrate()?, variable);
+            let polynomial_part = quotient.integrate()?.to_node(variable);
             terms.push(polynomial_part);
             integrator.step(
                 "polynomial division",
@@ -88,7 +86,7 @@ impl RationalFunction {
             let proper = self.integrate_proper(&remainder, variable, integrator)?;
             integrator.step(
                 "partial fractions",
-                || describe_polynomial(&self.denom),
+                || self.denom.describe(),
                 || proper.clone(),
             );
             terms.push(proper);
@@ -224,7 +222,7 @@ pub(super) fn solve_partial_fractions(columns: &[Poly], numerator: &Poly) -> Opt
     Some(solution.iter().collect())
 }
 fn describe_coefficients(coefficients: &[Rat]) -> String {
-    describe_polynomial(&Poly::new(coefficients.to_vec()))
+    Poly::new(coefficients.to_vec()).describe()
 }
 
 struct Descriptor {

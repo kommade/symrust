@@ -7,9 +7,7 @@
 use crate::{math::algebra::{
         factorization::{Factor, Factorization, factorise},
         linear::{Matrix, Vector},
-        polynomial::{
-            Poly, describe_linear, describe_polynomial, describe_quadratic, poly_to_node,
-        },
+        polynomial::Poly,
         rational::Rat,
         surd::Surd,
     },
@@ -59,7 +57,7 @@ pub(super) fn quadratic_term(
         return Some(helpers::zero());
     }
     let quadratic = Poly::new(vec![constant, linear, Rat::ONE]);
-    let quadratic_node = poly_to_node(&quadratic, variable);
+    let quadratic_node = quadratic.to_node(variable);
     let mut terms = Vec::new();
 
     // The slope part is a multiple of the derivative of the quadratic, so it

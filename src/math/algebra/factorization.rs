@@ -2,7 +2,7 @@
 //! extensions.
 
 use super::{
-    polynomial::{Poly, describe_linear, describe_polynomial, describe_quadratic},
+    polynomial::Poly,
     rational::Rat,
     surd::Surd,
 };
@@ -168,11 +168,11 @@ impl Factor {
 
     pub(crate) fn describe(&self) -> String {
         match self {
-            Factor::Linear { root } => describe_linear(*root),
+            Factor::Linear { root } => Poly::describe_linear(*root),
             Factor::Quadratic { linear, constant } => {
-                format!("({})", describe_quadratic(*linear, *constant))
+                format!("({})", Poly::describe_quadratic(*linear, *constant))
             }
-            Factor::General(poly) => format!("({})", describe_polynomial(poly)),
+            Factor::General(poly) => format!("({})", poly.describe()),
         }
     }
 }

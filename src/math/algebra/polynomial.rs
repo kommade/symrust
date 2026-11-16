@@ -1,12 +1,35 @@
 //! Polynomials over the rationals.
 
+use std::fmt;
+
 use super::{expr, rational::Rat};
 use crate::math::structs::expr::node::Node;
 
 /// A polynomial with rational coefficients, stored lowest degree first.
+///
+/// `Poly::new(vec![a0, a1, a2])` represents `a0 + a1·x + a2·x²`. Trailing zero
+/// coefficients are trimmed on construction, so equality is degree-first and
+/// the zero polynomial has no coefficients at all.
+///
+/// # Examples
+/// ```
+/// use rust_calculus::math::algebra::{polynomial::Poly, rational::Rat};
+/// let poly = Poly::new(vec![Rat::from_i64(1), Rat::ZERO, Rat::from_i64(2)]);
+/// assert_eq!(poly.degree(), Some(2));
+/// assert_eq!(poly.describe(), "2 x^2 + 1");
+/// ```
 #[derive(Clone, Debug, Default)]
 pub struct Poly {
     coeffs: Vec<Rat>,
+}
+
+/// Renders the polynomial in descending degree, e.g. `2 x^2 + 3 x - 1`.
+///
+/// See [`Poly::describe`], which this delegates to.
+impl fmt::Display for Poly {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.describe())
+    }
 }
 
 impl Poly {
@@ -248,97 +271,113 @@ impl Poly {
         }
         Some(Self::new(coeffs))
     }
-}
 
-pub fn poly_to_node(poly: &Poly, variable: &Node) -> Node {
-    let mut terms = Vec::new();
-    for (degree, coefficient) in poly.coeffs.iter().enumerate() {
-        if coefficient.is_zero() {
-            continue;
-        }
-        let power = match degree {
-            0 => expr::one(),
-            1 => variable.clone(),
-            _ => expr::pow(variable.clone(), expr::number(degree as i64)),
-        };
-        if coefficient.is_one() {
-            terms.push(power);
-        } else {
-            terms.push(expr::multiply_by_rational(power, *coefficient));
-        }
-    }
-    expr::sum(terms)
-}
-
-/// `(x - root)`, `(x + root)` or `x`.
-pub fn describe_linear(root: Rat) -> String {
-    let value = root.to_f64();
-    if value == 0.0 {
-        String::from("x")
-    } else if value < 0.0 {
-        format!("(x + {})", -value)
-    } else {
-        format!("(x - {value})")
-    }
-}
-
-/// `x^2 + linear x + constant`.
-pub fn describe_quadratic(linear: Rat, constant: Rat) -> String {
-    let mut description = String::from("x^2");
-    let slope = linear.to_f64();
-    if slope != 0.0 {
-        if slope < 0.0 {
-            description.push_str(&format!(" - {} x", -slope));
-        } else {
-            description.push_str(&format!(" + {slope} x"));
-        }
-    }
-    let offset = constant.to_f64();
-    if offset != 0.0 {
-        if offset < 0.0 {
-            description.push_str(&format!(" - {}", -offset));
-        } else {
-            description.push_str(&format!(" + {offset}"));
-        }
-    }
-    description
-}
-
-pub fn describe_polynomial(poly: &Poly) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    for degree in (0..=poly.degree().unwrap_or(0)).rev() {
-        let coefficient = poly.coeff(degree);
-        if coefficient.is_zero() {
-            continue;
-        }
-        let magnitude = if coefficient.is_negative() {
-            coefficient.neg()
-        } else {
-            coefficient
-        };
-        let value = magnitude.to_f64();
-        let term = match degree {
-            0 => format!("{value}"),
-            1 if magnitude.is_one() => String::from("x"),
-            1 => format!("{value} x"),
-            _ if magnitude.is_one() => format!("x^{degree}"),
-            _ => format!("{value} x^{degree}"),
-        };
-        if parts.is_empty() {
-            parts.push(if coefficient.is_negative() {
-                format!("-{term}")
+    /// Build the expression tree `a0 + a1·var + a2·var² + …` for `variable`.
+    ///
+    /// Zero coefficients are skipped, so `x² + 1` does not gain a `0 x` term,
+    /// and a unit coefficient is left implicit (`x`, not `1 x`).
+    #[must_use]
+    pub fn to_node(&self, variable: &Node) -> Node {
+        let mut terms = Vec::new();
+        for (degree, coefficient) in self.coeffs.iter().enumerate() {
+            if coefficient.is_zero() {
+                continue;
+            }
+            let power = match degree {
+                0 => expr::one(),
+                1 => variable.clone(),
+                _ => expr::pow(variable.clone(), expr::number(degree as i64)),
+            };
+            if coefficient.is_one() {
+                terms.push(power);
             } else {
-                term
-            });
-        } else if coefficient.is_negative() {
-            parts.push(format!("- {term}"));
+                terms.push(expr::multiply_by_rational(power, *coefficient));
+            }
+        }
+        expr::sum(terms)
+    }
+
+    /// The polynomial written as `a0 + a1 x + …` in descending degree, using
+    /// `x` as the variable name.
+    ///
+    /// Terms are ordered highest degree first and zero coefficients are
+    /// dropped, so the result reads like a polynomial a person would write.
+    /// This is the same rendering [`std::fmt::Display`] uses.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        for degree in (0..=self.degree().unwrap_or(0)).rev() {
+            let coefficient = self.coeff(degree);
+            if coefficient.is_zero() {
+                continue;
+            }
+            let magnitude = if coefficient.is_negative() {
+                coefficient.neg()
+            } else {
+                coefficient
+            };
+            let value = magnitude.to_f64();
+            let term = match degree {
+                0 => format!("{value}"),
+                1 if magnitude.is_one() => String::from("x"),
+                1 => format!("{value} x"),
+                _ if magnitude.is_one() => format!("x^{degree}"),
+                _ => format!("{value} x^{degree}"),
+            };
+            if parts.is_empty() {
+                parts.push(if coefficient.is_negative() {
+                    format!("-{term}")
+                } else {
+                    term
+                });
+            } else if coefficient.is_negative() {
+                parts.push(format!("- {term}"));
+            } else {
+                parts.push(format!("+ {term}"));
+            }
+        }
+        if parts.is_empty() {
+            String::from("0")
         } else {
-            parts.push(format!("+ {term}"));
+            parts.join(" ")
         }
     }
-    if parts.is_empty() {
-        String::from("0")
-    } else {
-        parts.join(" ")
+
+    /// The factor `x - root` written out, or `x` when the root is zero.
+    ///
+    /// A negative root reads `(x + 2)` rather than `(x - -2)`.
+    #[must_use]
+    pub fn describe_linear(root: Rat) -> String {
+        let value = root.to_f64();
+        if value == 0.0 {
+            String::from("x")
+        } else if value < 0.0 {
+            format!("(x + {})", -value)
+        } else {
+            format!("(x - {value})")
+        }
+    }
+
+    /// The monic quadratic `x² + linear·x + constant`, omitting zero terms.
+    #[must_use]
+    pub fn describe_quadratic(linear: Rat, constant: Rat) -> String {
+        let mut description = String::from("x^2");
+        let slope = linear.to_f64();
+        if slope != 0.0 {
+            if slope < 0.0 {
+                description.push_str(&format!(" - {} x", -slope));
+            } else {
+                description.push_str(&format!(" + {slope} x"));
+            }
+        }
+        let offset = constant.to_f64();
+        if offset != 0.0 {
+            if offset < 0.0 {
+                description.push_str(&format!(" - {}", -offset));
+            } else {
+                description.push_str(&format!(" + {offset}"));
+            }
+        }
+        description
     }
 }

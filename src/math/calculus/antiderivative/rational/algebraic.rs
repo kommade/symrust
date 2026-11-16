@@ -8,9 +8,7 @@
 use crate::{math::algebra::{
         factorization::{Factor, Factorization, factorise},
         linear::{Matrix, Vector},
-        polynomial::{
-            Poly, describe_linear, describe_polynomial, describe_quadratic, poly_to_node,
-        },
+        polynomial::{Poly},
         rational::Rat,
         surd::Surd,
     },
@@ -147,8 +145,8 @@ fn exact_cubic_binomial_term(
     // `ln|x − r|` undefined there (NaN) for the negative-`c` branch.
     let x_check = Node::clone(variable);
     let integrand = helpers::div(
-        poly_to_node(&Poly::new(coefficients.to_vec()), &x_check),
-        poly_to_node(factor, &x_check),
+        Poly::new(coefficients.to_vec()).to_node(&x_check),
+        factor.to_node(&x_check),
     );
     let finite = [0.3721_f64, 2.6329, -2.1177, 5.0].iter().any(|sample| {
         helpers::evaluate_at(&result, &crate::math::numeric::Real::from_f64(*sample))
