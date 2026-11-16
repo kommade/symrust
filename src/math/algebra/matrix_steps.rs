@@ -97,6 +97,112 @@ where
         let solution = determinant_generic(self)?;
         Some(solution.map_result(|scalar| scalar[0][0].clone()))
     }
+
+    /// Reduced row echelon form (row echelon form when `normalise` is false),
+    /// recording each elementary row operation.
+    ///
+    /// This is the exact-arithmetic version of
+    /// [`Matrix::row_reduce_solution`]: it works for any [`Matrixable`]
+    /// coefficient type and does not simplify entries, which is correct for a
+    /// type like [`Rat`] where every operation is already exact.
+    ///
+    /// # Examples
+    /// ```
+    /// use rust_calculus::math::algebra::linear::Matrix;
+    /// use rust_calculus::math::algebra::rational::Rat;
+    /// use rust_calculus::math::numeric::ExactField;
+    /// let entries: Vec<Rat> = [1, 2, 3, 4].iter().map(|v| Rat::from_i64(*v)).collect();
+    /// let matrix = Matrix::from_vec(2, 2, entries).unwrap();
+    /// let solution = matrix.row_reduce_steps(true);
+    /// assert_eq!(solution.result().to_string(), "[1 0]\n[0 1]\n");
+    /// ```
+    #[must_use]
+    pub fn row_reduce_steps(&self, normalise: bool) -> Solution<Matrix<T>, Matrix<T>> {
+        row_reduce_generic(self, normalise)
+    }
+}
+
+/// Generic row reduction that records every elementary row operation.
+///
+/// Unlike the `Expr` version this does not tidy intermediate entries: the
+/// coefficient type's own arithmetic already produces a canonical form for
+/// exact types such as [`Rat`].
+fn row_reduce_generic<T>(matrix: &Matrix<T>, normalise: bool) -> Solution<Matrix<T>, Matrix<T>>
+where
+    T: Matrixable + Display + Clone,
+{
+    let (rows, columns) = (matrix.rows(), matrix.columns());
+    let mut work = matrix.clone();
+    let mut recorder: StepRecorder<Matrix<T>> = StepRecorder::new(matrix.clone(), "row reduction");
+
+    let mut row = 0;
+    let mut lead = 0;
+    while row < rows && lead < columns {
+        let pivot = (row..rows).find(|&candidate| !work[candidate][lead].is_zero_value());
+        let Some(pivot_row) = pivot else {
+            lead += 1;
+            continue;
+        };
+        if pivot_row != row {
+            for column in 0..columns {
+                let left = work[row][column].clone();
+                work[row][column] = work[pivot_row][column].clone();
+                work[pivot_row][column] = left;
+            }
+            let snapshot = work.clone();
+            recorder.record_step(
+                "row swap",
+                || format!("choose pivot: exchanged row {} with row {}", row + 1, pivot_row + 1),
+                || snapshot.clone(),
+            );
+        }
+
+        if normalise {
+            let pivot_value = work[row][lead].clone();
+            if pivot_value != T::multiplicative_identity() {
+                let inverse = T::multiplicative_identity() / pivot_value.clone();
+                for column in 0..columns {
+                    work[row][column] = work[row][column].clone() * inverse.clone();
+                }
+                let snapshot = work.clone();
+                recorder.record_step(
+                    "row scaling",
+                    || format!("make pivot 1: multiplied row {} by {}", row + 1, inverse),
+                    || snapshot.clone(),
+                );
+            }
+        }
+
+        // Eliminate the pivot column from every other row when normalising
+        // (Gauss-Jordan), or only from the rows below when not (row echelon).
+        let first_target = if normalise { 0 } else { row + 1 };
+        for target in first_target..rows {
+            if target == row {
+                continue;
+            }
+            let entry = work[target][lead].clone();
+            if entry.is_zero_value() {
+                continue;
+            }
+            let pivot_value = work[row][lead].clone();
+            let multiple = entry / pivot_value;
+            for column in 0..columns {
+                work[target][column] =
+                    work[target][column].clone() - multiple.clone() * work[row][column].clone();
+            }
+            let snapshot = work.clone();
+            recorder.record_step(
+                "row replacement",
+                || format!("eliminate: row {} -= {} * row {}", target + 1, multiple, row + 1),
+                || snapshot.clone(),
+            );
+        }
+
+        row += 1;
+        lead += 1;
+    }
+
+    recorder.finish(work)
 }
 
 /// Generic Gaussian-elimination determinant that records every step.
