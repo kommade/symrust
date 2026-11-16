@@ -5,7 +5,7 @@
 #![cfg(feature = "algebraic")]
 
 use crate::math::algebra::{
-    algebraic::{Multiquadratic, real_roots},
+    algebraic::Multiquadratic,
     linear::Matrix,
     polynomial::Poly,
     rational::Rat,
@@ -23,7 +23,7 @@ fn poly(coefficients: &[i64]) -> Poly {
 #[test]
 fn finds_the_real_roots_of_a_cubic() {
     // x^3 - 2 has exactly one real root, the cube root of 2.
-    let roots = real_roots(&poly(&[-2, 0, 0, 1]));
+    let roots = poly(&[-2, 0, 0, 1]).real_roots();
     assert_eq!(roots.len(), 1);
     assert!((roots[0].to_f64() - 2.0_f64.cbrt()).abs() < 1e-6);
 }
@@ -31,7 +31,7 @@ fn finds_the_real_roots_of_a_cubic() {
 #[test]
 fn finds_both_real_roots_of_a_quadratic() {
     // x^2 - 2 has roots -sqrt(2) and sqrt(2).
-    let roots = real_roots(&poly(&[-2, 0, 1]));
+    let roots = poly(&[-2, 0, 1]).real_roots();
     assert_eq!(roots.len(), 2);
     assert!((roots[0].to_f64() + std::f64::consts::SQRT_2).abs() < 1e-6);
     assert!((roots[1].to_f64() - std::f64::consts::SQRT_2).abs() < 1e-6);
@@ -40,7 +40,7 @@ fn finds_both_real_roots_of_a_quadratic() {
 #[test]
 fn repeated_roots_are_reported_once() {
     // (x - 1)^2 = x^2 - 2x + 1 has the single distinct real root 1.
-    let roots = real_roots(&poly(&[1, -2, 1]));
+    let roots = poly(&[1, -2, 1]).real_roots();
     assert_eq!(roots.len(), 1);
     assert!((roots[0].to_f64() - 1.0).abs() < 1e-9);
 }
@@ -48,7 +48,7 @@ fn repeated_roots_are_reported_once() {
 #[test]
 fn complex_roots_are_not_reported() {
     // x^2 + 1 has no real roots.
-    assert!(real_roots(&poly(&[1, 0, 1])).is_empty());
+    assert!(poly(&[1, 0, 1]).real_roots().is_empty());
 }
 
 #[test]

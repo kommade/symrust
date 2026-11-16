@@ -16,6 +16,8 @@ pub(crate) mod matrix_steps;
 pub mod polynomial;
 /// Exact rational arithmetic: the `Rat` coefficient type.
 pub mod rational;
+/// Real root counting and isolation by Sturm sequences.
+pub mod sturm;
 pub mod symbolic_eigen;
 /// Arithmetic in a quadratic extension `Q(sqrt(k))`: the `Surd` coefficient type.
 pub mod surd;

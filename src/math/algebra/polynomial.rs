@@ -198,6 +198,99 @@ impl Poly {
         left.monic()
     }
 
+    /// The sign of the polynomial at `x`, as `-1`, `0` or `1`.
+    ///
+    /// Returns `None` only when evaluation overflows; a value of zero is a
+    /// root.
+    #[must_use]
+    pub fn sign_at(&self, x: Rat) -> Option<i32> {
+        let value = self.evaluate(x)?;
+        Some(if value.is_zero() {
+            0
+        } else if value.is_negative() {
+            -1
+        } else {
+            1
+        })
+    }
+
+    /// The squarefree part `p / gcd(p, p')`.
+    ///
+    /// The result has exactly the same distinct roots as `p`, but every one of
+    /// them simple. Root-counting and isolation are only valid on a squarefree
+    /// polynomial, so they take this first.
+    #[must_use]
+    pub fn squarefree(&self) -> Option<Self> {
+        let derivative = self.derivative()?;
+        if derivative.is_zero() {
+            return Some(self.clone());
+        }
+        let common = self.gcd(&derivative)?;
+        self.div_exact(&common)
+    }
+
+    /// A Cauchy bound `B` with every real root of the polynomial in `(-B, B)`.
+    ///
+    /// The bound comes from `B = 1 + max |a_i / a_n|`, where `a_n` is the
+    /// leading coefficient. The comparison is done by cross-multiplying exact
+    /// rationals rather than dividing into floats, so the bound is never
+    /// thrown off by rounding near an integer boundary.
+    ///
+    /// Returns `None` for the zero polynomial, which bounds nothing.
+    #[must_use]
+    pub fn root_bound(&self) -> Option<i128> {
+        let degree = self.degree()?;
+        let leading = self.leading()?;
+        if leading.is_zero() {
+            return None;
+        }
+        // `1 + max |a_i / a_n|`: keep the largest ratio seen so far, comparing
+        // exactly as `|a_i| * |a_n|` is not enough, so compare the rationals.
+        let mut largest: Option<Rat> = None;
+        for coefficient in &self.coeffs[..degree] {
+            let magnitude = if coefficient.is_negative() {
+                coefficient.neg()
+            } else {
+                *coefficient
+            };
+            let ratio = magnitude.div(if leading.is_negative() {
+                leading.neg()
+            } else {
+                leading
+            })?;
+            largest = Some(match largest {
+                Some(current) if ratio.cmp(&current) != std::cmp::Ordering::Greater => current,
+                _ => ratio,
+            });
+        }
+        let bound = match largest {
+            // Round `1 + ratio` up, so the bound is always at least as large as
+            // the true root magnitude.
+            Some(ratio) => {
+                let (num, den) = ratio.parts();
+                if den == 0 {
+                    return None;
+                }
+                let scaled = num.checked_add(den)?;
+                let rounded = scaled.checked_add(den - 1)?.checked_div(den)?;
+                i128::try_from(rounded).ok()?
+            }
+            // A constant polynomial: any bound works, so use 1.
+            None => 1,
+        };
+        Some(bound.max(1))
+    }
+
+    /// The Sturm chain of this polynomial, for counting real roots exactly.
+    ///
+    /// See [`SturmSequence`](super::sturm::SturmSequence). The polynomial is
+    /// reduced to its squarefree part first, so a repeated root is counted
+    /// once.
+    #[must_use]
+    pub fn sturm_sequence(&self) -> Option<super::sturm::SturmSequence> {
+        super::sturm::SturmSequence::new(self)
+    }
+
     pub fn evaluate(&self, value: Rat) -> Option<Rat> {
         let mut result = Rat::ZERO;
         for coefficient in self.coeffs.iter().rev() {

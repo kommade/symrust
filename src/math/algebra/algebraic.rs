@@ -623,10 +623,10 @@ impl RealAlgebraic {
         let mut left = self.clone();
         let mut right = other.clone();
         loop {
-            if rat_cmp(&left.hi, &right.lo) != Ordering::Greater {
+            if left.hi.cmp(&right.lo) != Ordering::Greater {
                 return Ordering::Less;
             }
-            if rat_cmp(&left.lo, &right.hi) != Ordering::Less {
+            if left.lo.cmp(&right.hi) != Ordering::Less {
                 return Ordering::Greater;
             }
             // Intervals overlap: shrink the wider one and retry.
@@ -680,188 +680,65 @@ impl PartialEq for RealAlgebraic {
     }
 }
 
+/// Two algebraic numbers are equal exactly when their intervals never
+/// separate, which is what the refining comparison in [`RealAlgebraic::cmp`]
+/// decides.
+impl Eq for RealAlgebraic {}
+
 impl PartialOrd for RealAlgebraic {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-/// Exact comparison of two rationals via cross-multiplication.
-///
-/// `Rat` keeps its denominator positive, so comparing `num * other.den` with
-/// `other.num * den` (as `i128`, widened by parsing) preserves the order.
-fn rat_cmp(left: &Rat, right: &Rat) -> std::cmp::Ordering {
-    let (left_num, left_den) = left.parts();
-    let (right_num, right_den) = right.parts();
-    match (
-        left_num.checked_mul(right_den),
-        right_num.checked_mul(left_den),
-    ) {
-        (Some(lhs), Some(rhs)) => lhs.cmp(&rhs),
-        // On overflow fall back to the (monotone) float comparison; exact ties
-        // are astronomically unlikely and would only affect refinement order.
-        _ => left
-            .to_f64()
-            .partial_cmp(&right.to_f64())
-            .unwrap_or(std::cmp::Ordering::Equal),
+/// Roots are ordered by value, not by their defining polynomial, so
+/// `sort` gives the roots in increasing order.
+impl Ord for RealAlgebraic {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        RealAlgebraic::cmp(self, other)
     }
 }
 
-/// Sign of `poly` at `x`, as `-1`, `0` or `1`.
-fn sign_at(poly: &Poly, x: Rat) -> Option<i32> {
-    let value = poly.evaluate(x)?;
-    Some(if value.is_zero() {
-        0
-    } else if value.is_negative() {
-        -1
-    } else {
-        1
-    })
-}
-
-/// The Sturm sequence of `poly`: `[p, p', -rem(p, p'), ...]`.
-///
-/// The polynomial is assumed squarefree (the caller takes the squarefree part);
-/// for such inputs the number of sign changes of this sequence across an
-/// interval equals the number of distinct real roots inside it.
-fn sturm_sequence(poly: &Poly) -> Option<Vec<Poly>> {
-    let mut sequence = vec![poly.clone(), poly.derivative()?];
-    loop {
-        let last = sequence.last()?;
-        let previous = &sequence[sequence.len() - 2];
-        if last.is_zero() {
-            sequence.pop();
-            break;
-        }
-        let (_, remainder) = previous.div_rem(last)?;
-        if remainder.is_zero() {
-            break;
-        }
-        sequence.push(remainder.scale(Rat::from_i64(-1))?);
-    }
-    Some(sequence)
-}
-
-/// The number of sign changes in the Sturm sequence evaluated at `x`.
-fn sign_changes(sequence: &[Poly], x: Rat) -> Option<usize> {
-    let mut changes = 0;
-    let mut previous = 0;
-    let mut seen = false;
-    for poly in sequence {
-        let sign = sign_at(poly, x)?;
-        if sign == 0 {
-            continue;
-        }
-        if seen && sign != previous {
-            changes += 1;
-        }
-        previous = sign;
-        seen = true;
-    }
-    Some(changes)
-}
-
-/// Count the distinct real roots in the open interval `(lo, hi)`.
-fn roots_between(sequence: &[Poly], lo: Rat, hi: Rat) -> Option<usize> {
-    let at_lo = sign_changes(sequence, lo)?;
-    let at_hi = sign_changes(sequence, hi)?;
-    Some(at_lo.saturating_sub(at_hi))
-}
-
-/// The squarefree part `p / gcd(p, p')`, so every real root is simple.
-fn squarefree(poly: &Poly) -> Option<Poly> {
-    let derivative = poly.derivative()?;
-    if derivative.is_zero() {
-        return Some(poly.clone());
-    }
-    let common = poly.gcd(&derivative)?;
-    poly.div_exact(&common)
-}
-
-/// A Cauchy bound `B` (as an integer) with every real root of `poly` in
-/// `(-B, B)`.
-fn root_bound(poly: &Poly) -> Option<i128> {
-    let leading = poly.leading()?.to_f64().abs();
-    if leading == 0.0 {
-        return None;
-    }
-    let max_ratio = poly
-        .coefficients()
-        .iter()
-        .take(poly.coefficients().len().saturating_sub(1))
-        .map(|coefficient| coefficient.to_f64().abs() / leading)
-        .fold(0.0, f64::max);
-    let bound = (1.0 + max_ratio).ceil() as i128;
-    Some(bound.max(1))
-}
-
-/// Every distinct real root of `poly`, ordered from smallest to largest.
-///
-/// The polynomial is reduced to its squarefree part first, so repeated roots
-/// are reported once. Returns an empty vector for a constant polynomial.
-pub fn real_roots(poly: &Poly) -> Vec<RealAlgebraic> {
-    let Some(degree) = poly.degree() else {
-        return Vec::new();
-    };
-    if degree == 0 {
-        return Vec::new();
-    }
-    // Squarefree so Sturm counts every root once and endpoints never vanish.
-    let Some(squarefree_poly) = squarefree(poly) else {
-        return Vec::new();
-    };
-    let Some(sequence) = sturm_sequence(&squarefree_poly) else {
-        return Vec::new();
-    };
-    let Some(bound) = root_bound(&squarefree_poly) else {
-        return Vec::new();
-    };
-
-    // Start from (-B, B) and bisect every interval that still holds more than
-    // one root until each holds exactly one.
-    let lo = Rat::from_i64(-bound as i64);
-    let hi = Rat::from_i64(bound as i64);
-    let mut pending = vec![(lo, hi)];
-    let mut isolated: Vec<(Rat, Rat)> = Vec::new();
-    while let Some((lo, hi)) = pending.pop() {
-        let Some(count) = roots_between(&sequence, lo, hi) else {
-            continue;
+impl Poly {
+    /// Every distinct real root, ordered from smallest to largest.
+    ///
+    /// The polynomial is reduced to its squarefree part first, so a repeated
+    /// root is reported once. Isolation uses a Cauchy bound to get a starting
+    /// bracket and then bisects it until each root sits in its own interval;
+    /// the intervals are returned as [`RealAlgebraic`] values, which keep the
+    /// root exact.
+    ///
+    /// Returns an empty vector for a constant polynomial, and also when the
+    /// polynomial has no real roots.
+    #[must_use]
+    pub fn real_roots(&self) -> Vec<RealAlgebraic> {
+        let Some(degree) = self.degree() else {
+            return Vec::new();
         };
-        if count == 0 {
-            continue;
+        if degree == 0 {
+            return Vec::new();
         }
-        if count == 1 {
-            isolated.push((lo, hi));
-            continue;
-        }
-        let Some(mid) = lo
-            .add(hi)
-            .and_then(|sum| Rat::new(1, 2).and_then(|half| sum.mul(half)))
-        else {
-            continue;
+        let Some(squarefree) = self.squarefree() else {
+            return Vec::new();
         };
-        // If the midpoint is an exact root, stop subdividing this interval: the
-        // caller only needs each root once. Shrink slightly around `mid`.
-        if squarefree_poly
-            .evaluate(mid)
-            .is_some_and(|value| value.is_zero())
-        {
-            isolated.push((lo, mid));
-            isolated.push((mid, hi));
-            continue;
-        }
-        pending.push((lo, mid));
-        pending.push((mid, hi));
-    }
+        let Some(sturm) = super::sturm::SturmSequence::new(&squarefree) else {
+            return Vec::new();
+        };
+        let Some(bound) = squarefree.root_bound() else {
+            return Vec::new();
+        };
 
-    let mut roots: Vec<RealAlgebraic> = isolated
-        .into_iter()
-        .map(|(lo, hi)| RealAlgebraic {
-            polynomial: squarefree_poly.clone(),
-            lo,
-            hi,
-        })
-        .collect();
-    roots.sort_by(|left, right| left.cmp(right));
-    roots
+        let bracket = Rat::from_i64(bound as i64);
+        let mut roots: Vec<RealAlgebraic> = sturm
+            .isolate_roots_between(-bracket, bracket)
+            .into_iter()
+            .map(|(lo, hi)| RealAlgebraic {
+                polynomial: squarefree.clone(),
+                lo,
+                hi,
+            })
+            .collect();
+        roots.sort();
+        roots
+    }
 }

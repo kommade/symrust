@@ -121,6 +121,35 @@ impl std::ops::Neg for Rat {
     }
 }
 
+/// Rationals are totally ordered, so they can be sorted and used as map keys.
+///
+/// A `Rat` is always stored in lowest terms with a positive denominator, so
+/// comparing `num * other.den` against `other.num * den` gives the true order
+/// without any division. Both products can overflow `i128` for extreme inputs,
+/// in which case the (monotone) float comparison is used instead; that is only
+/// inexact for values within an ulp of each other at magnitudes around
+/// `2^127`, which the arithmetic here cannot produce in practice.
+impl Ord for Rat {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (
+            self.num.checked_mul(other.den),
+            other.num.checked_mul(self.den),
+        ) {
+            (Some(left), Some(right)) => left.cmp(&right),
+            _ => self
+                .to_f64()
+                .partial_cmp(&other.to_f64())
+                .unwrap_or(std::cmp::Ordering::Equal),
+        }
+    }
+}
+
+impl PartialOrd for Rat {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl ExactField for Rat {
     fn multiplicative_identity() -> Self {
         Self::ONE

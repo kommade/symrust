@@ -179,11 +179,10 @@ fn multiply_rational(node: Node, value: Rat) -> Node {
 
 #[cfg(feature = "algebraic")]
 pub(crate) fn algebraic_factor_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
-    use crate::math::algebra::algebraic::real_roots;
     use crate::math::calculus::expr::float_from;
 
     let degree = factor.degree()?;
-    let roots = real_roots(factor);
+    let roots = factor.real_roots();
 
     // A binomial factor `x^3 + c` factors over the reals as
     // `(x − r)(x^2 + r·x + r^2)` with the (exact) real root `r = −∛c`, so it is
