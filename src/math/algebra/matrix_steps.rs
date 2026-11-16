@@ -172,6 +172,206 @@ where
     pub fn qr_steps(&self) -> Option<Solution<Matrix<T>, Matrix<T>>> {
         qr_generic(self)
     }
+
+    /// Eigenvalues and eigenvectors, recording the shifted matrices and the
+    /// null spaces that produce the eigenvectors.
+    ///
+    /// This is the **numeric** path: it works for any [`Matrixable`]
+    /// coefficient type, so a solution always exists when the matrix is
+    /// diagonalisable. Symbolic eigenvalues in radicals are a separate, richer
+    /// facility available only for [`Expr`](crate::math::structs::expr::Expr)
+    /// matrices; see [`Matrix::<Expr>::eigen_solution`].
+    ///
+    /// Each distinct eigenvalue contributes one step for the shift `A - λI` and
+    /// a nested row reduction for its null space.
+    ///
+    /// Returns `None` when the matrix is not square or not diagonalisable over
+    /// `T`.
+    ///
+    /// # Examples
+    /// ```
+    /// use rust_calculus::math::algebra::linear::Matrix;
+    /// use rust_calculus::math::algebra::rational::Rat;
+    /// use rust_calculus::math::numeric::ExactField;
+    /// // [[1, 0], [0, 2]] is already diagonal.
+    /// let entries: Vec<Rat> = [1, 0, 0, 2].iter().map(|v| Rat::from_i64(*v)).collect();
+    /// let matrix = Matrix::from_vec(2, 2, entries).unwrap();
+    /// let solution = matrix.eigen_steps().unwrap();
+    /// // One shift step per distinct eigenvalue, plus nested reductions.
+    /// assert!(solution.len() >= 2);
+    /// ```
+    #[must_use]
+    pub fn eigen_steps(&self) -> Option<Solution<Matrix<T>, Matrix<T>>> {
+        eigen_generic(self)
+    }
+
+    /// Singular value decomposition `A = U S Vᵀ`, recording the route taken.
+    ///
+    /// This is the **numeric** path, available for any [`Matrixable`]
+    /// coefficient type whose singular values stay in the field. It forms
+    /// `AᵀA`, records its eigen-decomposition as a nested solution (so the
+    /// characteristic-polynomial and null-space steps appear too), then takes
+    /// square roots and assembles the factors.
+    ///
+    /// The recorded answer is the reconstruction `U S Vᵀ`, which is `A` again;
+    /// recording `S` alone would lose `U` and `V`.
+    ///
+    /// Returns `None` when no decomposition exists over `T`.
+    ///
+    /// # Examples
+    /// ```
+    /// use rust_calculus::math::algebra::linear::Matrix;
+    /// use rust_calculus::math::algebra::rational::Rat;
+    /// use rust_calculus::math::numeric::ExactField;
+    /// // A diagonal matrix is its own SVD.
+    /// let entries: Vec<Rat> = [2, 0, 0, 3].iter().map(|v| Rat::from_i64(*v)).collect();
+    /// let matrix = Matrix::from_vec(2, 2, entries).unwrap();
+    /// let solution = matrix.svd_steps().unwrap();
+    /// assert_eq!(solution.result(), &matrix);
+    /// assert!(!solution.is_empty());
+    /// ```
+    #[must_use]
+    pub fn svd_steps(&self) -> Option<Solution<Matrix<T>, Matrix<T>>> {
+        svd_generic(self)
+    }
+}
+
+/// Generic SVD that records the route actually taken.
+///
+/// Mirrors the `Expr` version: form `AᵀA`, decompose it into eigenvectors (recording
+/// that decomposition as a nested solution), take square roots for the singular
+/// values, and assemble `U Σ Vᵀ`.
+fn svd_generic<T>(matrix: &Matrix<T>) -> Option<Solution<Matrix<T>, Matrix<T>>>
+where
+    T: Matrixable + Display + Clone,
+{
+    let decomposition = crate::math::algebra::linear::algorithms::svd_of(matrix)?;
+    let sigma = decomposition.1.clone();
+    let left = decomposition.0.clone();
+    let right = decomposition.3.clone();
+
+    let mut recorder: StepRecorder<Matrix<T>> =
+        StepRecorder::new(matrix.clone(), "singular value decomposition");
+
+    // 1. Aᵀ A, the matrix whose eigen-decomposition supplies V and Σ².
+    let transpose = matrix.transpose();
+    let gram = multiply_generic(&transpose, matrix);
+    recorder.record_step(
+        "form AᵀA",
+        || String::from("multiplied the transpose of A by A"),
+        || gram.clone(),
+    );
+
+    // 2. Its eigen-decomposition, with all of its own steps.
+    if let Some(eigen) = eigen_generic(&gram) {
+        recorder.solution_mut().push_sub_solution(eigen);
+    }
+
+    // 3. The singular values are the square roots of the eigenvalues.
+    recorder.record_step(
+        "take square roots",
+        || String::from("the singular values are the square roots of the eigenvalues of AᵀA"),
+        || sigma.clone(),
+    );
+
+    // 4. Assemble U Σ Vᵀ, which must reconstruct A.
+    let right_transpose = right.transpose();
+    let reconstructed = multiply_generic(&multiply_generic(&left, &sigma), &right_transpose);
+    recorder.record_step(
+        "assemble U Σ Vᵀ",
+        || {
+            format!(
+                "U is {}x{}, Σ is {}x{}, V is {}x{}; the product reconstructs A",
+                left.rows(),
+                left.columns(),
+                sigma.rows(),
+                sigma.columns(),
+                right.rows(),
+                right.columns()
+            )
+        },
+        || reconstructed.clone(),
+    );
+
+    Some(recorder.finish(reconstructed))
+}
+
+/// The product of two matrices over any coefficient type, assuming the inner
+/// dimensions agree.
+fn multiply_generic<T>(left: &Matrix<T>, right: &Matrix<T>) -> Matrix<T>
+where
+    T: Matrixable + Clone,
+{
+    let mut result = Matrix::<T>::new(left.rows(), right.columns());
+    for row in 0..left.rows() {
+        for column in 0..right.columns() {
+            let mut total = T::additive_identity();
+            for k in 0..left.columns() {
+                total = total + left[row][k].clone() * right[k][column].clone();
+            }
+            result[row][column] = total;
+        }
+    }
+    result
+}
+
+/// Generic eigen-decomposition that composes the steps which compute it.
+///
+/// The eigenvalues come from the numeric solver, so this works for any exact
+/// coefficient type. Each distinct eigenvalue is recorded as a shift step, and
+/// the null space of the shifted matrix is recorded as a nested row reduction.
+fn eigen_generic<T>(matrix: &Matrix<T>) -> Option<Solution<Matrix<T>, Matrix<T>>>
+where
+    T: Matrixable + Display + Clone,
+{
+    if matrix.rows() != matrix.columns() {
+        return None;
+    }
+    let size = matrix.rows();
+    let eigenvalues = crate::math::algebra::linear::algorithms::lenient_eigenvalues(matrix)?;
+
+    let mut recorder: StepRecorder<Matrix<T>> =
+        StepRecorder::new(matrix.clone(), "eigen-decomposition");
+
+    let distinct: Vec<T> = {
+        let mut seen: Vec<T> = Vec::new();
+        for value in eigenvalues {
+            if !seen.contains(&value) {
+                seen.push(value);
+            }
+        }
+        seen
+    };
+
+    let root_list = distinct
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    recorder.record_decision(
+        "characteristic polynomial",
+        || format!("the eigenvalues (roots of det(xI - A)) are {root_list}"),
+    );
+
+    for lambda in &distinct {
+        // (A - λI) is a step in its own right.
+        let mut shifted = matrix.clone();
+        for i in 0..size {
+            shifted[i][i] = shifted[i][i].clone() - lambda.clone();
+        }
+        let snapshot = shifted.clone();
+        recorder.record_step(
+            "shift by the eigenvalue",
+            || format!("formed A - ({lambda})I"),
+            || snapshot.clone(),
+        );
+
+        // Its null space is a row reduction; record it as a nested solution.
+        let reduction = row_reduce_generic(&shifted, true);
+        recorder.solution_mut().push_sub_solution(reduction);
+    }
+
+    Some(recorder.finish(matrix.clone()))
 }
 
 /// Generic Gram-Schmidt QR that records every orthogonalisation and
