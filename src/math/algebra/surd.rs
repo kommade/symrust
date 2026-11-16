@@ -7,7 +7,7 @@
 
 use std::fmt::Display;
 
-use super::{expr, rational::Rat};
+use super::rational::Rat;
 use crate::math::numeric::ExactField;
 use crate::math::structs::expr::node::Node;
 
@@ -276,12 +276,12 @@ impl Surd {
         if self.b.is_zero() {
             return self.a.to_node();
         }
-        let root = expr::sqrt(expr::number(self.k));
-        let radical = expr::multiply_by_rational(root, self.b);
+        let root = Node::sqrt(Node::number(self.k));
+        let radical = Node::multiply_by_rational(root, self.b);
         if self.a.is_zero() {
             radical
         } else {
-            expr::add(self.a.to_node(), radical)
+            Node::add(self.a.to_node(), radical)
         }
     }
 }
@@ -355,14 +355,14 @@ pub fn sqrt_rational(value: Rat) -> Option<Surd> {
 }
 
 pub fn surd_quadratic_node(linear: Surd, constant: Surd, variable: &Node) -> Node {
-    let square = expr::pow(variable.clone(), expr::number(2));
-    let linear_term = expr::mul(linear.to_node(), variable.clone());
-    expr::add(expr::add(square, linear_term), constant.to_node())
+    let square = Node::pow(variable.clone(), Node::number(2));
+    let linear_term = Node::mul(linear.to_node(), variable.clone());
+    Node::add(Node::add(square, linear_term), constant.to_node())
 }
 
 pub fn surd_sqrt_node(value: Surd) -> Node {
     match value.sqrt() {
         Some(root) => root.to_node(),
-        None => expr::sqrt(value.to_node()),
+        None => Node::sqrt(value.to_node()),
     }
 }

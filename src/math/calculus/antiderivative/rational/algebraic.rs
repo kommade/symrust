@@ -174,7 +174,7 @@ fn rational_node(value: Rat) -> Node {
 /// Multiply a node by an exact rational.
 #[cfg(feature = "algebraic")]
 fn multiply_rational(node: Node, value: Rat) -> Node {
-    crate::math::algebra::expr::multiply_by_rational(node, value)
+    Node::multiply_by_rational(node, value)
 }
 
 #[cfg(feature = "algebraic")]

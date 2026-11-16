@@ -41,7 +41,6 @@ where
     fn remove_constants(self) -> Real;
     fn simplify(self, expand: bool, combine_fns: bool) -> Self;
     fn factorise(self) -> Self;
-    //fn substitute(self, value: Real) -> Real;
 }
 
 impl<T: FloatType + Display> NodeOperations<Self> for Node<T> {

@@ -6,7 +6,6 @@
 
 use std::fmt::Display;
 
-use super::expr;
 use crate::math::numeric::ExactField;
 use crate::math::structs::expr::node::Node;
 use crate::math::utils::gcd_u128;
@@ -58,14 +57,14 @@ pub fn square_root_of(value: Rat) -> Node {
     }
     let (numerator, denominator) = value.parts();
     if let Some(denominator_root) = integer_sqrt(denominator.unsigned_abs()) {
-        let numerator_node = expr::sqrt(Rat::integer_node(numerator));
+        let numerator_node = Node::sqrt(Rat::integer_node(numerator));
         if denominator_root == 1 {
             numerator_node
         } else {
-            expr::div(numerator_node, Rat::integer_node(denominator_root as i128))
+            Node::div(numerator_node, Rat::integer_node(denominator_root as i128))
         }
     } else {
-        expr::sqrt(value.to_node())
+        Node::sqrt(value.to_node())
     }
 }
 
@@ -390,9 +389,9 @@ impl Rat {
 
     pub fn integer_node(value: i128) -> Node {
         if value >= i64::MIN as i128 && value <= i64::MAX as i128 {
-            expr::number(value as i64)
+            Node::number(value as i64)
         } else {
-            expr::float(arpfloat::Float::from_f64(value as f64).cast(arpfloat::FP128))
+            Node::float(arpfloat::Float::from_f64(value as f64).cast(arpfloat::FP128))
         }
     }
 
@@ -405,7 +404,7 @@ impl Rat {
         if self.den == 1 {
             numerator
         } else {
-            expr::div(numerator, Self::integer_node(self.den))
+            Node::div(numerator, Self::integer_node(self.den))
         }
     }
 }

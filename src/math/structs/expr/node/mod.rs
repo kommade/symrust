@@ -6,6 +6,7 @@
 //! `simplify` rewrites it, `display` renders it and `functions` exposes the
 //! arithmetic and simplification traits.
 
+mod builders;
 mod construct;
 mod convert;
 mod display;

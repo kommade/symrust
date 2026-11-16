@@ -297,7 +297,7 @@ impl Antiderivative for Expr {
         let value = evaluate_definite_integral(solution.result(), lower, upper)?;
         let mut solution = solution;
         solution.set_result_comment(comment);
-        Ok(solution.finish(Expr::from_node(crate::math::algebra::expr::float(
+        Ok(solution.finish(Expr::from_node(Node::float(
             Real::from(value.to_float()),
         ))))
     }

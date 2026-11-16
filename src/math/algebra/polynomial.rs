@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use super::{expr, rational::Rat};
+use super::rational::Rat;
 use crate::math::structs::expr::node::Node;
 
 /// A polynomial with rational coefficients, stored lowest degree first.
@@ -377,17 +377,17 @@ impl Poly {
                 continue;
             }
             let power = match degree {
-                0 => expr::one(),
+                0 => Node::one(),
                 1 => variable.clone(),
-                _ => expr::pow(variable.clone(), expr::number(degree as i64)),
+                _ => Node::pow(variable.clone(), Node::number(degree as i64)),
             };
             if coefficient.is_one() {
                 terms.push(power);
             } else {
-                terms.push(expr::multiply_by_rational(power, *coefficient));
+                terms.push(Node::multiply_by_rational(power, *coefficient));
             }
         }
-        expr::sum(terms)
+        Node::sum(terms)
     }
 
     /// The polynomial written as `a0 + a1 x + …` in descending degree, using

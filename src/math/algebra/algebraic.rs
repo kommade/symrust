@@ -15,7 +15,7 @@
 //!
 //! Enabled by the `algebraic` feature.
 
-use super::{expr, polynomial::Poly, rational::Rat};
+use super::{polynomial::Poly, rational::Rat};
 use crate::math::structs::expr::node::Node;
 
 /// An element of a multiquadratic field `Q(sqrt k1, ..., sqrt kt)`.
@@ -521,7 +521,7 @@ impl<const N: usize> Multiquadratic<N> where [(); 1 << N]: Sized {
     /// rational value.
     pub fn to_node(self) -> Node {
         if self.is_zero() {
-            return expr::zero();
+            return Node::zero();
         }
         let mut terms: Vec<Node> = Vec::new();
         for (mask, coefficient) in self.coeffs.iter().enumerate() {
@@ -531,12 +531,12 @@ impl<const N: usize> Multiquadratic<N> where [(); 1 << N]: Sized {
             let mut term = coefficient.to_node();
             for bit in 0..self.count as usize {
                 if mask & (1 << bit) != 0 {
-                    term = expr::mul(term, expr::sqrt(expr::number(self.radicands[bit])));
+                    term = Node::mul(term, Node::sqrt(Node::number(self.radicands[bit])));
                 }
             }
             terms.push(term);
         }
-        expr::sum(terms)
+        Node::sum(terms)
     }
 }
 
@@ -670,7 +670,7 @@ impl RealAlgebraic {
     /// `root(poly, k)` node would be more faithful, but the expression tree has
     /// no such constructor yet; this keeps the output usable until one is added.
     pub fn to_node(&self, _variable: &Node) -> Node {
-        expr::number(self.to_f64().round() as i64)
+        Node::number(self.to_f64().round() as i64)
     }
 }
 

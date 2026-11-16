@@ -103,7 +103,7 @@ fn poly_to_variable_node(
     polynomial: &crate::math::algebra::polynomial::Poly,
     variable: char,
 ) -> Node<Real> {
-    use crate::math::algebra::expr::{multiply_by_rational, number, one, pow, sum};
+    use crate::math::structs::expr::node::Node as _;
 
     let symbol = NodeInner::<Real>::operand(Token::Indp(variable)).wrap();
     let mut terms = Vec::new();
@@ -113,17 +113,17 @@ fn poly_to_variable_node(
             continue;
         }
         let power = match degree {
-            0 => one(),
+            0 => Node::one(),
             1 => symbol.clone(),
-            _ => pow(symbol.clone(), number(degree as i64)),
+            _ => Node::pow(symbol.clone(), Node::number(degree as i64)),
         };
         if coefficient.is_one() {
             terms.push(power);
         } else {
-            terms.push(multiply_by_rational(power, coefficient));
+            terms.push(Node::multiply_by_rational(power, coefficient));
         }
     }
-    sum(terms)
+    Node::sum(terms)
 }
 
 impl NodeInner {

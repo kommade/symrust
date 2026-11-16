@@ -8,7 +8,6 @@
 //! back as expression nodes, so this module borrows the expression tree
 //! ([`crate::math::structs::expr::node`]) and the shared integer helpers.
 
-pub(crate) mod expr;
 pub(crate) mod factorization;
 pub mod linear;
 pub(crate) mod matrix_steps;

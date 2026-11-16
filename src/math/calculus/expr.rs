@@ -2,9 +2,9 @@
 //! techniques.
 //!
 //! Everything here only looks at the *shape* of a tree: it reads constants out
-//! of it, flattens products and sums, and rebuilds the tree with the node
-//! builders from [`crate::math::algebra::expr`]. No technique decides what to do
-//! with that structure here.
+//! of it, flattens products and sums, and rebuilds the tree with the
+//! [`Node`] constructors. No technique decides what to do with that structure
+//! here.
 
 use std::ops::Neg;
 
@@ -14,11 +14,68 @@ use crate::{math::parse::lexer::{Func, Op, Token},
     math::utils::float_math::FloatMath,
 };
 
-// The single set of node builders lives in `algebra::expr`; both calculus
-// techniques construct trees through it.
-pub(crate) use crate::math::algebra::expr::{
-    add, div, float, mul, multiply_by_rational, number, one, pow, sqrt as sqrt_arg, sub, sum, zero,
-};
+// The node constructors live on `Node` itself; these aliases keep the calculus
+// code reading like the maths it implements.
+
+/// `Node::zero()`, as a free function.
+pub(crate) fn zero() -> Node {
+    Node::zero()
+}
+
+/// `Node::one()`, as a free function.
+pub(crate) fn one() -> Node {
+    Node::one()
+}
+
+/// `Node::number(value)`, as a free function.
+pub(crate) fn number(value: i64) -> Node {
+    Node::number(value)
+}
+
+/// `Node::float(value)`, as a free function.
+pub(crate) fn float(value: impl Into<Real>) -> Node {
+    Node::float(value)
+}
+
+/// `Node::add(left, right)`, as a free function.
+pub(crate) fn add(left: Node, right: Node) -> Node {
+    Node::add(left, right)
+}
+
+/// `Node::sub(left, right)`, as a free function.
+pub(crate) fn sub(left: Node, right: Node) -> Node {
+    Node::sub(left, right)
+}
+
+/// `Node::mul(left, right)`, as a free function.
+pub(crate) fn mul(left: Node, right: Node) -> Node {
+    Node::mul(left, right)
+}
+
+/// `Node::div(left, right)`, as a free function.
+pub(crate) fn div(left: Node, right: Node) -> Node {
+    Node::div(left, right)
+}
+
+/// `Node::pow(base, exponent)`, as a free function.
+pub(crate) fn pow(base: Node, exponent: Node) -> Node {
+    Node::pow(base, exponent)
+}
+
+/// `Node::sqrt(arg)`, as a free function.
+pub(crate) fn sqrt_arg(arg: Node) -> Node {
+    Node::sqrt(arg)
+}
+
+/// `Node::sum(nodes)`, as a free function.
+pub(crate) fn sum(nodes: impl IntoIterator<Item = Node>) -> Node {
+    Node::sum(nodes)
+}
+
+/// `Node::multiply_by_rational(node, value)`, as a free function.
+pub(crate) fn multiply_by_rational(node: Node, value: crate::math::algebra::rational::Rat) -> Node {
+    Node::multiply_by_rational(node, value)
+}
 
 pub(crate) fn float_from(value: f64) -> Real {
     Real::from_f64(value)
