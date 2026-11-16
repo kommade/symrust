@@ -2,7 +2,7 @@
 //! radical roots.
 
 use crate::math::algebra::linear::Matrix;
-use crate::math::algebra::symbolic_eigen::{characteristic_polynomial, eigenvalues, roots};
+use crate::math::algebra::symbolic_eigen::ExprPoly;
 use crate::create_expr;
 use crate::math::structs::expr::Expr;
 
@@ -30,7 +30,7 @@ fn characteristic_polynomial_of_a_diagonal_matrix() {
     super::setup();
     // A = [[x, 0], [0, y]] is not expressible, so use x and a constant.
     let source = matrix(&[&["x", "0"], &["0", "3"]]);
-    let polynomial = characteristic_polynomial(&source).expect("square matrix");
+    let polynomial = source.characteristic_polynomial().expect("square matrix");
     // det(λI - A) = (λ - x)(λ - 3) = λ² - (x + 3)λ + 3x
     assert_eq!(polynomial.degree(), Some(2));
 
@@ -56,7 +56,7 @@ fn symbolic_eigenvalues_of_a_triangular_matrix() {
     super::setup();
     // A = [[1, 0], [0, x]]  ->  eigenvalues 1 and x.
     let source = matrix(&[&["1", "0"], &["0", "x"]]);
-    let found = eigenvalues(&source).expect("degree 2 has a closed form");
+    let found = source.symbolic_eigenvalues().expect("degree 2 has a closed form");
     assert_eq!(found.len(), 2);
 
     // Evaluate each root at several x and check the multiset matches {1, x}.
@@ -86,7 +86,7 @@ fn symbolic_square_matrix_has_a_root_of_x() {
     super::setup();
     // A = [[0, 1], [x, 0]]  ->  λ² = x, so λ = ±sqrt(x).
     let source = matrix(&[&["0", "1"], &["x", "0"]]);
-    let found = eigenvalues(&source).expect("quadratic formula applies");
+    let found = source.symbolic_eigenvalues().expect("quadratic formula applies");
     assert_eq!(found.len(), 2);
     for root in &found {
         // Squaring a root must give x at every sample.
@@ -106,12 +106,12 @@ fn cubic_characteristic_polynomial_has_no_radical_roots() {
     super::setup();
     // A 3x3 with a variable gives a cubic in λ, which this module declines.
     let source = matrix(&[&["x", "0", "0"], &["0", "1", "0"], &["0", "0", "2"]]);
-    let Some(polynomial) = characteristic_polynomial(&source) else {
+    let Some(polynomial) = source.characteristic_polynomial() else {
         panic!("square matrix");
     };
     assert_eq!(polynomial.degree(), Some(3));
     assert!(
-        roots(&polynomial).is_none(),
+        polynomial.roots().is_none(),
         "degree 3 roots are not attempted"
     );
 }
@@ -123,7 +123,7 @@ fn symbolic_eigenvalues_are_tidied() {
     // quadratic formula should collapse to the exact roots {1, x} rather than
     // leaving a sqrt behind.
     let source = matrix(&[&["1", "0"], &["0", "x"]]);
-    let found = eigenvalues(&source).expect("degree 2");
+    let found = source.symbolic_eigenvalues().expect("degree 2");
     let rendered: Vec<String> = found.iter().map(ToString::to_string).collect();
     assert!(
         !rendered.iter().any(|root| root.contains("sqrt")),

@@ -82,7 +82,7 @@ impl Node<Real> {
 
     /// A function application built exactly as requested.
     ///
-    /// This is the raw constructor; [`Node::function`] applies the
+    /// This is the raw constructor; `calculus::expr::function` applies the
     /// simplifications that generated formulas need.
     #[must_use]
     pub fn call(func: Func, arg: Self) -> Self {

@@ -643,8 +643,8 @@ fn eigen_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
     let (eigenvalues, polynomial_text) = match matrix.eigenvalues() {
         Some(values) => (values, None),
         None => {
-            let polynomial = super::symbolic_eigen::characteristic_polynomial(matrix)?;
-            let values = super::symbolic_eigen::roots(&polynomial)?;
+            let polynomial = matrix.characteristic_polynomial()?;
+            let values = polynomial.roots()?;
             let text = describe_polynomial(&polynomial);
             (values, Some(text))
         }

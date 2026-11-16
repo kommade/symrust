@@ -246,51 +246,113 @@ fn determinant(matrix: &[Vec<ExprPoly>]) -> Option<ExprPoly> {
     Some(total)
 }
 
-/// The eigenvalues of a symbolic matrix, when they can be written in radicals.
-///
-/// Supports degree 1 (`-b/a`) and degree 2 (the quadratic formula). Returns
-/// `None` for larger characteristic polynomials — a general cubic or quartic
-/// formula is unreadable and a quintic has none — and for non-square matrices.
-#[must_use]
-pub fn eigenvalues(matrix: &Matrix<Expr>) -> Option<Vec<Expr>> {
-    let polynomial = characteristic_polynomial(matrix)?;
-    roots(&polynomial)
+impl ExprPoly {
+    /// The roots of this polynomial, when it has a closed form.
+    ///
+    /// Supported for degree 1 (`-b/a`) and degree 2 (the quadratic formula).
+    /// Returns `None` for higher degrees — a general cubic or quartic formula is
+    /// unreadable and a quintic has none — and for a polynomial with a
+    /// vanishing leading coefficient.
+    ///
+    /// # Examples
+    /// ```
+    /// use rust_calculus::math::algebra::symbolic_eigen::ExprPoly;
+    /// use rust_calculus::math::numeric::ExactField;
+    /// use rust_calculus::math::structs::expr::Expr;
+    /// // λ² - 4 has the roots -2 and 2.
+    /// let poly = ExprPoly::new(vec![
+    ///     Expr::from_f64(-4.0),
+    ///     Expr::from_f64(0.0),
+    ///     Expr::from_f64(1.0),
+    /// ]);
+    /// let roots = poly.roots().unwrap();
+    /// assert_eq!(roots.len(), 2);
+    /// ```
+    #[must_use]
+    pub fn roots(&self) -> Option<Vec<Expr>> {
+        let degree = self.degree()?;
+        let coefficients = self.coefficients();
+        match degree {
+            0 => Some(Vec::new()),
+            1 => {
+                // a·λ + b = 0  =>  λ = -b / a
+                let a = coefficients[1].clone();
+                let b = coefficients[0].clone();
+                if a.is_zero_value() {
+                    return None;
+                }
+                let negative_b = (-b).simplify(true);
+                Some(vec![tidy(negative_b / a)])
+            }
+            2 => {
+                // a·λ² + b·λ + c = 0
+                let a = coefficients[2].clone();
+                let b = coefficients[1].clone();
+                let c = coefficients[0].clone();
+                if a.is_zero_value() {
+                    return None;
+                }
+                let two = Expr::from_f64(2.0);
+                let four = Expr::from_f64(4.0);
+                let discriminant = tidy(b.clone() * b.clone() - four * a.clone() * c.clone());
+                let root = discriminant.sqrt();
+                let denominator = two.clone() * a.clone();
+                let first = tidy((-b.clone() + root.clone()) / denominator.clone());
+                let second = tidy((-b - root) / denominator);
+                Some(vec![first, second])
+            }
+            _ => None,
+        }
+    }
 }
 
-/// The roots of `polynomial`, when it has a closed form of degree at most 2.
-#[must_use]
-pub fn roots(polynomial: &ExprPoly) -> Option<Vec<Expr>> {
-    let degree = polynomial.degree()?;
-    let coefficients = polynomial.coefficients();
-    match degree {
-        0 => Some(Vec::new()),
-        1 => {
-            // a·λ + b = 0  =>  λ = -b / a
-            let a = coefficients[1].clone();
-            let b = coefficients[0].clone();
-            if a.is_zero_value() {
-                return None;
-            }
-            let negative_b = (-b).simplify(true);
-            Some(vec![tidy(negative_b / a)])
+impl Matrix<Expr> {
+    /// The characteristic polynomial `det(λI - A)`, expanded symbolically.
+    ///
+    /// The expansion is a straight cofactor expansion along the first row, run
+    /// over a ring of [`Expr`] polynomials rather than scalars. That is
+    /// exponential in the matrix size, which is fine for the small matrices
+    /// this is meant for and keeps the code short enough to audit.
+    ///
+    /// Returns `None` if the matrix is not square.
+    #[must_use]
+    pub fn characteristic_polynomial(&self) -> Option<ExprPoly> {
+        if self.rows() != self.columns() {
+            return None;
         }
-        2 => {
-            // a·λ² + b·λ + c = 0
-            let a = coefficients[2].clone();
-            let b = coefficients[1].clone();
-            let c = coefficients[0].clone();
-            if a.is_zero_value() {
-                return None;
-            }
-            let two = Expr::from_f64(2.0);
-            let four = Expr::from_f64(4.0);
-            let discriminant = tidy(b.clone() * b.clone() - four * a.clone() * c.clone());
-            let root = discriminant.sqrt();
-            let denominator = two.clone() * a.clone();
-            let first = tidy((-b.clone() + root.clone()) / denominator.clone());
-            let second = tidy((-b - root) / denominator);
-            Some(vec![first, second])
+        let size = self.rows();
+        if size == 0 {
+            return Some(ExprPoly::constant(Expr::from_f64(1.0)));
         }
-        _ => None,
+
+        // Build λI - A as a grid of constant-or-λ polynomials.
+        let mut entries: Vec<Vec<ExprPoly>> = Vec::with_capacity(size);
+        for row in 0..size {
+            let mut values = Vec::with_capacity(size);
+            for column in 0..size {
+                let entry = if row == column {
+                    // λ - a_ii
+                    ExprPoly::lambda().sub(&ExprPoly::constant(self[row][column].clone()))
+                } else {
+                    // -a_ij
+                    ExprPoly::constant((-self[row][column].clone()).simplify(true))
+                };
+                values.push(entry);
+            }
+            entries.push(values);
+        }
+
+        determinant(&entries)
+    }
+
+    /// The eigenvalues of a symbolic matrix, when they can be written in
+    /// radicals.
+    ///
+    /// This is [`characteristic_polynomial`](Self::characteristic_polynomial)
+    /// followed by [`ExprPoly::roots`], so it supports degree 1 and degree 2 and
+    /// returns `None` beyond that or for a non-square matrix.
+    #[must_use]
+    pub fn symbolic_eigenvalues(&self) -> Option<Vec<Expr>> {
+        self.characteristic_polynomial()?.roots()
     }
 }
