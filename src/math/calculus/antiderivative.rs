@@ -56,7 +56,7 @@ use crate::{
     math::structs::{
         expr::{
             Expr,
-            node::{Node, NodeFunctions},
+            node::{Node, NodeFunctions, NodeSimplify},
         },
         solution::{NoSteps, Recorder, Solution, StepRecorder},
     },

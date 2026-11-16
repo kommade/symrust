@@ -12,7 +12,7 @@ use crate::{math::numeric::{FloatType, Real},
     math::utils::fmt::unnecessary_brackets,
 };
 
-use super::functions::NodeFunctions;
+use super::functions::{NodeFunctions, NodeSimplify};
 use super::{Node, NodeError, NodeInner, NodeValue, OpNode};
 use super::inspect::*;
 

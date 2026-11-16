@@ -6,7 +6,7 @@ use crate::{math::calculus::expr::{
     math::structs::{
         expr::{
             Expr,
-            node::{MulType, Node, NodeFunctions, NodeOperations, NodeValue}
+            node::{MulType, Node, NodeFunctions, NodeOperations, NodeSimplify, NodeValue}
         },
         solution::{Recorder, Solution, StepRecorder},
     },

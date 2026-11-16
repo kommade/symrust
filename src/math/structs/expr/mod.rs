@@ -12,7 +12,7 @@ pub mod evaluate;
 pub mod limit;
 mod matrix;
 
-use node::{MulType, Node, NodeInner, NodeError, NodeFunctions, NodeOperations, NodeValue, OpNode};
+use node::{MulType, Node, NodeInner, NodeError, NodeFunctions, NodeOperations, NodeSimplify, NodeValue, OpNode};
 pub use error::ExprError;
 pub use evaluate::{Evaluable, Evaluated};
 pub use limit::Limit;
@@ -319,13 +319,13 @@ impl<T: FloatType + Display> Mul for Expr<T> {
     }
 }
 
-impl Mul<i64> for Expr<Real> {
+impl<T: FloatType + Display + std::ops::Neg<Output = T> + std::fmt::Debug> Mul<i64> for Expr<T> {
     type Output = Self;
 
     fn mul(self, other: i64) -> Self {
         Self::from_node(
             self.tree
-                .distribute_constant(Real::from_i64(other), MulType::OpMul),
+                .distribute_constant(T::from_i64(other), MulType::OpMul),
         )
     }
 }
@@ -338,13 +338,13 @@ impl<T: FloatType + Display> Div for Expr<T> {
         Self { tree }
     }
 }
-impl Div<i64> for Expr<Real> {
+impl<T: FloatType + Display + std::ops::Neg<Output = T> + std::fmt::Debug> Div<i64> for Expr<T> {
     type Output = Self;
 
     fn div(self, other: i64) -> Self {
         Self::from_node(
             self.tree
-                .distribute_constant(Real::from_i64(other), MulType::OpDiv),
+                .distribute_constant(T::from_i64(other), MulType::OpDiv),
         )
     }
 }

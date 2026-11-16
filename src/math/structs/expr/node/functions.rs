@@ -30,16 +30,44 @@ pub trait NodeOperations<T> {
     fn pow(self, other: T) -> Self;
 }
 
+/// Node operations that are meaningful for every leaf float type.
+///
+/// These build a node from an existing one, or read a numeric value out of it.
+/// They are generic over `T` because none of them needs more from the leaf than
+/// [`FloatType`] already provides.
+///
+/// `simplify` and `factorise` are *not* here: they depend on the
+/// `Real`-specific tree rewriting in the private `simplify` module, so they
+/// live on [`NodeSimplify`] instead.
 pub trait NodeFunctions<T>
 where
-    T: Into<Real>,
+    T: FloatType + Display,
 {
+    /// `-self`, pushed down one level where that reads better.
     fn negate(self) -> Self;
+    /// `1 / self`, simplified when the node is a division or a number.
     fn recip(self) -> Self;
+    /// Multiply by the constant `k`, folding it into any numeric factor.
     fn distribute_constant(self, k: T, mul_type: MulType) -> Self;
+    /// Multiply by another node, combining like powers where possible.
     fn distribute_expr(self, other: Self, mul_type: MulType) -> Self;
-    fn remove_constants(self) -> Real;
+    /// The numeric coefficient of the tree.
+    ///
+    /// Variables and named constants count as `-1`, so a bare `x` has
+    /// coefficient `-1` rather than `1`. That convention is what lets callers
+    /// treat "no coefficient" and "coefficient one" alike.
+    fn remove_constants(self) -> T;
+}
+
+/// The `Real`-only node simplifications.
+///
+/// These rewrite the tree rather than build it, and lean on the `Real`-specific
+/// helpers in the private `simplify` and `inspect` modules, so they are not
+/// available for every coefficient type.
+pub trait NodeSimplify {
+    /// Simplify the tree, optionally expanding products.
     fn simplify(self, expand: bool, combine_fns: bool) -> Self;
+    /// Pull out a product form where one reads better.
     fn factorise(self) -> Self;
 }
 
@@ -121,13 +149,13 @@ impl<T: FloatType + Display> NodeOperations<i64> for Node<T> {
     }
 }
 
-impl NodeFunctions<Real> for Node {
+impl<T: FloatType + Display + Neg<Output = T> + std::fmt::Debug> NodeFunctions<T> for Node<T> {
     fn negate(self) -> Self {
         match &self.inner.borrow().value {
             NodeValue::Operand(token) => match token {
-                Token::Number(num) => NodeInner::<Real>::from_number(-*num).wrap(),
-                Token::Float(num) => NodeInner::<Real>::from_float(num.clone().neg()).wrap(),
-                _ => NodeInner::<Real>::zero().sub(self.clone()),
+                Token::Number(num) => NodeInner::<T>::from_number(-*num).wrap(),
+                Token::Float(num) => NodeInner::<T>::from_float(-num.clone()).wrap(),
+                _ => NodeInner::<T>::zero().sub(self.clone()),
             },
             NodeValue::Operator(op_node) => match &op_node.token {
                 Token::Operator(op) => {
@@ -135,7 +163,7 @@ impl NodeFunctions<Real> for Node {
                     let right = op_node.right.clone();
                     match op {
                         Op::Sub => {
-                            if left.inner.borrow().is_zero() {
+                            if left.is_number_zero() {
                                 op_node.right.clone()
                             } else {
                                 right.sub(left)
@@ -144,10 +172,10 @@ impl NodeFunctions<Real> for Node {
                         Op::Add => left.negate().sub(right),
                         Op::Mul | Op::ImplicitMul => left.negate().impl_mul(right),
                         Op::Div => left.negate().div(right),
-                        Op::Pow => NodeInner::<Real>::zero().sub(self.clone()),
+                        Op::Pow => NodeInner::<T>::zero().sub(self.clone()),
                     }
                 }
-                _ => NodeInner::<Real>::zero().sub(self.clone()),
+                _ => NodeInner::<T>::zero().sub(self.clone()),
             },
             _ => self.clone(),
         }
@@ -160,37 +188,37 @@ impl NodeFunctions<Real> for Node {
                 // integers and use a float otherwise, with the correct sign.
                 Token::Number(num) => {
                     if *num == 1 || *num == -1 {
-                        NodeInner::<Real>::from_number(*num).wrap()
+                        NodeInner::<T>::from_number(*num).wrap()
                     } else {
-                        NodeInner::<Real>::from_float(Real::one() / Real::from_i64(*num)).wrap()
+                        NodeInner::<T>::from_float(T::one() / T::from_i64(*num)).wrap()
                     }
                 }
                 Token::Float(num) => {
-                    NodeInner::<Real>::from_float(Real::one() / num.clone()).wrap()
+                    NodeInner::<T>::from_float(T::one() / num.clone()).wrap()
                 }
-                _ => NodeInner::<Real>::one().div(self.clone()),
+                _ => NodeInner::<T>::one().div(self.clone()),
             },
             NodeValue::Operator(op_node) => match &op_node.token {
                 Token::Operator(op) => {
                     let left = op_node.left.clone();
                     let right = op_node.right.clone();
                     match op {
-                        Op::Div => NodeInner::<Real>::from_operation(Op::Div, right.clone(), left.clone()),
-                        _ => NodeInner::<Real>::one().div(self.clone()),
+                        Op::Div => NodeInner::<T>::from_operation(Op::Div, right.clone(), left.clone()),
+                        _ => NodeInner::<T>::one().div(self.clone()),
                     }
                 }
-                _ => NodeInner::<Real>::one().div(self.clone()),
+                _ => NodeInner::<T>::one().div(self.clone()),
             },
             _ => self.clone(),
         }
     }
-    fn distribute_constant(self, k: Real, mul_type: MulType) -> Self {
+    fn distribute_constant(self, k: T, mul_type: MulType) -> Self {
         if k.is_zero() {
-            return NodeInner::<Real>::zero();
+            return NodeInner::<T>::zero();
         } else if k.is_one() {
             return self;
         }
-        let constant = NodeInner::<Real>::from_float(k.clone()).wrap();
+        let constant = NodeInner::<T>::from_float(k.clone()).wrap();
         match &self.inner.borrow().value {
             NodeValue::Operator(op_node) => match &op_node.token {
                 Token::Operator(op) => {
@@ -199,13 +227,13 @@ impl NodeFunctions<Real> for Node {
                     match op {
                         Op::Mul | Op::ImplicitMul => {
                             if !right.inner.borrow().has_indp {
-                                NodeInner::<Real>::from_operation(
+                                NodeInner::<T>::from_operation(
                                     op.clone(),
                                     right.distribute_constant(k, mul_type),
                                     left,
                                 )
                             } else {
-                                NodeInner::<Real>::from_operation(
+                                NodeInner::<T>::from_operation(
                                     op.clone(),
                                     left.distribute_constant(k, mul_type),
                                     right,
@@ -213,59 +241,59 @@ impl NodeFunctions<Real> for Node {
                             }
                         }
                         Op::Div => match mul_type {
-                            MulType::OpMul => NodeInner::<Real>::from_operation(
+                            MulType::OpMul => NodeInner::<T>::from_operation(
                                 Op::Div,
                                 left.distribute_constant(k, MulType::OpMul),
                                 right,
                             ),
-                            MulType::OpDiv => NodeInner::<Real>::from_operation(
+                            MulType::OpDiv => NodeInner::<T>::from_operation(
                                 Op::Div,
                                 left,
                                 right.distribute_constant(k, MulType::OpMul),
                             ),
                         },
-                        Op::Add | Op::Sub => NodeInner::<Real>::from_operation(
+                        Op::Add | Op::Sub => NodeInner::<T>::from_operation(
                             op.clone(),
                             left.distribute_constant(k.clone(), mul_type),
                             right.distribute_constant(k.clone(), mul_type),
                         ),
                         _ => match mul_type {
                             MulType::OpMul => {
-                                NodeInner::<Real>::from_operation(Op::ImplicitMul, constant, self.clone())
+                                NodeInner::<T>::from_operation(Op::ImplicitMul, constant, self.clone())
                             }
                             MulType::OpDiv => {
-                                NodeInner::<Real>::from_operation(Op::Div, self.clone(), constant)
+                                NodeInner::<T>::from_operation(Op::Div, self.clone(), constant)
                             }
                         },
                     }
                 }
                 _ => match mul_type {
                     MulType::OpMul => {
-                        NodeInner::<Real>::from_operation(Op::ImplicitMul, constant, self.clone())
+                        NodeInner::<T>::from_operation(Op::ImplicitMul, constant, self.clone())
                     }
-                    MulType::OpDiv => NodeInner::<Real>::from_operation(Op::Div, self.clone(), constant),
+                    MulType::OpDiv => NodeInner::<T>::from_operation(Op::Div, self.clone(), constant),
                 },
             },
             NodeValue::Operand(op) => match op {
                 Token::Number(num) => match mul_type {
-                    MulType::OpMul => NodeInner::<Real>::operand(Token::Float(
-                        Real::from_i64(*num) * k,
+                    MulType::OpMul => NodeInner::<T>::operand(Token::Float(
+                        T::from_i64(*num) * k,
                     ))
                     .wrap(),
-                    MulType::OpDiv => NodeInner::<Real>::operand(Token::Float(
-                        Real::from_i64(*num) / k,
+                    MulType::OpDiv => NodeInner::<T>::operand(Token::Float(
+                        T::from_i64(*num) / k,
                     ))
                     .wrap(),
                 },
                 Token::Float(num) => match mul_type {
-                    MulType::OpMul => NodeInner::<Real>::operand(Token::Float(num.clone() * k)).wrap(),
-                    MulType::OpDiv => NodeInner::<Real>::operand(Token::Float(num.clone() / k)).wrap(),
+                    MulType::OpMul => NodeInner::<T>::operand(Token::Float(num.clone() * k)).wrap(),
+                    MulType::OpDiv => NodeInner::<T>::operand(Token::Float(num.clone() / k)).wrap(),
                 },
                 Token::Indp(_) | Token::Var(_) | Token::Constant(_) => match mul_type {
                     MulType::OpMul => {
-                        NodeInner::<Real>::from_operation(Op::ImplicitMul, constant, self.clone())
+                        NodeInner::<T>::from_operation(Op::ImplicitMul, constant, self.clone())
                     }
-                    MulType::OpDiv => NodeInner::<Real>::from_operation(Op::Div, self.clone(), constant),
+                    MulType::OpDiv => NodeInner::<T>::from_operation(Op::Div, self.clone(), constant),
                 },
                 _ => unreachable!(),
             },
@@ -294,30 +322,30 @@ impl NodeFunctions<Real> for Node {
                 }
 
                 if self_base.is_some_and(|a| {
-                    other_base.is_some_and(|b| a.inner.borrow().eq(&b.inner.borrow()))
+                    other_base.is_some_and(|b| a.same_tree(&b))
                 }) {
-                    let eq = self_borrow.eq(&other_borrow);
+                    let eq = self.same_tree(&other);
                     drop(self_borrow);
                     match (self_exp, other_exp) {
                         (None, None) if eq => {
-                            return NodeInner::<Real>::from_operation(
+                            return NodeInner::<T>::from_operation(
                                 Op::Pow,
                                 self,
-                                NodeInner::<Real>::from_number(2).wrap(),
+                                NodeInner::<T>::from_number(2).wrap(),
                             );
                         }
                         (Some(exp), None) | (None, Some(exp)) => {
-                            return NodeInner::<Real>::from_operation(
+                            return NodeInner::<T>::from_operation(
                                 Op::Pow,
                                 self.inner.borrow().get_left().unwrap(),
-                                NodeInner::<Real>::from_operation(Op::Add, exp, NodeInner::<Real>::one()),
+                                NodeInner::<T>::from_operation(Op::Add, exp, NodeInner::<T>::one()),
                             );
                         }
                         (Some(exp_a), Some(exp_b)) => {
-                            return NodeInner::<Real>::from_operation(
+                            return NodeInner::<T>::from_operation(
                                 Op::Pow,
                                 self.inner.borrow().get_left().unwrap(),
-                                NodeInner::<Real>::from_operation(Op::Add, exp_a, exp_b),
+                                NodeInner::<T>::from_operation(Op::Add, exp_a, exp_b),
                             );
                         }
                         _ => {}
@@ -344,24 +372,24 @@ impl NodeFunctions<Real> for Node {
                 }
 
                 if self_base.is_some_and(|a| {
-                    other_base.is_some_and(|b| a.inner.borrow().eq(&b.inner.borrow()))
+                    other_base.is_some_and(|b| a.same_tree(&b))
                 }) {
-                    let eq = self_borrow.eq(&other_borrow);
+                    let eq = self.same_tree(&other);
                     drop(self_borrow);
                     match (self_exp, other_exp) {
-                        (None, None) if eq => return NodeInner::<Real>::one(),
+                        (None, None) if eq => return NodeInner::<T>::one(),
                         (Some(exp), None) | (None, Some(exp)) => {
-                            return NodeInner::<Real>::from_operation(
+                            return NodeInner::<T>::from_operation(
                                 Op::Pow,
                                 self.inner.borrow().get_left().unwrap(),
-                                NodeInner::<Real>::from_operation(Op::Sub, exp, NodeInner::<Real>::one()),
+                                NodeInner::<T>::from_operation(Op::Sub, exp, NodeInner::<T>::one()),
                             );
                         }
                         (Some(exp_a), Some(exp_b)) => {
-                            return NodeInner::<Real>::from_operation(
+                            return NodeInner::<T>::from_operation(
                                 Op::Pow,
                                 self.inner.borrow().get_left().unwrap(),
-                                NodeInner::<Real>::from_operation(Op::Sub, exp_a, exp_b),
+                                NodeInner::<T>::from_operation(Op::Sub, exp_a, exp_b),
                             );
                         }
                         _ => {}
@@ -389,7 +417,7 @@ impl NodeFunctions<Real> for Node {
                 None
             }
         } {
-            return NodeInner::<Real>::from_operation(
+            return NodeInner::<T>::from_operation(
                 op,
                 left.distribute_expr(other.clone(), mul_type),
                 right.distribute_expr(other, mul_type),
@@ -418,24 +446,24 @@ impl NodeFunctions<Real> for Node {
                 }
             }
         {
-            return NodeInner::<Real>::from_operation(
+            return NodeInner::<T>::from_operation(
                 op,
                 self.clone().distribute_expr(left, mul_type),
                 self.distribute_expr(right, mul_type),
             );
         }
 
-        NodeInner::<Real>::from_operation(operator, self, other)
+        NodeInner::<T>::from_operation(operator, self, other)
     }
-    fn remove_constants(self) -> Real {
+    fn remove_constants(self) -> T {
         // Work on an owned copy so the borrow is not held while recursing.
         let value = self.inner.borrow().value.clone();
         match value {
             NodeValue::Operand(token) => match token {
-                Token::Constant(_) => Real::neg_one(),
-                Token::Number(value) => Real::from_i64(value),
+                Token::Constant(_) => T::neg_one(),
+                Token::Number(value) => T::from_i64(value),
                 Token::Float(value) => value,
-                Token::Indp(_) | Token::Var(_) => Real::neg_one(),
+                Token::Indp(_) | Token::Var(_) => T::neg_one(),
                 _ => unreachable!(),
             },
             NodeValue::Operator(node) => match node.token {
@@ -447,7 +475,7 @@ impl NodeFunctions<Real> for Node {
                         Op::Div => left / right,
                         Op::Add => left + right,
                         Op::Sub => left - right,
-                        Op::Pow => left.pow(&right),
+                        Op::Pow => left.pow(right),
                     }
                 }
                 Token::Function(func) => {
@@ -456,23 +484,31 @@ impl NodeFunctions<Real> for Node {
                         Func::Sin => argument.sin(),
                         Func::Cos => argument.cos(),
                         Func::Tan => argument.tan(),
-                        Func::Sec => Real::one() / argument.cos(),
-                        Func::Csc => Real::one() / argument.sin(),
-                        Func::Cot => Real::one() / argument.tan(),
+                        Func::Sec => T::one() / argument.cos(),
+                        Func::Csc => T::one() / argument.sin(),
+                        Func::Cot => T::one() / argument.tan(),
                         Func::Asin => argument.asin(),
                         Func::Acos => argument.acos(),
                         Func::Atan => argument.atan(),
                         Func::Sqrt => argument.sqrt(),
-                        Func::Root(index) => argument.pow(&(Real::one() / index)),
+                        Func::Root(index) => argument.pow(T::one() / index),
                         Func::Ln => argument.ln(),
-                        Func::Log(base) => argument.log(base),
+                        // `log_b(x)` is `ln x / ln b`; the trait's `log` takes a
+                        // concrete `Float`, so the base is converted through it.
+                        Func::Log(base) => argument.ln() / base.ln(),
                     }
                 }
                 _ => unreachable!(),
             },
-            NodeValue::Empty => Real::zero(),
+            NodeValue::Empty => T::zero(),
         }
     }
+}
+
+/// The `Real`-only simplifications, separate from [`NodeFunctions`] because
+/// they rewrite the tree using the `Real`-specific helpers in `simplify` and
+/// `inspect`.
+impl NodeSimplify for Node {
     fn simplify(self, expand: bool, combine_fns: bool) -> Self {
         let node = self.inner.borrow();
         match node {

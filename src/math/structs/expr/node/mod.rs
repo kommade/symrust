@@ -55,7 +55,7 @@ pub struct Node<T = Real> {
     pub(crate) inner: Rc<RefCell<NodeInner<T>>>,
 }
 
-pub use functions::{NodeFunctions, NodeOperations};
+pub use functions::{NodeFunctions, NodeOperations, NodeSimplify};
 
 pub(crate) use construct::NodeError;
 pub(crate) use display::{matrix_to_latex, vector_to_latex};
