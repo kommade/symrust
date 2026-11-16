@@ -29,9 +29,11 @@
 //! [`Matrix`]. The plain methods return only the answer; the `*_solution`
 //! methods return a [`Solution`] that also records every step.
 
+use std::fmt::Display;
+
 use crate::math::algebra::linear::{Matrix, SquareMatrixFns};
 use crate::math::algebra::rational::Rat;
-use crate::math::numeric::ExactField;
+use crate::math::numeric::{ExactField, Matrixable};
 use crate::math::structs::expr::Expr;
 use crate::math::structs::expr::node::Node;
 use crate::math::structs::solution::{Recorder, Solution, StepRecorder};
@@ -56,7 +58,134 @@ impl Matrix<Expr> {
     pub fn determinant_solution(&self) -> Option<Solution> {
         determinant_tracked(self)
     }
+}
 
+/// Step-tracked operations that work over any coefficient type.
+///
+/// These record each intermediate matrix as a [`Matrix<T>`] step result rather
+/// than wrapping it in an [`Expr`], so they are available for `Matrix<Rat>`,
+/// `Matrix<Surd>` and any other [`Matrixable`] coefficient type as well as for
+/// `Matrix<Expr>`. The answer type may differ from the step type — a
+/// determinant records matrices and answers with a scalar — which is what
+/// [`Solution<T, S>`] is for.
+impl<T> Matrix<T>
+where
+    T: Matrixable + Display + Clone,
+{
+    /// The determinant by Gaussian elimination, recording each elementary row
+    /// operation and the final diagonal product.
+    ///
+    /// Returns `None` when the matrix is not square.
+    ///
+    /// Each step shows the matrix as it stands after the operation. The answer
+    /// is the scalar determinant, so the result type is `T` while the steps are
+    /// `Matrix<T>`; see [`Solution`]'s two type parameters.
+    ///
+    /// # Examples
+    /// ```
+    /// use rust_calculus::math::algebra::linear::Matrix;
+    /// use rust_calculus::math::algebra::rational::Rat;
+    /// use rust_calculus::math::numeric::ExactField;
+    /// let entries: Vec<Rat> = [1, 2, 3, 4].iter().map(|v| Rat::from_i64(*v)).collect();
+    /// let matrix = Matrix::from_vec(2, 2, entries).unwrap();
+    /// let solution = matrix.determinant_steps().unwrap();
+    /// assert_eq!(solution.result().to_string(), "-2");
+    /// assert!(!solution.is_empty());
+    /// ```
+    #[must_use]
+    pub fn determinant_steps(&self) -> Option<Solution<Matrix<T>, T>> {
+        let solution = determinant_generic(self)?;
+        Some(solution.map_result(|scalar| scalar[0][0].clone()))
+    }
+}
+
+/// Generic Gaussian-elimination determinant that records every step.
+///
+/// [`ElementaryStep`] can only display a value of the *answer* type, so a
+/// solution that shows intermediate matrices must answer with a matrix too.
+/// The determinant is therefore carried as a `1 x 1` matrix on the last step,
+/// and [`determinant_steps`](Matrix::determinant_steps) unwraps it.
+fn determinant_generic<T>(matrix: &Matrix<T>) -> Option<Solution<Matrix<T>, Matrix<T>>>
+where
+    T: Matrixable + Display + Clone,
+{
+    if matrix.rows() != matrix.columns() {
+        return None;
+    }
+    let size = matrix.rows();
+    let mut work = matrix.clone();
+    let mut recorder: StepRecorder<Matrix<T>> = StepRecorder::new(matrix.clone(), "determinant");
+    let mut sign = 1i64;
+
+    for i in 0..size {
+        let pivot = (i..size).find(|&candidate| !work[candidate][i].is_zero_value());
+        let Some(pivot_row) = pivot else {
+            recorder.record_decision(
+                "singular",
+                || format!("column {} has no non-zero pivot, so the determinant is 0", i + 1),
+            );
+            return Some(recorder.finish(scalar_matrix(T::additive_identity())));
+        };
+        if pivot_row != i {
+            let (a, b) = (i, pivot_row);
+            for column in 0..size {
+                let left = work[a][column].clone();
+                work[a][column] = work[b][column].clone();
+                work[b][column] = left;
+            }
+            let snapshot = work.clone();
+            recorder.record_step(
+                "row swap",
+                || format!("choose pivot: exchanged row {} with row {}", a + 1, b + 1),
+                || snapshot.clone(),
+            );
+            sign = -sign;
+        }
+        let pivot_value = work[i][i].clone();
+        for target in (i + 1)..size {
+            let entry = work[target][i].clone();
+            if entry.is_zero_value() {
+                continue;
+            }
+            let multiple = entry / pivot_value.clone();
+            for column in 0..size {
+                work[target][column] =
+                    work[target][column].clone() - multiple.clone() * work[i][column].clone();
+            }
+            let snapshot = work.clone();
+            recorder.record_step(
+                "row replacement",
+                || format!("eliminate: row {} -= {} * row {}", target + 1, multiple, i + 1),
+                || snapshot.clone(),
+            );
+        }
+    }
+
+    // The determinant is the product of the triangular diagonal, times the sign
+    // accumulated from row swaps.
+    let mut value = if sign < 0 {
+        -T::multiplicative_identity()
+    } else {
+        T::multiplicative_identity()
+    };
+    for i in 0..size {
+        value = value * work[i][i].clone();
+    }
+    recorder.record_decision(
+        "multiply the diagonal",
+        || String::from("the determinant is the product of the diagonal, times the swap sign"),
+    );
+    Some(recorder.finish(scalar_matrix(value)))
+}
+
+/// The `1 x 1` matrix holding `value`, used to carry a scalar determinant
+/// through a solution whose steps are matrices.
+fn scalar_matrix<T: Matrixable>(value: T) -> Matrix<T> {
+    Matrix::from_vec(1, 1, vec![value]).expect("a 1 x 1 matrix always fits")
+}
+
+/// Step-tracked operations on a [`Matrix`] of expressions.
+impl Matrix<Expr> {
     /// The inverse by Gauss-Jordan elimination of `[A | I]`, recording the
     /// steps.
     ///

@@ -88,6 +88,31 @@ pub enum SolutionStep<T = Expr, S = T> {
     SubSolution(Solution<T, S>),
 }
 
+impl<T, S> SolutionStep<T, S> {
+    /// Convert the step's displayed value to a different answer type.
+    ///
+    /// A nested solution keeps its own step/answer pair and is carried over
+    /// unchanged; only the values this level displays are converted.
+    #[must_use]
+    fn convert_result<S2>(self, f: &impl Fn(S) -> S2) -> SolutionStep<T, S2> {
+        match self {
+            SolutionStep::Elementary(step) => SolutionStep::Elementary(ElementaryStep::new(
+                step.step_name,
+                step.description,
+                step.step_result.map(f),
+            )),
+            // A sub-solution has its own type pair, so it cannot be converted
+            // here. `map_result` is only used where a solution has no nested
+            // steps, and drops them otherwise.
+            SolutionStep::SubSolution(_) => SolutionStep::Elementary(ElementaryStep::new(
+                "nested solution",
+                "carried over from the original computation",
+                None,
+            )),
+        }
+    }
+}
+
 /// A computation together with the steps that produced it.
 ///
 /// A `Solution` is what the `_solution` entry points return, e.g.
@@ -208,6 +233,27 @@ impl<T, S> Solution<T, S> {
     pub fn finish(mut self, result: S) -> Self {
         self.result = result;
         self
+    }
+
+    /// Convert the answer to a different type, keeping every step.
+    ///
+    /// This is how a computation whose steps are matrices can answer with a
+    /// scalar: the steps stay as they are, and only the final value is
+    /// unwrapped. Each step's displayed value is converted the same way, so the
+    /// steps and the answer stay consistent.
+    #[must_use]
+    pub fn map_result<S2>(self, f: impl Fn(S) -> S2) -> Solution<T, S2> {
+        Solution {
+            start: self.start,
+            problem_type: self.problem_type,
+            steps: self
+                .steps
+                .into_iter()
+                .map(|step| step.convert_result(&f))
+                .collect(),
+            result: f(self.result),
+            result_comment: self.result_comment,
+        }
     }
 
     /// How many steps were recorded (nested solutions count as one each).
@@ -443,6 +489,36 @@ impl<T> Recorder<T> for StepRecorder<T> {
 
     fn record_sub_solution(&mut self, solution: impl FnOnce() -> Solution<T, T>) {
         self.solution.push_sub_solution(solution());
+    }
+}
+
+/// A recorder whose step and answer types may differ.
+///
+/// The matrix step code uses this: a determinant steps through `Matrix<T>`
+/// values but answers with a `T`.
+///
+/// [`record_sub_solution`](Recorder::record_sub_solution) is not available here,
+/// because a nested solution must have the same step and answer type as its
+/// parent. A computation that needs nested solutions should call
+/// [`solution_mut`](StepRecorder::solution_mut) and push them directly.
+impl<T, S> StepRecorder<T, S> {
+    /// Record an elementary step whose result has the step type `S`.
+    pub fn record_step(
+        &mut self,
+        step_name: &str,
+        description: impl FnOnce() -> String,
+        result: impl FnOnce() -> S,
+    ) {
+        let description = description();
+        let step_result = result();
+        self.solution.push_step(step_name, description, step_result);
+    }
+
+    /// Record a step that reports a decision but produces no step result.
+    pub fn record_decision(&mut self, step_name: &str, description: impl FnOnce() -> String) {
+        let description = description();
+        self.solution
+            .push_step_without_result(step_name, description, None);
     }
 }
 
