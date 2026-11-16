@@ -104,43 +104,12 @@ fn one() -> Expr {
     Expr::from_f64(1.0)
 }
 
-/// Simplify an entry, and reduce it to a tidy closed value when it is fully
-/// numeric.
+/// Reduce an entry to the most readable exact form.
 ///
-/// Elementary row operations repeatedly build expressions like `-2 / -2` or
-/// `0 - 2 * (1 / -2)`. Symbolic simplification leaves those partly unevaluated,
-/// which makes a recorded step hard to read. A *closed* (variable-free)
-/// expression is therefore reduced here, while genuinely symbolic entries are
-/// left as simplified expressions.
-///
-/// The reduction has two stages, and the order matters:
-///
-/// 1. An exact rational value is written back as an integer when the
-///    denominator is `1`, and as the fraction `p / q` otherwise. This keeps
-///    `1 / 5` readable: folding it into a decimal would produce
-///    `0.2000000000000000111…`, because `1/5` has no exact binary form.
-/// 2. Only when no exact rational value exists — because the entry contains a
-///    radical, which `Node::evaluate` refuses to fold — is the entry left in its
-///    simplified symbolic form. That is what keeps a surd such as `sqrt(2)`
-///    exact rather than turning it into `1.4142…`.
+/// The work is done by [`Expr::tidy`], which is shared with the symbolic
+/// eigen-solver; this alias keeps the recorded-step code reading naturally.
 pub(crate) fn tidy(entry: Expr) -> Expr {
-    let simplified = entry.simplify(true);
-    if simplified.has_independent() {
-        return simplified;
-    }
-    let Some(value) = simplified.tree().inner.borrow().evaluate() else {
-        return simplified;
-    };
-    if value.is_nan() || value.is_infinite() {
-        return simplified;
-    }
-    // Prefer an exact rational rendering so fractions stay fractions.
-    match Rat::from_real(&value) {
-        Some(rational) => Expr::from_node(rational.to_node()),
-        // No exact rational form but the value is still finite: this happens
-        // for a float leaf that was already decimal, so keep the decimal.
-        None => Expr::from_f64(value.to_f64()),
-    }
+    entry.tidy()
 }
 
 /// Swap rows `a` and `b`, recording the step.
@@ -593,7 +562,7 @@ fn svd_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
     let mut recorder = StepRecorder::new(matrix_expr(matrix), "singular value decomposition");
 
     // 1. Aᵀ A, the matrix whose eigen-decomposition supplies V and Σ².
-    let transpose = transpose_of(matrix);
+    let transpose = matrix.transpose();
     let gram = multiply_matrix(&transpose, matrix);
     recorder.record(
         "form AᵀA",
@@ -614,7 +583,7 @@ fn svd_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
     );
 
     // 4. Assemble U Σ Vᵀ, which must reconstruct A.
-    let right_transpose = transpose_of(&right);
+    let right_transpose = right.transpose();
     let reconstructed = multiply_matrix(&multiply_matrix(&left, &sigma), &right_transpose);
     recorder.record(
         "assemble U Σ Vᵀ",
@@ -635,19 +604,11 @@ fn svd_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
     Some(recorder.finish(matrix_expr(&reconstructed)))
 }
 
-/// The transpose of a matrix of expressions.
-fn transpose_of(matrix: &Matrix<Expr>) -> Matrix<Expr> {
-    let mut result = Matrix::<Expr>::new(matrix.columns(), matrix.rows());
-    for row in 0..matrix.rows() {
-        for column in 0..matrix.columns() {
-            result[column][row] = matrix[row][column].clone();
-        }
-    }
-    result
-}
-
 /// The product of two matrices of expressions, assuming the inner dimensions
 /// agree.
+///
+/// `MatrixMul::mul_matrix` would compute the same product, but this version
+/// tidies every partial sum, which is what keeps the recorded entries short.
 fn multiply_matrix(left: &Matrix<Expr>, right: &Matrix<Expr>) -> Matrix<Expr> {
     let mut result = Matrix::<Expr>::new(left.rows(), right.columns());
     for row in 0..left.rows() {

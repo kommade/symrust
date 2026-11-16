@@ -48,7 +48,7 @@ impl <T> Matrix<T> where T: Matrixable {
     }
 
     /// A `rows x columns` matrix read row-major from `values`.
-pub fn from_vec(rows: usize, columns: usize, values: Vec<T>) -> Option<Self> {
+    pub fn from_vec(rows: usize, columns: usize, values: Vec<T>) -> Option<Self> {
         if values.len() != rows.checked_mul(columns)? {
             return None;
         }

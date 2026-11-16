@@ -169,15 +169,12 @@ impl ExprPoly {
 }
 
 /// Simplify an entry, and fold it to a plain number when it is fully numeric.
+///
+/// Unlike the numeric-only version this replaces, exact values survive: a
+/// rational stays a fraction and a surd stays a surd, because the shared
+/// [`Expr::tidy`] routes closed values through `Rat` rather than `f64`.
 fn tidy(entry: Expr) -> Expr {
-    let simplified = entry.simplify(true);
-    if simplified.has_independent() {
-        return simplified;
-    }
-    match simplified.evaluate(0.0_f64).value() {
-        Some(value) if value.is_finite() => Expr::from_f64(value),
-        _ => simplified,
-    }
+    entry.tidy()
 }
 
 /// The characteristic polynomial `det(λI - A)`, expanded symbolically.

@@ -2,6 +2,7 @@ use std::error::Error;
 use std::fmt::Display;
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
+use crate::math::algebra::rational::Rat;
 use crate::math::numeric::{ExactField, FloatType, Real};
 use crate::math::parse::{lexer::Lexer, parser::Parser};
 
@@ -245,6 +246,49 @@ impl Expr<Real> {
     pub fn simplify(self, expand: bool) -> Self {
         let tree = self.tree.simplify(expand, true);
         Self { tree }
+    }
+
+    /// Simplify, then fold a fully numeric result to its most readable exact
+    /// form.
+    ///
+    /// Algorithms that build expressions mechanically produce entries like
+    /// `-2 / -2` or `0 - 2 * (1 / -2)`. [`simplify`](Self::simplify) leaves
+    /// those partly unevaluated, which makes a recorded step hard to read, so a
+    /// *closed* (variable-free) expression is reduced further here. Symbolic
+    /// entries are returned simplified and otherwise untouched.
+    ///
+    /// Exactness is preserved: an integer stays an integer, a fraction is
+    /// written as `p / q`, and a surd such as `sqrt(2)` is left alone rather
+    /// than folded into `1.4142…`. Only a value with no exact rational form —
+    /// because it was already a decimal leaf — stays a decimal.
+    ///
+    /// # Examples
+    ///
+    /// - `-2 / -2` becomes `1`
+    /// - `(2 - 2) / 5` becomes `0`
+    /// - `1 / 5` stays `1 / 5` (not `0.2`)
+    /// - `sqrt(2)` stays `sqrt(2)` (not `1.414…`)
+    /// - `x + 0` becomes `x`
+    #[must_use]
+    pub fn tidy(self) -> Self {
+        let simplified = self.simplify(true);
+        if simplified.has_independent() {
+            return simplified;
+        }
+        let Some(value) = simplified.tree().inner.borrow().evaluate() else {
+            return simplified;
+        };
+        if value.is_nan() || value.is_infinite() {
+            return simplified;
+        }
+        // Prefer an exact rational rendering so fractions stay fractions.
+        match Rat::from_real(&value) {
+            Some(rational) => Self::from_node(rational.to_node()),
+            // No exact rational form but the value is still finite: this
+            // happens for a float leaf that was already decimal, so keep the
+            // decimal.
+            None => Self::from_f64(value.to_f64()),
+        }
     }
 }
 
