@@ -120,6 +120,132 @@ where
     pub fn row_reduce_steps(&self, normalise: bool) -> Solution<Matrix<T>, Matrix<T>> {
         row_reduce_generic(self, normalise)
     }
+
+    /// The inverse by Gauss-Jordan elimination of `[A | I]`, recording the
+    /// steps.
+    ///
+    /// Works for any [`Matrixable`] coefficient type. The elimination runs on
+    /// the augmented matrix as one `n x 2n` matrix, so every row operation is
+    /// applied to `A` and `I` together by construction.
+    ///
+    /// Returns `None` when the matrix is not square or not invertible.
+    ///
+    /// # Examples
+    /// ```
+    /// use rust_calculus::math::algebra::linear::Matrix;
+    /// use rust_calculus::math::algebra::rational::Rat;
+    /// use rust_calculus::math::numeric::ExactField;
+    /// let entries: Vec<Rat> = [2, 0, 0, 4].iter().map(|v| Rat::from_i64(*v)).collect();
+    /// let matrix = Matrix::from_vec(2, 2, entries).unwrap();
+    /// let solution = matrix.inverse_steps().unwrap();
+    /// assert_eq!(solution.result().to_string(), "[1/2 0]\n[0 1/4]\n");
+    /// ```
+    #[must_use]
+    pub fn inverse_steps(&self) -> Option<Solution<Matrix<T>, Matrix<T>>> {
+        inverse_generic(self)
+    }
+}
+
+/// Generic Gauss-Jordan inverse that records every elementary row operation.
+fn inverse_generic<T>(matrix: &Matrix<T>) -> Option<Solution<Matrix<T>, Matrix<T>>>
+where
+    T: Matrixable + Display + Clone,
+{
+    if matrix.rows() != matrix.columns() {
+        return None;
+    }
+    let size = matrix.rows();
+
+    // Build `[A | I]`.
+    let mut augmented = Matrix::<T>::new(size, size * 2);
+    for row in 0..size {
+        for column in 0..size {
+            augmented[row][column] = matrix[row][column].clone();
+            augmented[row][size + column] = if row == column {
+                T::multiplicative_identity()
+            } else {
+                T::additive_identity()
+            };
+        }
+    }
+    let mut recorder: StepRecorder<Matrix<T>> =
+        StepRecorder::new(matrix.clone(), "inverse by Gauss-Jordan elimination");
+
+    for column in 0..size {
+        let pivot = (column..size).find(|&candidate| !augmented[candidate][column].is_zero_value());
+        let Some(pivot_row) = pivot else {
+            return None;
+        };
+        if pivot_row != column {
+            for entry in 0..(2 * size) {
+                let left = augmented[column][entry].clone();
+                augmented[column][entry] = augmented[pivot_row][entry].clone();
+                augmented[pivot_row][entry] = left;
+            }
+            let snapshot = augmented.clone();
+            recorder.record_step(
+                "row swap",
+                || format!("choose pivot: exchanged row {} with row {}", column + 1, pivot_row + 1),
+                || snapshot.clone(),
+            );
+        }
+
+        let pivot_value = augmented[column][column].clone();
+        if pivot_value != T::multiplicative_identity() {
+            let inverse = T::multiplicative_identity() / pivot_value.clone();
+            for entry in 0..(2 * size) {
+                augmented[column][entry] = augmented[column][entry].clone() * inverse.clone();
+            }
+            let snapshot = augmented.clone();
+            recorder.record_step(
+                "row scaling",
+                || format!("make pivot 1: multiplied row {} by {}", column + 1, inverse),
+                || snapshot.clone(),
+            );
+        }
+
+        for row in 0..size {
+            if row == column {
+                continue;
+            }
+            let entry = augmented[row][column].clone();
+            if entry.is_zero_value() {
+                continue;
+            }
+            let pivot_value = augmented[column][column].clone();
+            let multiple = entry / pivot_value;
+            for position in 0..(2 * size) {
+                augmented[row][position] = augmented[row][position].clone()
+                    - multiple.clone() * augmented[column][position].clone();
+            }
+            let snapshot = augmented.clone();
+            recorder.record_step(
+                "row replacement",
+                || {
+                    format!(
+                        "eliminate: row {} -= {} * row {}",
+                        row + 1,
+                        multiple,
+                        column + 1
+                    )
+                },
+                || snapshot.clone(),
+            );
+        }
+    }
+
+    // Read the right-hand half out as the inverse.
+    let mut inverse = Matrix::<T>::new(size, size);
+    for row in 0..size {
+        for column in 0..size {
+            inverse[row][column] = augmented[row][size + column].clone();
+        }
+    }
+    recorder.record_decision(
+        "read the inverse",
+        || String::from("the right-hand half of the reduced matrix is the inverse"),
+    );
+    Some(recorder.finish(inverse))
 }
 
 /// Generic row reduction that records every elementary row operation.
