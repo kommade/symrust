@@ -720,13 +720,7 @@ fn x_power_minus_one(d: usize) -> Poly {
 /// Greatest common divisor of two positive integers.
 #[cfg(all(feature = "algebraic", feature = "complex"))]
 fn gcd(a: i64, b: i64) -> i64 {
-    let (mut a, mut b) = (a.abs(), b.abs());
-    while b != 0 {
-        let t = b;
-        b = a % b;
-        a = t;
-    }
-    a
+    crate::math::utils::gcd_i128(a as i128, b as i128) as i64
 }
 
 /// Build the exact formal root-sum term for an irreducible factor `p`.

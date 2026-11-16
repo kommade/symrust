@@ -147,15 +147,11 @@ fn common_factor(matrix: &crate::math::algebra::linear::Matrix<Expr>) -> Option<
 }
 
 /// Greatest common divisor of two integers, always non-negative.
-fn integer_gcd(mut a: i128, mut b: i128) -> i128 {
-    a = a.abs();
-    b = b.abs();
-    while b != 0 {
-        let remainder = a % b;
-        a = b;
-        b = remainder;
-    }
-    if a == 0 { 1 } else { a }
+///
+/// Delegates to the shared [`crate::math::utils::gcd_i128`] so the crate has
+/// one implementation of Euclid's algorithm.
+fn integer_gcd(a: i128, b: i128) -> i128 {
+    crate::math::utils::gcd_i128(a, b)
 }
 
 pub(crate) fn matrix_to_latex(matrix: &crate::math::algebra::linear::Matrix<Expr>) -> String {

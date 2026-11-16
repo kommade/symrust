@@ -14,6 +14,15 @@ pub(crate) fn gcd_u128(mut left: u128, mut right: u128) -> u128 {
     if left == 0 { 1 } else { left }
 }
 
+/// The greatest common divisor of two signed integers, always non-negative.
+///
+/// This is the signed counterpart of [`gcd_u128`], for callers that start from
+/// `i64`/`i128` coefficients. Like `gcd_u128` it returns `1` for `gcd(0, 0)`,
+/// which keeps it usable as a divisor.
+pub(crate) fn gcd_i128(mut left: i128, mut right: i128) -> i128 {
+    gcd_u128(left.unsigned_abs(), right.unsigned_abs()) as i128
+}
+
 // `float_math` is scalar numeric support (`Float` comparison, integer gcd and
 // the inverse trigonometric functions `arpfloat` is missing). It is used by the
 // expression tree and the parser, so it deliberately stays below `algebra`:
