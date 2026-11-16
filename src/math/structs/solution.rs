@@ -29,7 +29,7 @@ use crate::math::structs::expr::Expr;
 /// and the value that rule produced.
 ///
 /// The recorded value is generic so a computation over any coefficient type can
-/// keep steps — a `Matrix<Rat>` reduction records `Rat` matrices, and an
+/// keep steps — a `Matrix<Rat>` reduction records its matrices, and an
 /// expression calculation records `Expr`. Both render through `Display`.
 #[derive(Debug, Clone)]
 pub struct ElementaryStep<T = Expr> {
@@ -47,12 +47,17 @@ pub struct ElementaryStep<T = Expr> {
 }
 
 /// One entry in a [`Solution`].
+///
+/// The parameters mirror [`Solution`]'s: `T` is the type an elementary step
+/// records, `S` the type the enclosing computation answers with. A nested
+/// sub-solution keeps its own pair, so `SubSolution` carries a full
+/// `Solution<T, S>`.
 #[derive(Debug, Clone)]
-pub enum SolutionStep<T = Expr> {
+pub enum SolutionStep<T = Expr, S = T> {
     /// A single rule application.
     Elementary(ElementaryStep<T>),
     /// A nested solution, for a sub-problem that was solved in its own right.
-    SubSolution(Solution<T>),
+    SubSolution(Solution<T, S>),
 }
 
 /// A computation together with the steps that produced it.
@@ -60,6 +65,12 @@ pub enum SolutionStep<T = Expr> {
 /// A `Solution` is what the `_solution` entry points return, e.g.
 /// [`get_derivative_solution`][crate::math::calculus::derivative::Derivative::get_derivative_solution].
 /// The plain entry points return only the answer and record no steps.
+///
+/// The two type parameters are deliberately separate. `S` is what the steps
+/// record; it defaults to `T` so the common case needs one parameter. They come
+/// apart when a computation works with one kind of value but answers with
+/// another — a determinant reduces a `Matrix<Rat>` step by step but its answer is
+/// a scalar `Rat`.
 ///
 /// # Examples
 /// ```
@@ -70,26 +81,26 @@ pub enum SolutionStep<T = Expr> {
 /// assert!(!solution.steps().is_empty());
 /// ```
 #[derive(Debug, Clone)]
-pub struct Solution<T = Expr> {
+pub struct Solution<T = Expr, S = T> {
     start: T,
     problem_type: String,
-    steps: Vec<SolutionStep<T>>,
-    result: T,
+    steps: Vec<SolutionStep<T, S>>,
+    result: S,
     result_comment: String,
 }
 
-impl<T> Solution<T> {
+impl<T, S> Solution<T, S> {
     /// Start collecting the steps of `problem_type` applied to `start`.
     #[must_use]
     pub fn new(start: T, problem_type: impl Into<String>) -> Self
     where
-        T: Default,
+        S: Default,
     {
         Self {
             start,
             problem_type: problem_type.into(),
             steps: Vec::new(),
-            result: T::default(),
+            result: S::default(),
             result_comment: String::new(),
         }
     }
@@ -108,13 +119,13 @@ impl<T> Solution<T> {
 
     /// The steps recorded so far, in the order they were taken.
     #[must_use]
-    pub fn steps(&self) -> &[SolutionStep<T>] {
+    pub fn steps(&self) -> &[SolutionStep<T, S>] {
         &self.steps
     }
 
     /// The final answer.
     #[must_use]
-    pub fn result(&self) -> &T {
+    pub fn result(&self) -> &S {
         &self.result
     }
 
@@ -124,7 +135,7 @@ impl<T> Solution<T> {
         &self.result_comment
     }
 
-    /// Record an elementary step that produced a value.
+    /// Record an elementary step.
     pub fn push_step(
         &mut self,
         step_name: impl Into<String>,
@@ -152,12 +163,12 @@ impl<T> Solution<T> {
     }
 
     /// Record a nested solution.
-    pub fn push_sub_solution(&mut self, solution: Solution<T>) {
+    pub fn push_sub_solution(&mut self, solution: Solution<T, S>) {
         self.steps.push(SolutionStep::SubSolution(solution));
     }
 
     /// Set the final answer.
-    pub fn set_result(&mut self, result: T) {
+    pub fn set_result(&mut self, result: S) {
         self.result = result;
     }
 
@@ -168,7 +179,7 @@ impl<T> Solution<T> {
 
     /// Finish the solution by storing the answer and returning it.
     #[must_use]
-    pub fn finish(mut self, result: T) -> Self {
+    pub fn finish(mut self, result: S) -> Self {
         self.result = result;
         self
     }
@@ -186,7 +197,7 @@ impl<T> Solution<T> {
     }
 }
 
-impl<T: Display> Display for Solution<T> {
+impl<T: Display, S: Display> Display for Solution<T, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "{}: {}", self.problem_type, self.start)?;
         for (index, step) in self.steps.iter().enumerate() {
@@ -304,7 +315,7 @@ pub(crate) trait Recorder<T = Expr> {
     }
 
     /// Record a nested solution.
-    fn record_sub_solution(&mut self, solution: impl FnOnce() -> Solution<T>) {
+    fn record_sub_solution(&mut self, solution: impl FnOnce() -> Solution<T, T>) {
         let _ = solution;
     }
 
@@ -336,7 +347,7 @@ impl<T> Recorder<T> for NoSteps {
     }
 
     #[inline]
-    fn record_sub_solution(&mut self, _solution: impl FnOnce() -> Solution<T>) {}
+    fn record_sub_solution(&mut self, _solution: impl FnOnce() -> Solution<T, T>) {}
 
     #[inline]
     fn is_recording(&self) -> bool {
@@ -345,12 +356,16 @@ impl<T> Recorder<T> for NoSteps {
 }
 
 /// Collects steps into a [`Solution`].
+///
+/// `T` is the type each step records, `S` the type the final answer has. They
+/// are the same for most computations; a determinant, for instance, records
+/// matrices and answers with a scalar.
 #[derive(Debug, Clone)]
-pub(crate) struct StepRecorder<T = Expr> {
-    solution: Solution<T>,
+pub(crate) struct StepRecorder<T = Expr, S = T> {
+    solution: Solution<T, S>,
 }
 
-impl<T: Default> StepRecorder<T> {
+impl<T, S: Default> StepRecorder<T, S> {
     /// Start recording the steps of `problem_type` applied to `start`.
     #[must_use]
     pub fn new(start: T, problem_type: impl Into<String>) -> Self {
@@ -361,18 +376,18 @@ impl<T: Default> StepRecorder<T> {
 
     /// Finish recording, storing `result` as the answer.
     #[must_use]
-    pub fn finish(self, result: T) -> Solution<T> {
+    pub fn finish(self, result: S) -> Solution<T, S> {
         self.solution.finish(result)
     }
 
     /// The steps recorded so far.
     #[must_use]
-    pub fn solution(&self) -> &Solution<T> {
+    pub fn solution(&self) -> &Solution<T, S> {
         &self.solution
     }
 
     /// A mutable reference to the solution being built.
-    pub fn solution_mut(&mut self) -> &mut Solution<T> {
+    pub fn solution_mut(&mut self) -> &mut Solution<T, S> {
         &mut self.solution
     }
 }
@@ -400,7 +415,7 @@ impl<T> Recorder<T> for StepRecorder<T> {
             .push_step_without_result(step_name, description, None);
     }
 
-    fn record_sub_solution(&mut self, solution: impl FnOnce() -> Solution<T>) {
+    fn record_sub_solution(&mut self, solution: impl FnOnce() -> Solution<T, T>) {
         self.solution.push_sub_solution(solution());
     }
 }

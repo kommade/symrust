@@ -385,3 +385,34 @@ fn solution_is_generic_over_its_value() {
     );
     assert!(rendered.contains("= 7"), "got:\n{rendered}");
 }
+
+/// The step type and the result type are independent: a computation can record
+/// matrices while answering with a scalar. This is what lets a determinant keep
+/// its row-operation steps but return a single number.
+#[test]
+fn solution_steps_and_result_may_differ() {
+    use crate::math::algebra::linear::Matrix;
+    use crate::math::algebra::rational::Rat;
+    use crate::math::structs::solution::Solution;
+
+    let matrix = Matrix::<Rat>::from_vec(
+        2,
+        2,
+        vec![
+            Rat::from_i64(1),
+            Rat::from_i64(2),
+            Rat::from_i64(3),
+            Rat::from_i64(4),
+        ],
+    )
+    .unwrap();
+    let mut solution = Solution::<Matrix<Rat>, Rat>::new(matrix.clone(), "determinant");    solution.push_step("row swap", "exchanged rows", matrix);
+    let solution = solution.finish(Rat::from_i64(-2));
+
+    assert_eq!(solution.result(), &Rat::from_i64(-2));
+    assert_eq!(solution.steps().len(), 1);
+    let rendered = solution.to_string();
+    assert!(rendered.contains("determinant"), "got:\n{rendered}");
+    assert!(rendered.contains("exchanged rows"), "got:\n{rendered}");
+    assert!(rendered.contains("= -2"), "got:\n{rendered}");
+}
