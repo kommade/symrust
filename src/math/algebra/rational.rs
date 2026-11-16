@@ -52,7 +52,7 @@ fn integer_cbrt(value: u128) -> Option<u128> {
 }
 
 /// `sqrt(value)` as a node, staying exact whenever possible.
-pub(crate) fn square_root_of(value: Rat) -> Node {
+pub fn square_root_of(value: Rat) -> Node {
     if let Some(exact) = value.sqrt_exact() {
         return exact.to_node();
     }
@@ -70,7 +70,7 @@ pub(crate) fn square_root_of(value: Rat) -> Node {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Rat {
+pub struct Rat {
     num: i128,
     den: i128,
 }
@@ -160,17 +160,17 @@ impl Display for Rat {
 }
 
 impl Rat {
-    pub(crate) const ZERO: Self = Self { num: 0, den: 1 };
-    pub(crate) const ONE: Self = Self { num: 1, den: 1 };
+    pub const ZERO: Self = Self { num: 0, den: 1 };
+    pub const ONE: Self = Self { num: 1, den: 1 };
 
-    pub(crate) const fn from_i64(value: i64) -> Self {
+    pub const fn from_i64(value: i64) -> Self {
         Self {
             num: value as i128,
             den: 1,
         }
     }
 
-    pub(crate) fn new(num: i128, den: i128) -> Option<Self> {
+    pub fn new(num: i128, den: i128) -> Option<Self> {
         if den == 0 {
             return None;
         }
@@ -183,7 +183,7 @@ impl Rat {
     }
 
     /// Recover a rational from a floating point value.
-    pub(crate) fn from_float(value: &arpfloat::Float) -> Option<Self> {
+    pub fn from_float(value: &arpfloat::Float) -> Option<Self> {
         if value.is_nan() || value.is_inf() {
             return None;
         }
@@ -194,14 +194,14 @@ impl Rat {
     }
 
     /// Recover a rational from the crate's [`Real`](crate::math::numeric::Real) float type.
-    pub(crate) fn from_real(value: &crate::math::numeric::Real) -> Option<Self> {
+    pub fn from_real(value: &crate::math::numeric::Real) -> Option<Self> {
         Self::from_float(value.as_inner())
     }
 
     /// Recover a *simple* rational (small denominator) from a float.
     ///
     /// Used for display purposes: `1/3` is nicer than `0.3333333333333333`.
-    pub(crate) fn from_float_simple(value: &arpfloat::Float) -> Option<Self> {
+    pub fn from_float_simple(value: &arpfloat::Float) -> Option<Self> {
         let candidate = Self::from_float(value)?;
         if candidate.den.unsigned_abs() > 64 {
             return None;
@@ -213,7 +213,7 @@ impl Rat {
     }
 
     /// Recover a small rational from a floating point value.
-    pub(crate) fn from_f64(value: f64) -> Option<Self> {
+    pub fn from_f64(value: f64) -> Option<Self> {
         if !value.is_finite() {
             return None;
         }
@@ -253,26 +253,26 @@ impl Rat {
         Self::new(numerator, best.1)
     }
 
-    pub(crate) fn add(self, other: Self) -> Option<Self> {
+    pub fn add(self, other: Self) -> Option<Self> {
         let left = self.num.checked_mul(other.den)?;
         let right = other.num.checked_mul(self.den)?;
         Self::new(left.checked_add(right)?, self.den.checked_mul(other.den)?)
     }
 
-    pub(crate) fn sub(self, other: Self) -> Option<Self> {
+    pub fn sub(self, other: Self) -> Option<Self> {
         let left = self.num.checked_mul(other.den)?;
         let right = other.num.checked_mul(self.den)?;
         Self::new(left.checked_sub(right)?, self.den.checked_mul(other.den)?)
     }
 
-    pub(crate) fn mul(self, other: Self) -> Option<Self> {
+    pub fn mul(self, other: Self) -> Option<Self> {
         Self::new(
             self.num.checked_mul(other.num)?,
             self.den.checked_mul(other.den)?,
         )
     }
 
-    pub(crate) fn div(self, other: Self) -> Option<Self> {
+    pub fn div(self, other: Self) -> Option<Self> {
         if other.num == 0 {
             return None;
         }
@@ -282,18 +282,18 @@ impl Rat {
         )
     }
 
-    pub(crate) fn recip(self) -> Option<Self> {
+    pub fn recip(self) -> Option<Self> {
         Self::new(self.den, self.num)
     }
 
-    pub(crate) fn neg(self) -> Self {
+    pub fn neg(self) -> Self {
         Self {
             num: -self.num,
             den: self.den,
         }
     }
 
-    pub(crate) fn pow(self, exponent: i64) -> Option<Self> {
+    pub fn pow(self, exponent: i64) -> Option<Self> {
         if exponent == 0 {
             return Some(Self::ONE);
         }
@@ -314,33 +314,33 @@ impl Rat {
         }
     }
 
-    pub(crate) fn is_zero(&self) -> bool {
+    pub fn is_zero(&self) -> bool {
         self.num == 0
     }
 
-    pub(crate) fn is_one(&self) -> bool {
+    pub fn is_one(&self) -> bool {
         self.num == 1 && self.den == 1
     }
 
-    pub(crate) fn is_negative(&self) -> bool {
+    pub fn is_negative(&self) -> bool {
         self.num < 0
     }
 
-    pub(crate) fn to_f64(&self) -> f64 {
+    pub fn to_f64(&self) -> f64 {
         self.num as f64 / self.den as f64
     }
 
-    pub(crate) fn to_float(&self) -> arpfloat::Float {
+    pub fn to_float(&self) -> arpfloat::Float {
         arpfloat::Float::from_f64(self.to_f64()).cast(arpfloat::FP128)
     }
 
     /// The value as the crate's [`Real`](crate::math::numeric::Real) float type.
-    pub(crate) fn to_real(&self) -> crate::math::numeric::Real {
+    pub fn to_real(&self) -> crate::math::numeric::Real {
         crate::math::numeric::Real::from_f64(self.to_f64())
     }
 
     /// The square root of this value if it is a perfect square.
-    pub(crate) fn sqrt_exact(&self) -> Option<Self> {
+    pub fn sqrt_exact(&self) -> Option<Self> {
         if self.is_negative() {
             return None;
         }
@@ -350,7 +350,7 @@ impl Rat {
     }
 
     /// The cube root of this value if it is an exact cube.
-    pub(crate) fn cbrt_exact(&self) -> Option<Self> {
+    pub fn cbrt_exact(&self) -> Option<Self> {
         if self.is_negative() {
             return None;
         }
@@ -359,7 +359,7 @@ impl Rat {
         Self::new(num_root, den_root)
     }
 
-    pub(crate) fn integer_node(value: i128) -> Node {
+    pub fn integer_node(value: i128) -> Node {
         if value >= i64::MIN as i128 && value <= i64::MAX as i128 {
             expr::number(value as i64)
         } else {
@@ -367,11 +367,11 @@ impl Rat {
         }
     }
 
-    pub(crate) fn parts(&self) -> (i128, i128) {
+    pub fn parts(&self) -> (i128, i128) {
         (self.num, self.den)
     }
 
-    pub(crate) fn to_node(self) -> Node {
+    pub fn to_node(self) -> Node {
         let numerator = Self::integer_node(self.num);
         if self.den == 1 {
             numerator

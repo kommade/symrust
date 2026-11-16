@@ -33,7 +33,7 @@ use crate::math::structs::expr::node::Node;
 /// Requires a const generic `N` for the maximum number of radicands, which is
 /// the maximum number of nested square roots that can appear in the singular values.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Multiquadratic<const N: usize> where [(); 1 << N]: Sized {
+pub struct Multiquadratic<const N: usize> where [(); 1 << N]: Sized {
     /// The distinct squarefree radicands; only the first `count` are used.
     radicands: [i64; N],
     count: u8,
@@ -54,14 +54,14 @@ impl <const N: usize> Default for Multiquadratic<N> where [(); 1 << N]: Sized  {
 
 impl <const N: usize> Multiquadratic<N> where [(); 1 << N]: Sized {
     /// The rational value `q` (no radicands).
-    pub(crate) fn from_rat(value: Rat) -> Self {
+    pub fn from_rat(value: Rat) -> Self {
         let mut result = Self::default();
         result.coeffs[0] = value;
         result
     }
 
     /// `sqrt(k)` for a positive integer `k`, reduced to its squarefree radicand.
-    pub(crate) fn sqrt_of(k: i64) -> Option<Self> {
+    pub fn sqrt_of(k: i64) -> Option<Self> {
         if k <= 0 {
             return None;
         }
@@ -77,7 +77,7 @@ impl <const N: usize> Multiquadratic<N> where [(); 1 << N]: Sized {
         self.coeffs.iter().all(|coefficient| coefficient.is_zero())
     }
 
-    pub(crate) fn to_f64(&self) -> f64 {
+    pub fn to_f64(&self) -> f64 {
         let mut total = 0.0;
         for (mask, coefficient) in self.coeffs.iter().enumerate() {
             if coefficient.is_zero() {
@@ -519,7 +519,7 @@ impl<const N: usize> Multiquadratic<N> where [(); 1 << N]: Sized {
 
     /// Render the value: square roots when a radicand is present, otherwise the
     /// rational value.
-    pub(crate) fn to_node(self) -> Node {
+    pub fn to_node(self) -> Node {
         if self.is_zero() {
             return expr::zero();
         }
@@ -569,7 +569,7 @@ impl<const N: usize> std::fmt::Display for Multiquadratic<N> where [(); 1 << N]:
 /// A real root of a rational polynomial, held exactly as
 /// `(defining polynomial, isolating interval)`.
 #[derive(Clone, Debug)]
-pub(crate) struct RealAlgebraic {
+pub struct RealAlgebraic {
     /// The polynomial the value is a root of.
     polynomial: Poly,
     /// Open interval bounds; the root lies in `(lo, hi)`.
@@ -579,12 +579,12 @@ pub(crate) struct RealAlgebraic {
 
 impl RealAlgebraic {
     /// The defining polynomial.
-    pub(crate) fn polynomial(&self) -> &Poly {
+    pub fn polynomial(&self) -> &Poly {
         &self.polynomial
     }
 
     /// The isolating interval `(lo, hi)`.
-    pub(crate) fn interval(&self) -> (Rat, Rat) {
+    pub fn interval(&self) -> (Rat, Rat) {
         (self.lo, self.hi)
     }
 
@@ -592,7 +592,7 @@ impl RealAlgebraic {
     ///
     /// The stored interval only isolates the root from its siblings; bisecting
     /// it down to a narrow width first gives a close approximation.
-    pub(crate) fn to_f64(&self) -> f64 {
+    pub fn to_f64(&self) -> f64 {
         let mut current = self.clone();
         // Denominators roughly double per bisection; ~50 steps stay well inside
         // `i128`, and 2^-50 already exceeds f64 precision for normal-sized roots.
@@ -618,7 +618,7 @@ impl RealAlgebraic {
     /// Two algebraic numbers that are roots of *different* polynomials are
     /// still ordered by comparing their isolating intervals and, when those
     /// overlap, bisecting the one with the wider interval until they separate.
-    pub(crate) fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    pub fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         use std::cmp::Ordering;
         let mut left = self.clone();
         let mut right = other.clone();
@@ -669,7 +669,7 @@ impl RealAlgebraic {
     /// The root is emitted as a decimal approximation. A symbolic
     /// `root(poly, k)` node would be more faithful, but the expression tree has
     /// no such constructor yet; this keeps the output usable until one is added.
-    pub(crate) fn to_node(&self, _variable: &Node) -> Node {
+    pub fn to_node(&self, _variable: &Node) -> Node {
         expr::number(self.to_f64().round() as i64)
     }
 }
@@ -799,7 +799,7 @@ fn root_bound(poly: &Poly) -> Option<i128> {
 ///
 /// The polynomial is reduced to its squarefree part first, so repeated roots
 /// are reported once. Returns an empty vector for a constant polynomial.
-pub(crate) fn real_roots(poly: &Poly) -> Vec<RealAlgebraic> {
+pub fn real_roots(poly: &Poly) -> Vec<RealAlgebraic> {
     let Some(degree) = poly.degree() else {
         return Vec::new();
     };

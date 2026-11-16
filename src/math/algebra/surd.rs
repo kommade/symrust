@@ -13,7 +13,7 @@ use crate::math::structs::expr::node::Node;
 
 /// `a + b sqrt(k)` with a squarefree `k`. A rational is stored with `k = 0`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Surd {
+pub struct Surd {
     k: i64,
     a: Rat,
     b: Rat,
@@ -115,7 +115,7 @@ impl Surd {
         b: Rat::ONE,
     };
 
-    pub(crate) const fn rational(value: Rat) -> Self {
+    pub const fn rational(value: Rat) -> Self {
         Self {
             k: 0,
             a: value,
@@ -124,7 +124,7 @@ impl Surd {
     }
 
     /// Build `a + b sqrt(k)`, folding the expression when it is rational.
-    pub(crate) fn new(k: i64, a: Rat, b: Rat) -> Option<Self> {
+    pub fn new(k: i64, a: Rat, b: Rat) -> Option<Self> {
         if b.is_zero() {
             return Some(Self::rational(a));
         }
@@ -144,19 +144,19 @@ impl Surd {
         })
     }
 
-    pub(crate) fn is_zero(&self) -> bool {
+    pub fn is_zero(&self) -> bool {
         self.a.is_zero() && self.b.is_zero()
     }
 
-    pub(crate) fn is_one(&self) -> bool {
+    pub fn is_one(&self) -> bool {
         self.k == 0 && self.a.is_one()
     }
 
-    pub(crate) fn is_negative(&self) -> bool {
+    pub fn is_negative(&self) -> bool {
         self.to_f64() < 0.0
     }
 
-    pub(crate) fn to_f64(&self) -> f64 {
+    pub fn to_f64(&self) -> f64 {
         if self.b.is_zero() {
             self.a.to_f64()
         } else {
@@ -164,7 +164,7 @@ impl Surd {
         }
     }
 
-    pub(crate) fn neg(self) -> Self {
+    pub fn neg(self) -> Self {
         Self {
             k: self.k,
             a: self.a.neg(),
@@ -181,16 +181,16 @@ impl Surd {
         }
     }
 
-    pub(crate) fn add(self, other: Self) -> Option<Self> {
+    pub fn add(self, other: Self) -> Option<Self> {
         let k = self.common_field(other)?;
         Self::new(k, self.a.add(other.a)?, self.b.add(other.b)?)
     }
 
-    pub(crate) fn sub(self, other: Self) -> Option<Self> {
+    pub fn sub(self, other: Self) -> Option<Self> {
         self.add(other.neg())
     }
 
-    pub(crate) fn mul(self, other: Self) -> Option<Self> {
+    pub fn mul(self, other: Self) -> Option<Self> {
         let k = self.common_field(other)?;
         // (a1 + b1 s)(a2 + b2 s) = a1a2 + k b1b2 + (a1b2 + a2b1) s
         let radicand = Rat::from_i64(k);
@@ -202,7 +202,7 @@ impl Surd {
         Self::new(k, a, b)
     }
 
-    pub(crate) fn div(self, other: Self) -> Option<Self> {
+    pub fn div(self, other: Self) -> Option<Self> {
         let k = self.common_field(other)?;
         // Multiply both sides by the conjugate of the divisor.
         let conjugate = other.neg_conjugate();
@@ -211,7 +211,7 @@ impl Surd {
         numerator.scale(norm.recip()?)
     }
 
-    pub(crate) fn recip(self) -> Option<Self> {
+    pub fn recip(self) -> Option<Self> {
         let k = self.k;
         let conjugate = self.neg_conjugate();
         let norm = denominator_norm(self, k)?;
@@ -230,12 +230,12 @@ impl Surd {
         Self::new(self.k, self.a.mul(factor)?, self.b.mul(factor)?)
     }
 
-    pub(crate) fn scale_by(self, factor: Rat) -> Option<Self> {
+    pub fn scale_by(self, factor: Rat) -> Option<Self> {
         self.scale(factor)
     }
 
     /// The exact square root when it stays inside a single quadratic extension.
-    pub(crate) fn sqrt(self) -> Option<Self> {
+    pub fn sqrt(self) -> Option<Self> {
         if self.is_negative() {
             return None;
         }
@@ -272,7 +272,7 @@ impl Surd {
         Self::new(self.k, first_root, sign)
     }
 
-    pub(crate) fn to_node(self) -> Node {
+    pub fn to_node(self) -> Node {
         if self.b.is_zero() {
             return self.a.to_node();
         }
@@ -296,7 +296,7 @@ fn denominator_norm(value: Surd, k: i64) -> Option<Rat> {
 }
 
 /// Write `value = k * rest^2` with a squarefree `k`.
-pub(crate) fn squarefree_part(value: i128) -> Option<(i64, i128)> {
+pub fn squarefree_part(value: i128) -> Option<(i64, i128)> {
     if value == 0 {
         return Some((0, 0));
     }
@@ -329,7 +329,7 @@ pub(crate) fn squarefree_part(value: i128) -> Option<(i64, i128)> {
 }
 
 /// `sqrt(value)` as a single surd, when possible.
-pub(crate) fn sqrt_rational(value: Rat) -> Option<Surd> {
+pub fn sqrt_rational(value: Rat) -> Option<Surd> {
     if value.is_negative() {
         return None;
     }
@@ -354,13 +354,13 @@ pub(crate) fn sqrt_rational(value: Rat) -> Option<Surd> {
     }
 }
 
-pub(crate) fn surd_quadratic_node(linear: Surd, constant: Surd, variable: &Node) -> Node {
+pub fn surd_quadratic_node(linear: Surd, constant: Surd, variable: &Node) -> Node {
     let square = expr::pow(variable.clone(), expr::number(2));
     let linear_term = expr::mul(linear.to_node(), variable.clone());
     expr::add(expr::add(square, linear_term), constant.to_node())
 }
 
-pub(crate) fn surd_sqrt_node(value: Surd) -> Node {
+pub fn surd_sqrt_node(value: Surd) -> Node {
     match value.sqrt() {
         Some(root) => root.to_node(),
         None => expr::sqrt(value.to_node()),

@@ -27,7 +27,7 @@
 //!
 //! Every rule the search applies is recorded. Call
 //! [`get_antiderivative_solution`][Antiderivative::get_antiderivative_solution]
-//! to get back a [`Solution`][crate::math::structs::solution::Solution] describing
+//! to get back a [`Solution`] describing
 //! them, or [`get_antiderivative`][Antiderivative::get_antiderivative] for just
 //! the answer:
 //!
@@ -132,7 +132,7 @@ pub trait Antiderivative {
     ///
     /// See [`Antiderivative::get_antiderivative`] for the search itself; this
     /// returns the same answer wrapped in a
-    /// [`Solution`][crate::math::structs::solution::Solution] with the steps.
+    /// [`Solution`] with the steps.
     /// # Examples
     /// ```
     /// use rust_calculus::{create_expr, math::calculus::antiderivative::Antiderivative};

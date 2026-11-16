@@ -162,7 +162,7 @@ impl<T: FloatType + Display> Expr<T> {
     /// independent variable.
     ///
     /// Numeric literals are converted straight into `T` (via
-    /// [`FloatType::parse_decimal`][crate::math::numeric::FloatType::parse_decimal]),
+    /// [`FloatType::parse_decimal`]),
     /// so there is no `Real` round-trip. For `T = Real` this is identical to
     /// [`Expr::new`]. This is the constructor the [`create_expr!`][crate::create_expr]
     /// macro calls when a number type is supplied explicitly, e.g.

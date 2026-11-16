@@ -13,12 +13,14 @@ pub(crate) mod factorization;
 pub mod linear;
 pub(crate) mod matrix_steps;
 pub(crate) mod polynomial;
-pub(crate) mod rational;
+/// Exact rational arithmetic: the `Rat` coefficient type.
+pub mod rational;
 pub mod symbolic_eigen;
-pub(crate) mod surd;
+/// Arithmetic in a quadratic extension `Q(sqrt(k))`: the `Surd` coefficient type.
+pub mod surd;
 
 /// Exact real algebraic numbers and the general factoring fallback that uses
 /// them. Compiled only with the `algebraic` feature, so the default build
 /// carries none of it.
 #[cfg(feature = "algebraic")]
-pub(crate) mod algebraic;
+pub mod algebraic;
