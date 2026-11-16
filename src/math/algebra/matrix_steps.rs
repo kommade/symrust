@@ -144,6 +144,143 @@ where
     pub fn inverse_steps(&self) -> Option<Solution<Matrix<T>, Matrix<T>>> {
         inverse_generic(self)
     }
+
+    /// QR factorisation by Gram-Schmidt, recording the orthogonalisation and
+    /// normalisation steps.
+    ///
+    /// Returns the solution whose answer is the `Q` matrix; the description of
+    /// the final step records `R`. Returns `None` when a column is linearly
+    /// dependent on the earlier ones, which is detected exactly (a zero squared
+    /// norm) rather than by a tolerance.
+    ///
+    /// # Examples
+    /// ```
+    /// use rust_calculus::math::algebra::linear::Matrix;
+    /// use rust_calculus::math::algebra::rational::Rat;
+    /// use rust_calculus::math::numeric::ExactField;
+    /// // [[3, 0], [4, 0]] is singular, so the second column is dependent.
+    /// let entries: Vec<Rat> = [3, 0, 4, 0].iter().map(|v| Rat::from_i64(*v)).collect();
+    /// let matrix = Matrix::from_vec(2, 2, entries).unwrap();
+    /// assert!(matrix.qr_steps().is_none());
+    /// // [[3, 4], [4, -3]] has orthogonal columns and a rational QR.
+    /// let entries: Vec<Rat> = [3, 4, 4, -3].iter().map(|v| Rat::from_i64(*v)).collect();
+    /// let matrix = Matrix::from_vec(2, 2, entries).unwrap();
+    /// let solution = matrix.qr_steps().unwrap();
+    /// assert!(!solution.is_empty());
+    /// ```
+    #[must_use]
+    pub fn qr_steps(&self) -> Option<Solution<Matrix<T>, Matrix<T>>> {
+        qr_generic(self)
+    }
+}
+
+/// Generic Gram-Schmidt QR that records every orthogonalisation and
+/// normalisation step.
+///
+/// The recorded result is `Q`; `R` is described in the final step, because a
+/// solution has one answer and the factorisation has two factors.
+fn qr_generic<T>(matrix: &Matrix<T>) -> Option<Solution<Matrix<T>, Matrix<T>>>
+where
+    T: Matrixable + Display + Clone,
+{
+    let (rows, columns) = (matrix.rows(), matrix.columns());
+    let mut recorder: StepRecorder<Matrix<T>> =
+        StepRecorder::new(matrix.clone(), "QR factorisation (Gram-Schmidt)");
+
+    let mut q: Vec<Vec<T>> = Vec::with_capacity(columns);
+    for j in 0..columns {
+        let mut vector: Vec<T> = (0..rows).map(|row| matrix[row][j].clone()).collect();
+
+        for (i, existing) in q.iter().enumerate() {
+            let projection = dot_generic(existing, &vector);
+            if projection.is_zero_value() {
+                continue;
+            }
+            for (row, value) in vector.iter_mut().enumerate() {
+                *value = value.clone() - projection.clone() * existing[row].clone();
+            }
+            let described = column_matrix_generic(&vector);
+            recorder.record_step(
+                "orthogonalise",
+                || {
+                    format!(
+                        "subtracted the projection of column {} onto q{} from column {}",
+                        j + 1,
+                        i + 1,
+                        j + 1
+                    )
+                },
+                || described.clone(),
+            );
+        }
+
+        // Exact dependence test: a zero squared norm means the column is a
+        // combination of the earlier ones. No tolerance is involved, which is
+        // the point of doing this over an exact type.
+        let norm_squared = dot_generic(&vector, &vector);
+        if norm_squared.is_zero_value() {
+            return None;
+        }
+        let norm = norm_squared.try_sqrt()?;
+        for value in vector.iter_mut() {
+            *value = value.clone() / norm.clone();
+        }
+        let described = column_matrix_generic(&vector);
+        recorder.record_step(
+            "normalise",
+            || format!("normalised column {} to unit length to give q{}", j + 1, j + 1),
+            || described.clone(),
+        );
+        q.push(vector);
+    }
+
+    // Assemble Q and compute R = Qᵀ A.
+    let mut q_matrix = Matrix::<T>::new(rows, columns);
+    for (column, entries) in q.iter().enumerate() {
+        for (row, value) in entries.iter().enumerate() {
+            q_matrix[row][column] = value.clone();
+        }
+    }
+    let mut r_matrix = Matrix::<T>::new(columns, columns);
+    for i in 0..columns {
+        for j in 0..columns {
+            if i > j {
+                r_matrix[i][j] = T::additive_identity();
+                continue;
+            }
+            let mut total = T::additive_identity();
+            for row in 0..rows {
+                total = total + q[i][row].clone() * matrix[row][j].clone();
+            }
+            r_matrix[i][j] = total;
+        }
+    }
+
+    recorder.record_decision(
+        "assemble",
+        || format!("Q holds the orthonormal columns and R = QᵀA, giving R = {r_matrix}"),
+    );
+    Some(recorder.finish(q_matrix))
+}
+
+/// The dot product of two entry slices over any coefficient type.
+fn dot_generic<T>(left: &[T], right: &[T]) -> T
+where
+    T: Matrixable + Clone,
+{
+    let mut total = T::additive_identity();
+    for (a, b) in left.iter().zip(right) {
+        total = total + a.clone() * b.clone();
+    }
+    total
+}
+
+/// A single column as an `n x 1` matrix, for showing a partially built basis.
+fn column_matrix_generic<T>(values: &[T]) -> Matrix<T>
+where
+    T: Matrixable + Clone,
+{
+    Matrix::from_rows(values.iter().map(|value| vec![value.clone()]).collect())
 }
 
 /// Generic Gauss-Jordan inverse that records every elementary row operation.
