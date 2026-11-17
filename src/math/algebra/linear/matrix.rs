@@ -10,10 +10,100 @@ use super::traits::{MatrixIndex, MatrixOps, Matrixable};
 use super::vector::Vector;
 use super::vector_set::VectorSet;
 
-pub struct Matrix<T> where T: Matrixable {
+/// A runtime-sized matrix.
+///
+/// The struct itself is unbounded: shapes and entry storage need no field
+/// arithmetic, so a `Matrix<Expr<T>>` token can hold any expression leaf. All
+/// arithmetic lives behind [`Matrixable`] impls, which keeps the
+/// "a matrix always needs a field" requirement local to the algorithms instead
+/// of poisoning every holder of the type with a bound.
+pub struct Matrix<T> {
     pub(crate) rows: usize,
     pub(crate) columns: usize,
     pub(crate) data: Vec<T>,
+}
+
+impl<T> Matrix<T> {
+    /// A `rows x columns` matrix read row-major from `values`.
+    pub fn from_vec_square(size: usize, values: Vec<T>) -> Option<Self> {
+        Self::from_vec(size, size, values)
+    }
+
+    /// A `rows x columns` matrix read row-major from `values`.
+    pub fn from_vec(rows: usize, columns: usize, values: Vec<T>) -> Option<Self> {
+        if values.len() != rows.checked_mul(columns)? {
+            return None;
+        }
+        Some(Self { rows, columns, data: values })
+    }
+
+    /// A square matrix of `size x size` read row-major from `values`.
+    ///
+    /// Values past `size * size` are ignored; missing values stay zero.
+    pub fn from_unchecked_vec_square(size: usize, values: Vec<T>) -> Self
+    where
+        T: Clone + Default,
+    {
+        Self::from_unchecked_vec(size, size, values)
+    }
+
+    /// A `rows x columns` matrix read row-major from `values`.
+    ///
+    /// Values past `rows * columns` are ignored; missing values stay zero.
+    pub fn from_unchecked_vec(rows: usize, columns: usize, values: Vec<T>) -> Self
+    where
+        T: Clone + Default,
+    {
+        let mut data = values;
+        data.resize(rows * columns, matrix_entry_zero());
+        Self { rows, columns, data }
+    }
+
+    /// A `rows x columns` matrix read row-major from `values`.
+    pub fn from_slice(rows: usize, columns: usize, values: &[T]) -> Option<Self>
+    where
+        T: Clone,
+    {
+        Self::from_vec(rows, columns, values.to_vec())
+    }
+
+    /// A `rows x columns` matrix read row-major from `values`.
+    ///
+    /// Values past `rows * columns` are ignored; missing values stay zero.
+    pub fn from_unchecked_slice(rows: usize, columns: usize, values: &[T]) -> Self
+    where
+        T: Clone + Default,
+    {
+        Self::from_unchecked_vec(rows, columns, values.to_vec())
+    }
+
+    /// A matrix read row-major from `rows`.
+    pub fn from_rows(rows: Vec<Vec<T>>) -> Self {
+        let row_count = rows.len();
+        let column_count = rows.first().map_or(0, Vec::len);
+        Self {
+            rows: row_count,
+            columns: column_count,
+            data: rows.into_iter().flatten().collect(),
+        }
+    }
+
+    /// Number of rows.
+    pub fn rows(&self) -> usize {
+        self.rows
+    }
+
+    /// Number of columns.
+    pub fn columns(&self) -> usize {
+        self.columns
+    }
+}
+
+/// `T::default()` needs a bound; `from_unchecked_vec` fills with it without
+/// naming the bound at the struct level. The helper exists so the unbounded
+/// constructor compiles for coefficients that are only `Default`.
+fn matrix_entry_zero<T: Default>() -> T {
+    T::default()
 }
 
 impl <T> Matrix<T> where T: Matrixable {
@@ -42,73 +132,9 @@ impl <T> Matrix<T> where T: Matrixable {
         matrix
     }
 
-    /// A square matrix of `size x size` read row-major from `values`.
-    pub fn from_vec_square(size: usize, values: Vec<T>) -> Option<Self> {
-        Self::from_vec(size, size, values)
-    }
-
-    /// A `rows x columns` matrix read row-major from `values`.
-    pub fn from_vec(rows: usize, columns: usize, values: Vec<T>) -> Option<Self> {
-        if values.len() != rows.checked_mul(columns)? {
-            return None;
-        }
-        Some(Self { rows, columns, data: values })
-    }
-
-    /// A square matrix of `size x size` read row-major from `values`.
-    ///
-    /// Values past `size * size` are ignored; missing values stay zero.
-    pub fn from_unchecked_vec_square(size: usize, values: Vec<T>) -> Self {
-        Self::from_unchecked_vec(size, size, values)
-    }
-
-    /// A `rows x columns` matrix read row-major from `values`.
-    ///
-    /// Values past `rows * columns` are ignored; missing values stay zero.
-    pub fn from_unchecked_vec(rows: usize, columns: usize, values: Vec<T>) -> Self {
-        let mut matrix = Self::new(rows, columns);
-        for (slot, value) in matrix.data.iter_mut().zip(values) {
-            *slot = value;
-        }
-        matrix
-    }
-
-    /// A `rows x columns` matrix read row-major from `values`.
-    pub fn from_slice(rows: usize, columns: usize, values: &[T]) -> Option<Self> {
-        Self::from_vec(rows, columns, values.to_vec())
-    }
-
-    /// A `rows x columns` matrix read row-major from `values`.
-    ///
-    /// Values past `rows * columns` are ignored; missing values stay zero.
-    pub fn from_unchecked_slice(rows: usize, columns: usize, values: &[T]) -> Self {
-        Self::from_unchecked_vec(rows, columns, values.to_vec())
-    }
-
-    /// A matrix read row-major from `rows`.
-    pub fn from_rows(rows: Vec<Vec<T>>) -> Self {
-        let row_count = rows.len();
-        let column_count = rows.first().map_or(0, Vec::len);
-        Self {
-            rows: row_count,
-            columns: column_count,
-            data: rows.into_iter().flatten().collect(),
-        }
-    }
-
     /// Copy the entries of a [`StaticMatrix`] into a runtime matrix.
     pub fn from_static<const N: usize, const M: usize>(source: &StaticMatrix<T, N, M>) -> Self {
         Self::from_unchecked_vec(N, M, source.iter().cloned().collect())
-    }
-
-    /// Number of rows.
-    pub fn rows(&self) -> usize {
-        self.rows
-    }
-
-    /// Number of columns.
-    pub fn columns(&self) -> usize {
-        self.columns
     }
 
     /// Resize in place: keep the top-left overlap, zero-fill any new entries.
@@ -185,19 +211,19 @@ impl <T: Matrixable> MatrixIndex<T> for Matrix<T> {
     }
 }
 
-impl <T> PartialEq for Matrix<T> where T: Matrixable {
+impl <T: PartialEq> PartialEq for Matrix<T> {
     fn eq(&self, other: &Self) -> bool {
         self.rows == other.rows && self.columns == other.columns && self.data == other.data
     }
 }
 
-impl <T> Default for Matrix<T> where T: Matrixable {
+impl <T> Default for Matrix<T> {
     fn default() -> Self {
-        Self::new(0, 0)
+        Self { rows: 0, columns: 0, data: Vec::new() }
     }
 }
 
-impl <T> Index<usize> for Matrix<T> where T: Matrixable {
+impl <T> Index<usize> for Matrix<T> {
     type Output = [T];
 
     fn index(&self, row: usize) -> &Self::Output {
@@ -205,14 +231,14 @@ impl <T> Index<usize> for Matrix<T> where T: Matrixable {
     }
 }
 
-impl <T> IndexMut<usize> for Matrix<T> where T: Matrixable {
+impl <T> IndexMut<usize> for Matrix<T> {
     fn index_mut(&mut self, row: usize) -> &mut Self::Output {
         let start = row * self.columns;
         &mut self.data[start..][..self.columns]
     }
 }
 
-impl <T> Clone for Matrix<T> where T: Matrixable {
+impl <T: Clone> Clone for Matrix<T> {
     fn clone(&self) -> Self {
         Self {
             rows: self.rows,
@@ -222,20 +248,30 @@ impl <T> Clone for Matrix<T> where T: Matrixable {
     }
 }
 
-impl <T> std::fmt::Debug for Matrix<T> where T: Matrixable {
+impl <T> std::fmt::Debug for Matrix<T> where T: std::fmt::Debug {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let rows: Vec<&[T]> = (0..self.rows).map(|row| &self[row]).collect();
         f.debug_list().entries(rows).finish()
     }
 }
 
-impl <T> Display for Matrix<T> where T: Matrixable + Display {
+impl <T> Display for Matrix<T> where T: Display {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write_matrix(self, f)
+        for row in 0..self.rows {
+            write!(f, "[")?;
+            for column in 0..self.columns {
+                if column > 0 {
+                    write!(f, " ")?;
+                }
+                write!(f, "{}", self.data[row * self.columns + column])?;
+            }
+            writeln!(f, "]")?;
+        }
+        Ok(())
     }
 }
 
-impl <T> FromIterator<T> for Matrix<T> where T: Matrixable {
+impl <T> FromIterator<T> for Matrix<T> {
     /// Collect a flat, row-major list of entries into a single-column matrix.
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let data: Vec<T> = iter.into_iter().collect();
@@ -247,7 +283,7 @@ impl <T> FromIterator<T> for Matrix<T> where T: Matrixable {
     }
 }
 
-impl <T> IntoIterator for Matrix<T> where T: Matrixable {
+impl <T> IntoIterator for Matrix<T> {
     type Item = T;
     type IntoIter = std::vec::IntoIter<T>;
 

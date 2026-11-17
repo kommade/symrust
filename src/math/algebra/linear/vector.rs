@@ -23,23 +23,25 @@ use super::traits::{MatrixIndex, MatrixOps, Matrixable};
 /// let v = Vector::from_vec(vec![Rat::from_i64(1), Rat::from_i64(2)]);
 /// assert_eq!(v[1], Rat::from_i64(2));
 /// ```
-pub struct Vector<T> where T: Matrixable {
+///
+/// Like [`Matrix`], the struct is unbounded: storage needs no field
+/// arithmetic, so a `Vector<Expr<T>>` token can hold any expression leaf. All
+/// arithmetic lives behind [`Matrixable`] impls.
+pub struct Vector<T> {
     data: Vec<T>,
 }
 
-impl <T> Vector<T> where T: Matrixable {
-    /// The zero vector of the given length.
-    pub fn zeros(length: usize) -> Self {
-        Self { data: vec![T::default(); length] }
-    }
-
+impl<T> Vector<T> {
     /// A vector read top to bottom from `data`.
     pub fn from_vec(data: Vec<T>) -> Self {
         Self { data }
     }
 
     /// A vector read top to bottom from `data`.
-    pub fn from_slice(data: &[T]) -> Self {
+    pub fn from_slice(data: &[T]) -> Self
+    where
+        T: Clone,
+    {
         Self { data: data.to_vec() }
     }
 
@@ -64,14 +66,20 @@ impl <T> Vector<T> where T: Matrixable {
     }
 
     /// The vector as a `length x 1` [`Matrix`].
-    pub fn to_matrix(&self) -> Matrix<T> {
+    pub fn to_matrix(&self) -> Matrix<T>
+    where
+        T: Clone,
+    {
         Matrix::from_vec(self.len(), 1, self.data.clone()).expect("a vector is one column")
     }
 
     /// The vector read from a `length x 1` matrix.
     ///
     /// Returns `None` when the matrix has more than one column.
-    pub fn from_matrix(matrix: &Matrix<T>) -> Option<Self> {
+    pub fn from_matrix(matrix: &Matrix<T>) -> Option<Self>
+    where
+        T: Clone,
+    {
         (matrix.columns() == 1).then(|| Self::from_vec((0..matrix.rows()).map(|row| matrix[row][0].clone()).collect()))
     }
 
@@ -80,6 +88,13 @@ impl <T> Vector<T> where T: Matrixable {
         Self {
             data: (0..length).map(&mut f).collect(),
         }
+    }
+}
+
+impl <T> Vector<T> where T: Matrixable {
+    /// The zero vector of the given length.
+    pub fn zeros(length: usize) -> Self {
+        Self { data: vec![T::default(); length] }
     }
 
     /// Extend to `length` entries, zero-filling any new ones.
@@ -146,19 +161,19 @@ impl <T> Vector<T> where T: Matrixable {
     }
 }
 
-impl <T> PartialEq for Vector<T> where T: Matrixable {
+impl <T: PartialEq> PartialEq for Vector<T> {
     fn eq(&self, other: &Self) -> bool {
         self.data == other.data
     }
 }
 
-impl <T> std::fmt::Debug for Vector<T> where T: Matrixable {
+impl <T: std::fmt::Debug> std::fmt::Debug for Vector<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list().entries(self.data.iter()).finish()
     }
 }
 
-impl <T> Display for Vector<T> where T: Matrixable + Display {
+impl <T> Display for Vector<T> where T: Display {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for value in &self.data {
             writeln!(f, "[{}]", value)?;
@@ -167,19 +182,19 @@ impl <T> Display for Vector<T> where T: Matrixable + Display {
     }
 }
 
-impl <T> Clone for Vector<T> where T: Matrixable {
+impl <T: Clone> Clone for Vector<T> {
     fn clone(&self) -> Self {
         Self { data: self.data.clone() }
     }
 }
 
-impl <T> Default for Vector<T> where T: Matrixable {
+impl <T> Default for Vector<T> {
     fn default() -> Self {
         Self { data: Vec::new() }
     }
 }
 
-impl <T> Index<usize> for Vector<T> where T: Matrixable {
+impl <T> Index<usize> for Vector<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -187,13 +202,13 @@ impl <T> Index<usize> for Vector<T> where T: Matrixable {
     }
 }
 
-impl <T> IndexMut<usize> for Vector<T> where T: Matrixable {
+impl <T> IndexMut<usize> for Vector<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.data[index]
     }
 }
 
-impl <T> IntoIterator for Vector<T> where T: Matrixable {
+impl <T> IntoIterator for Vector<T> {
     type Item = T;
     type IntoIter = std::vec::IntoIter<T>;
 
@@ -202,13 +217,13 @@ impl <T> IntoIterator for Vector<T> where T: Matrixable {
     }
 }
 
-impl <T> FromIterator<T> for Vector<T> where T: Matrixable {
+impl <T> FromIterator<T> for Vector<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self::from_vec(iter.into_iter().collect())
     }
 }
 
-impl <T> From<Vec<T>> for Vector<T> where T: Matrixable {
+impl <T> From<Vec<T>> for Vector<T> {
     fn from(data: Vec<T>) -> Self {
         Self::from_vec(data)
     }
