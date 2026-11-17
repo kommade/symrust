@@ -24,7 +24,6 @@ use super::ALGEBRAIC_NEEDED;
 use super::algebraic::*;
 use super::rational_function::{RationalFunction, solve_partial_fractions};
 use crate::math::algebra::factorization::{surd_poly, surd_shift, surd_zero, split_quartic};
-use crate::math::algebra::linear::{SurdMatrix, SurdVector};
 use crate::math::algebra::rational::square_root_of;
 use crate::math::algebra::surd::{surd_quadratic_node, surd_sqrt_node};
 
@@ -249,8 +248,8 @@ where
         first_poly.to_vec(),
     ];
     let size = 4;
-    let mut matrix = SurdMatrix::<4, 4>::default();
-    let mut rhs = SurdVector::<4>::default();
+    let mut matrix = Matrix::<Surd>::new(size, size);
+    let mut rhs_entries = Vec::<Surd>::with_capacity(size);
     for degree in 0..size {
         for column in 0..size {
             matrix[degree][column] = columns[column]
@@ -258,9 +257,9 @@ where
                 .copied()
                 .unwrap_or_else(surd_zero);
         }
-        rhs[degree][0] = Surd::rational(coefficients.get(degree).copied().unwrap_or(Rat::ZERO));
+        rhs_entries.push(Surd::rational(coefficients.get(degree).copied().unwrap_or(Rat::ZERO)));
     }
-    let solution = matrix.solve_system(&rhs)?;
+    let solution = matrix.solve_system(&Vector::from_vec(rhs_entries))?;
     let first_term = quadratic_surd_term(
         solution[0],
         solution[1],

@@ -1,23 +1,25 @@
 //! Tests for diagonalisation and the singular value decomposition.
 //!
-//! Every property is checked through both storages so the shared algorithms are
-//! exercised by [`StaticMatrix`] (compile-time dimensions) and [`Matrix`]
-//! (runtime dimensions).
+//! Every dynamic assertion runs unconditionally; the [`StaticMatrix`] twins of
+//! the same properties are gated behind `generic_const` (so the shared
+//! algorithms are exercised through both storages when the feature is on).
 
-use crate::math::algebra::{
-    linear::{Matrix, MatrixMul, SquareMatrixFns, StaticMatrix, StaticSquareMatrixFns},
-    rational::Rat,
-};
+use crate::math::algebra::{linear::{Matrix, MatrixMul, SquareMatrixFns}, rational::Rat};
+
+#[cfg(feature = "generic_const")]
+use crate::math::algebra::linear::{StaticMatrix, StaticSquareMatrixFns};
 
 fn rat(value: i64) -> Rat {
     Rat::from_i64(value)
 }
 
+#[cfg(feature = "generic_const")]
 fn identity_static() -> StaticMatrix<Rat, 2, 2> {
     StaticMatrix::<Rat, 2, 2>::identity()
 }
 
 #[test]
+#[cfg(feature = "generic_const")]
 fn static_diagonalization_reconstructs_the_matrix() {
     // A symmetric matrix with exact eigenvalues 1 and 5.
     let matrix = StaticMatrix::<Rat, 2, 2>::new([[rat(3), rat(2)], [rat(2), rat(3)]]);
@@ -47,9 +49,10 @@ fn static_diagonalization_reconstructs_the_matrix() {
 }
 
 #[test]
-fn dynamic_diagonalization_matches_static() {
-    let values = [3, 2, 2, 3];
-    let dynamic = Matrix::<Rat>::from_vec(2, 2, values.iter().copied().map(rat).collect()).unwrap();
+fn dynamic_diagonalization_reconstructs_the_matrix() {
+    // A symmetric matrix with exact eigenvalues 1 and 5; the static twin is
+    // `static_diagonalization_reconstructs_the_matrix` (generic_const).
+    let dynamic = Matrix::<Rat>::from_vec(2, 2, vec![rat(3), rat(2), rat(2), rat(3)]).unwrap();
     let diagonalization = dynamic
         .diagonalize()
         .expect("eigenvalues 1 and 5 are rational");
@@ -60,9 +63,14 @@ fn dynamic_diagonalization_matches_static() {
         .mul_matrix(&d)
         .mul_matrix(&p.inv().expect("P is invertible"));
     assert_eq!(reconstructed, dynamic, "P D P^-1 must equal A");
+
+    let mut values = diagonalization.eigenvalues();
+    values.sort_by(|a, b| a.to_f64().partial_cmp(&b.to_f64()).unwrap());
+    assert_eq!(values, vec![rat(1), rat(5)]);
 }
 
 #[test]
+#[cfg(feature = "generic_const")]
 fn diagonalization_of_a_diagonal_matrix_keeps_the_entries() {
     let matrix = StaticMatrix::<Rat, 3, 3>::new([
         [rat(2), rat(0), rat(0)],
@@ -79,14 +87,21 @@ fn diagonalization_of_a_diagonal_matrix_keeps_the_entries() {
 fn non_diagonalisable_matrix_has_no_diagonalization() {
     // [[1, 1], [0, 1]] has only the eigenvector (1, 0), so it is not
     // diagonalisable over the rationals.
-    let matrix = StaticMatrix::<Rat, 2, 2>::new([[rat(1), rat(1)], [rat(0), rat(1)]]);
-    assert!(matrix.diagonalize().is_none());
-
     let dynamic = Matrix::<Rat>::from_vec(2, 2, vec![rat(1), rat(1), rat(0), rat(1)]).unwrap();
     assert!(dynamic.diagonalize().is_none());
 }
 
 #[test]
+#[cfg(feature = "generic_const")]
+fn static_non_diagonalisable_matrix_has_no_diagonalization() {
+    // [[1, 1], [0, 1]] has only the eigenvector (1, 0), so it is not
+    // diagonalisable over the rationals.
+    let matrix = StaticMatrix::<Rat, 2, 2>::new([[rat(1), rat(1)], [rat(0), rat(1)]]);
+    assert!(matrix.diagonalize().is_none());
+}
+
+#[test]
+#[cfg(feature = "generic_const")]
 fn static_svd_reconstructs_a_diagonal_matrix() {
     // A diagonal matrix has orthogonal, axis-aligned singular vectors, so the
     // decomposition stays exact over the rationals. Singular values descend.
@@ -132,6 +147,7 @@ fn dynamic_svd_reconstructs_the_matrix() {
 }
 
 #[test]
+#[cfg(feature = "generic_const")]
 fn svd_of_identity_is_identity() {
     let matrix = identity_static();
     let svd = matrix.svd().expect("identity has a trivial SVD");
@@ -173,11 +189,15 @@ fn singular_values_are_roots_of_the_ata_eigenvalues() {
     // For A = [[1, 2], [3, 4]], A^T A = [[10, 14], [14, 20]], with eigenvalues
     // 15 ± sqrt(197) — irrational, so the exact decomposition is reported as
     // unavailable over the rationals.
-    let matrix = StaticMatrix::<Rat, 2, 2>::new([[rat(1), rat(2)], [rat(3), rat(4)]]);
-    assert!(matrix.svd().is_none());
-
     let dynamic = Matrix::<Rat>::from_vec(2, 2, vec![rat(1), rat(2), rat(3), rat(4)]).unwrap();
     assert!(dynamic.svd().is_none());
+}
+
+#[test]
+#[cfg(feature = "generic_const")]
+fn static_singular_values_are_roots_of_the_ata_eigenvalues() {
+    let matrix = StaticMatrix::<Rat, 2, 2>::new([[rat(1), rat(2)], [rat(3), rat(4)]]);
+    assert!(matrix.svd().is_none());
 }
 
 #[test]

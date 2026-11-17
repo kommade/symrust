@@ -4,7 +4,6 @@ use std::fmt::Display;
 use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use super::algorithms::{assert_same_shape, map_entries, map_scalar, write_matrix};
-use super::static_matrix::StaticMatrix;
 use super::storage::vec_solve_system;
 use super::traits::{MatrixIndex, MatrixOps, Matrixable};
 use super::vector::Vector;
@@ -130,11 +129,6 @@ impl <T> Matrix<T> where T: Matrixable {
             matrix.data[i * size + i] = T::multiplicative_identity();
         }
         matrix
-    }
-
-    /// Copy the entries of a [`StaticMatrix`] into a runtime matrix.
-    pub fn from_static<const N: usize, const M: usize>(source: &StaticMatrix<T, N, M>) -> Self {
-        Self::from_unchecked_vec(N, M, source.iter().cloned().collect())
     }
 
     /// Resize in place: keep the top-left overlap, zero-fill any new entries.

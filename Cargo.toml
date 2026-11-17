@@ -13,14 +13,19 @@ default = []
 # with `algebraic` it additionally enables the exact roots-of-unity integration
 # of cyclotomic denominators (which factors over C using `Complex` residues).
 complex = []
-# Enables the general algebraic-number machinery (Option B): exact real roots of
+# Enables the general algebraic-number machinery: exact real roots of
 # arbitrary rational polynomials via Sturm-sequence isolation, so the integrator
 # can factor irreducible factors of any degree. This is independent of `complex`:
 # on its own it factors over R (real surds), not over C. Enable `complex` as well
 # to factor over C and write cyclotomic integrals in terms of roots of unity.
-# Off by default: with it disabled none of the extra code is compiled, so there
-# is zero runtime cost.
-algebraic = []
+# Implies `generic_const`: the `Multiquadratic` field it is built on stores its
+# `2^N` coefficients in a `[Rat; 1 << N]`, which needs `generic_const_exprs`.
+algebraic = ["generic_const"]
+# Enables the use of generic const expressions, which allows for more
+# compile-time optimizations and more expressive type-level programming. This
+# is an unstable feature and may not be available on all Rust versions. It is
+# off by default to maintain compatibility with stable Rust.
+generic_const = []
 [dev-dependencies]
 color-eyre = "0.6.3"
 

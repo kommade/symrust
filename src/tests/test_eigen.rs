@@ -1,3 +1,8 @@
+//! Eigenvalue tests over the statically sized matrix; the dynamic counterpart
+//! of the same algorithms is covered by [`test_dynamic_matrix`].
+//! Compiled only with `generic_const`, which provides the static matrix.
+#![cfg(feature = "generic_const")]
+
 use crate::math::algebra::{
     linear::{StaticMatrix, StaticSquareMatrixFns},
     rational::Rat,

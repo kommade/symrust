@@ -1,9 +1,6 @@
 //! Tests for the runtime [`Vector`] type and the [`VectorSet`] container.
 
-use crate::math::algebra::{
-    linear::{Matrix, StaticMatrix, StaticVector, Vector, VectorSet},
-    rational::Rat,
-};
+use crate::math::algebra::{linear::{Matrix, Vector, VectorSet}, rational::Rat};
 
 fn rat(value: i64) -> Rat {
     Rat::from_i64(value)
@@ -72,7 +69,10 @@ fn matrix_rows_and_columns_are_vectors() {
 }
 
 #[test]
+#[cfg(feature = "generic_const")]
 fn static_solve_system_returns_a_runtime_vector() {
+    use crate::math::algebra::linear::{StaticMatrix, StaticVector};
+
     let matrix = StaticMatrix::<Rat, 2, 2>::new([[rat(2), rat(1)], [rat(1), rat(3)]]);
     let rhs = StaticVector::<Rat, 2>::from_vec(vec![rat(3), rat(5)]).unwrap();
     let solution = matrix.solve_system(&rhs).expect("consistent");

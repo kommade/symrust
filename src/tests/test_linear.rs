@@ -1,4 +1,8 @@
-//! Tests for the exact linear algebra in [`crate::math::algebra::linear`].
+//! Tests for the exact linear algebra over the statically sized types
+//! ([`StaticMatrix`], the `Rat` specialisations, `StaticMatrixMul`).
+//! Compiled only with `generic_const`, which provides all of them. The
+//! runtime-[`Matrix`] equivalents live in [`test_dynamic_matrix`].
+#![cfg(feature = "generic_const")]
 
 use crate::math::algebra::{
     linear::{RatMatrix, RatVector, StaticMatrix, StaticMatrixMul, StaticSquareMatrixFns},

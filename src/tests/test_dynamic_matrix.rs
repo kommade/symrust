@@ -1,10 +1,11 @@
 //! Tests for the runtime-sized matrix in [`crate::math::algebra::linear`].
 //!
-//! These mirror the static matrix tests so that the shared algorithms are
-//! checked through both storages.
+//! The static counterparts of the parity tests live in [`test_linear`], gated
+//! behind `generic_const`; here the expected values are written out so the
+//! dynamic API is checked without the feature.
 
 use crate::math::algebra::{
-    linear::{Matrix, MatrixMul, SquareMatrixFns, StaticMatrix, StaticSquareMatrixFns, Vector},
+    linear::{Matrix, MatrixMul, SquareMatrixFns, Vector},
     rational::Rat,
 };
 
@@ -44,47 +45,42 @@ fn dimensions_are_chosen_at_runtime() {
 
 #[test]
 fn dynamic_determinant_matches_static() {
-    let values = [6, 1, 1, 4, -2, 5, 2, 8, 7];
-    let dynamic = dynamic(3, 3, &values);
-    let stat = StaticMatrix::<Rat, 3, 3>::new([
-        [rat(6), rat(1), rat(1)],
-        [rat(4), rat(-2), rat(5)],
-        [rat(2), rat(8), rat(7)],
-    ]);
-    assert_eq!(dynamic.det(), stat.det());
+    // Static twin lives in `test_linear` (generic_const); here the determinant
+    // is pinned so the dynamic det is checked without the feature.
+    let dynamic = dynamic(3, 3, &[6, 1, 1, 4, -2, 5, 2, 8, 7]);
     assert_eq!(dynamic.det(), rat(-306));
 }
 
 #[test]
 fn dynamic_inverse_matches_static() {
+    // inv([[4,7],[2,6]]) = (1/10)[[6,-7],[-2,4]].
     let dynamic = dynamic(2, 2, &[4, 7, 2, 6]);
-    let stat = StaticMatrix::<Rat, 2, 2>::new([[rat(4), rat(7)], [rat(2), rat(6)]]);
-    let dynamic_inverse = dynamic.inv().expect("matrix is invertible");
-    let stat_inverse = stat.inv().expect("matrix is invertible");
-    assert_eq!(dynamic_inverse[0][0], stat_inverse[0][0]);
-    assert_eq!(dynamic_inverse[0][1], stat_inverse[0][1]);
-    assert_eq!(dynamic_inverse[1][0], stat_inverse[1][0]);
-    assert_eq!(dynamic_inverse[1][1], stat_inverse[1][1]);
+    let inverse = dynamic.inv().expect("matrix is invertible");
+    assert_eq!(inverse[0][0], Rat::new(3, 5).unwrap());
+    assert_eq!(inverse[0][1], Rat::new(-7, 10).unwrap());
+    assert_eq!(inverse[1][0], Rat::new(-1, 5).unwrap());
+    assert_eq!(inverse[1][1], Rat::new(2, 5).unwrap());
 }
 
 #[test]
 fn dynamic_cofactors_match_static() {
     let dynamic = dynamic(3, 3, &[1, 2, 3, 0, 4, 5, 1, 0, 6]);
-    let stat = StaticMatrix::<Rat, 3, 3>::new([
-        [rat(1), rat(2), rat(3)],
-        [rat(0), rat(4), rat(5)],
-        [rat(1), rat(0), rat(6)],
-    ]);
+    let expected_cofactors = [
+        [rat(24), rat(5), rat(-4)],
+        [rat(-12), rat(3), rat(2)],
+        [rat(-2), rat(-5), rat(4)],
+    ];
     for row in 0..3 {
         for column in 0..3 {
-            assert_eq!(dynamic.cofactor(row, column), stat.cofactor(row, column));
+            assert_eq!(dynamic.cofactor(row, column), expected_cofactors[row][column]);
         }
     }
 
+    // The adjugate is the transpose of the cofactor matrix.
     let adjugate = dynamic.adjugate();
     for row in 0..3 {
         for column in 0..3 {
-            assert_eq!(adjugate[row][column], stat.adjugate()[row][column]);
+            assert_eq!(adjugate[row][column], expected_cofactors[column][row]);
         }
     }
 }
@@ -99,17 +95,12 @@ fn dynamic_minor_is_one_size_smaller() {
 
 #[test]
 fn dynamic_eigenvalues_match_static() {
+    // A diagonal matrix's eigenvalues are its diagonal entries, sorted.
     let dynamic = dynamic(3, 3, &[2, 0, 0, 0, 3, 0, 0, 0, 5]);
-    let stat = StaticMatrix::<Rat, 3, 3>::new([
-        [rat(2), rat(0), rat(0)],
-        [rat(0), rat(3), rat(0)],
-        [rat(0), rat(0), rat(5)],
-    ]);
-    let mut dynamic_values = dynamic.eigenvalues().expect("diagonal has eigenvalues");
-    let mut stat_values = stat.eigenvalues().expect("diagonal has eigenvalues");
-    dynamic_values.sort_by(|a, b| a.to_f64().partial_cmp(&b.to_f64()).unwrap());
-    stat_values.sort_by(|a, b| a.to_f64().partial_cmp(&b.to_f64()).unwrap());
-    assert_eq!(dynamic_values, stat_values);
+    let eigenvalues = dynamic.eigenvalues().expect("diagonal has eigenvalues");
+    let mut values: Vec<Rat> = eigenvalues.into_iter().collect();
+    values.sort_by(|a, b| a.to_f64().partial_cmp(&b.to_f64()).unwrap());
+    assert_eq!(values, vec![rat(2), rat(3), rat(5)]);
 }
 
 #[test]
@@ -158,7 +149,10 @@ fn dynamic_factorisations_rebuild_the_matrix() {
 }
 
 #[test]
+#[cfg(feature = "generic_const")]
 fn dynamic_from_static_matches() {
+    use crate::math::algebra::linear::StaticMatrix;
+
     let stat = StaticMatrix::<Rat, 2, 2>::new([[rat(1), rat(2)], [rat(3), rat(4)]]);
     let dynamic = Matrix::<Rat>::from_static(&stat);
     assert_eq!((dynamic.rows(), dynamic.columns()), (2, 2));

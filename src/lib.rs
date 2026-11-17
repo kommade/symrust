@@ -1,8 +1,8 @@
-#![feature(generic_const_exprs)]
-#![allow(incomplete_features)]
+#![cfg_attr(feature = "generic_const", feature(generic_const_exprs))]
+#![cfg_attr(feature = "generic_const", allow(incomplete_features))]
 #![allow(unused)]
 
-//! A symbolic calculus library.
+//! A symbolic math library.
 //!
 //! The crate source is split into two trees:
 //!

@@ -671,102 +671,105 @@ fn surd_int_pow(base: crate::math::algebra::surd::Surd, exponent: i64) -> crate:
     }
 }
 
+/// The evaluator's surface for [`Multiquadratic`], one `cfg` for the whole
+/// group: the scalar value impls and the `f64` helpers they share.
 #[cfg(feature = "algebraic")]
-impl<const N: usize> ExpressionScalar for crate::math::algebra::algebraic::Multiquadratic<N> where [(); 1 << N]: Sized {
-    fn from_i64(value: i64) -> Self {
-        crate::math::algebra::algebraic::Multiquadratic::from_rat(
-            crate::math::algebra::rational::Rat::from_i64(value),
-        )
-    }
+mod multiquadratic_value {
+    use super::*;
 
-    fn pow(self, exponent: Self) -> Self {
-        let exponent_value = crate::math::algebra::algebraic::Multiquadratic::to_f64(&exponent);
-        match crate::math::algebra::rational::Rat::from_f64(exponent_value) {
-            Some(value) if crate::math::algebra::rational::Rat::parts(&value).1 == 1 => {
-                if let Ok(power) = i64::try_from(crate::math::algebra::rational::Rat::parts(&value).0) {
-                    return multiquadratic_int_pow(self, power);
+    impl<const N: usize> ExpressionScalar for crate::math::algebra::algebraic::Multiquadratic<N> where [(); 1 << N]: Sized {
+        fn from_i64(value: i64) -> Self {
+            crate::math::algebra::algebraic::Multiquadratic::from_rat(
+                crate::math::algebra::rational::Rat::from_i64(value),
+            )
+        }
+
+        fn pow(self, exponent: Self) -> Self {
+            let exponent_value = crate::math::algebra::algebraic::Multiquadratic::to_f64(&exponent);
+            match crate::math::algebra::rational::Rat::from_f64(exponent_value) {
+                Some(value) if crate::math::algebra::rational::Rat::parts(&value).1 == 1 => {
+                    if let Ok(power) = i64::try_from(crate::math::algebra::rational::Rat::parts(&value).0) {
+                        return multiquadratic_int_pow(self, power);
+                    }
+                    multiquadratic_from_f64(
+                        crate::math::algebra::algebraic::Multiquadratic::to_f64(&self).powf(exponent_value),
+                    )
                 }
-                multiquadratic_from_f64(
+                _ => multiquadratic_from_f64(
                     crate::math::algebra::algebraic::Multiquadratic::to_f64(&self).powf(exponent_value),
-                )
+                ),
             }
-            _ => multiquadratic_from_f64(
-                crate::math::algebra::algebraic::Multiquadratic::to_f64(&self).powf(exponent_value),
-            ),
+        }
+
+        fn sin(self) -> Self {
+            multiquadratic_from_f64(crate::math::algebra::algebraic::Multiquadratic::to_f64(&self).sin())
+        }
+        fn cos(self) -> Self {
+            multiquadratic_from_f64(crate::math::algebra::algebraic::Multiquadratic::to_f64(&self).cos())
+        }
+        fn tan(self) -> Self {
+            multiquadratic_from_f64(crate::math::algebra::algebraic::Multiquadratic::to_f64(&self).tan())
+        }
+        fn asin(self) -> Self {
+            multiquadratic_from_f64(crate::math::algebra::algebraic::Multiquadratic::to_f64(&self).asin())
+        }
+        fn acos(self) -> Self {
+            multiquadratic_from_f64(crate::math::algebra::algebraic::Multiquadratic::to_f64(&self).acos())
+        }
+        fn atan(self) -> Self {
+            multiquadratic_from_f64(crate::math::algebra::algebraic::Multiquadratic::to_f64(&self).atan())
+        }
+        fn sqrt(self) -> Self {
+            <Self as crate::math::numeric::ExactField>::sqrt(self)
+        }
+        fn ln(self) -> Self {
+            multiquadratic_from_f64(crate::math::algebra::algebraic::Multiquadratic::to_f64(&self).ln())
         }
     }
 
-    fn sin(self) -> Self {
-        multiquadratic_from_f64(crate::math::algebra::algebraic::Multiquadratic::to_f64(&self).sin())
-    }
-    fn cos(self) -> Self {
-        multiquadratic_from_f64(crate::math::algebra::algebraic::Multiquadratic::to_f64(&self).cos())
-    }
-    fn tan(self) -> Self {
-        multiquadratic_from_f64(crate::math::algebra::algebraic::Multiquadratic::to_f64(&self).tan())
-    }
-    fn asin(self) -> Self {
-        multiquadratic_from_f64(crate::math::algebra::algebraic::Multiquadratic::to_f64(&self).asin())
-    }
-    fn acos(self) -> Self {
-        multiquadratic_from_f64(crate::math::algebra::algebraic::Multiquadratic::to_f64(&self).acos())
-    }
-    fn atan(self) -> Self {
-        multiquadratic_from_f64(crate::math::algebra::algebraic::Multiquadratic::to_f64(&self).atan())
-    }
-    fn sqrt(self) -> Self {
-        <Self as crate::math::numeric::ExactField>::sqrt(self)
-    }
-    fn ln(self) -> Self {
-        multiquadratic_from_f64(crate::math::algebra::algebraic::Multiquadratic::to_f64(&self).ln())
-    }
-}
-
-#[cfg(feature = "algebraic")]
-impl<const N: usize> FloatBridge for crate::math::algebra::algebraic::Multiquadratic<N> where [(); 1 << N]: Sized {
-    fn from_real(value: Real) -> Self {
-        crate::math::algebra::algebraic::Multiquadratic::from_rat(rat_from_f64(value.as_f64()))
-    }
-
-    fn to_real(&self) -> Real {
-        Real::from_f64(crate::math::algebra::algebraic::Multiquadratic::to_f64(self))
-    }
-}
-
-/// Build a [`Multiquadratic`][crate::math::algebra::algebraic::Multiquadratic] from an
-/// `f64` (rational approximation, best effort).
-#[cfg(feature = "algebraic")]
-#[allow(dead_code)] // reached through the `Evaluable` impl, which lib code has not exercised yet
-fn multiquadratic_from_f64<const N: usize>(value: f64) -> crate::math::algebra::algebraic::Multiquadratic<N> where [(); 1 << N]: Sized {
-    crate::math::algebra::algebraic::Multiquadratic::from_rat(rat_from_f64(value))
-}
-
-/// Integer power of a multiquadratic value by repeated squaring.
-#[cfg(feature = "algebraic")]
-#[allow(dead_code)] // reached through the `Evaluable` impl, which lib code has not exercised yet
-fn multiquadratic_int_pow<const N: usize>(
-    base: crate::math::algebra::algebraic::Multiquadratic<N>,
-    exponent: i64,
-) -> crate::math::algebra::algebraic::Multiquadratic<N> where [(); 1 << N]: Sized {
-    use crate::math::algebra::algebraic::Multiquadratic;
-    if exponent == 0 {
-        return Multiquadratic::from_i64(1);
-    }
-    let mut result = Multiquadratic::from_i64(1);
-    let mut power = base;
-    let mut remaining = exponent.unsigned_abs();
-    while remaining > 0 {
-        if remaining & 1 == 1 {
-            result = result * power;
+    impl<const N: usize> FloatBridge for crate::math::algebra::algebraic::Multiquadratic<N> where [(); 1 << N]: Sized {
+        fn from_real(value: Real) -> Self {
+            crate::math::algebra::algebraic::Multiquadratic::from_rat(rat_from_f64(value.as_f64()))
         }
-        remaining >>= 1;
-        if remaining > 0 {
-            power = power * power;
+
+        fn to_real(&self) -> Real {
+            Real::from_f64(crate::math::algebra::algebraic::Multiquadratic::to_f64(self))
         }
     }
-    if exponent < 0 {
-        Multiquadratic::from_i64(1) / result
-    } else {
-        result
+
+    /// Build a [`Multiquadratic`][crate::math::algebra::algebraic::Multiquadratic] from an
+    /// `f64` (rational approximation, best effort).
+    #[allow(dead_code)] // reached through the `Evaluable` impl, which lib code has not exercised yet
+    pub(super) fn multiquadratic_from_f64<const N: usize>(value: f64) -> crate::math::algebra::algebraic::Multiquadratic<N> where [(); 1 << N]: Sized {
+        crate::math::algebra::algebraic::Multiquadratic::from_rat(rat_from_f64(value))
+    }
+
+    /// Integer power of a multiquadratic value by repeated squaring.
+    #[allow(dead_code)] // reached through the `Evaluable` impl, which lib code has not exercised yet
+    fn multiquadratic_int_pow<const N: usize>(
+        base: crate::math::algebra::algebraic::Multiquadratic<N>,
+        exponent: i64,
+    ) -> crate::math::algebra::algebraic::Multiquadratic<N> where [(); 1 << N]: Sized {
+        use crate::math::algebra::algebraic::Multiquadratic;
+        if exponent == 0 {
+            return Multiquadratic::from_i64(1);
+        }
+        let mut result = Multiquadratic::from_i64(1);
+        let mut power = base;
+        let mut remaining = exponent.unsigned_abs();
+        while remaining > 0 {
+            if remaining & 1 == 1 {
+                result = result * power;
+            }
+            remaining >>= 1;
+            if remaining > 0 {
+                power = power * power;
+            }
+        }
+        if exponent < 0 {
+            Multiquadratic::from_i64(1) / result
+        } else {
+            result
+        }
     }
 }
