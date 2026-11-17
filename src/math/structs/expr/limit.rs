@@ -468,9 +468,7 @@ fn is_exponential_growth<T: SymbolicLeaf>(node: &Node<T>) -> bool {
         Shape::Operand(Token::Number(n)) => n > 1,
         Shape::Operand(Token::Constant(_)) => true,
         Shape::Operand(Token::Float(v)) => {
-            use crate::math::numeric::FloatBridge;
-            // Compare against 1 through the arbitrary-precision engine.
-            Real::from_float(v.to_float()) > Real::from_i64(1)
+            v.to_real() > Real::from_i64(1)
         }
         _ => false,
     }

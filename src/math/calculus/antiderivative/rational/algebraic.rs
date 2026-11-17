@@ -1161,7 +1161,7 @@ where
         if coef_k.is_zero() {
             continue;
         }
-        let total = k as f64 + exponent_value.to_float().as_f64();
+        let total = k as f64 + exponent_value.to_real().as_f64();
         let new_exponent = total + 1.0;
         if new_exponent.abs() < 1e-12 {
             // ∫ u^{-1} du = ln|u|

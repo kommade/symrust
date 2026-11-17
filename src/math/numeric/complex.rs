@@ -188,13 +188,13 @@ impl Div for Complex {
 }
 
 impl FloatBridge for Complex {
-    fn from_float(value: Float) -> Self {
-        Self::from_real(Real::from(value))
+    fn from_real(value: Real) -> Self {
+        Self::from_real(value)
     }
 
-    fn to_float(&self) -> Float {
+    fn to_real(&self) -> Real {
         // A complex value has no single float; return the real part.
-        Float::from(self.re.clone())
+        self.re.clone()
     }
 }
 

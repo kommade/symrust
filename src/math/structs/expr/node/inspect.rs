@@ -16,7 +16,7 @@ use super::{Node, NodeError, NodeInner, NodeValue, OpNode};
 /// do not fit an `f64` comparison are out of reach here, but an exponent of
 /// two is always representable.
 fn is_exactly_two<T: FloatType + Display>(value: &T) -> bool {
-    value.is_integer() && value.to_float().as_f64() == 2.0
+    value.is_integer() && value.to_real().as_f64() == 2.0
 }
 
 /// If the expression is a perfect-square polynomial, return `u` with
@@ -105,7 +105,7 @@ where
                     if !exponent.is_integer() || exponent.is_negative() {
                         return None;
                     }
-                    let power = exponent.to_float().as_f64();
+                    let power = exponent.to_real().as_f64();
                     if !(0.0..=32.0).contains(&power) {
                         return None;
                     }
@@ -205,7 +205,7 @@ impl<T: FloatType + Display> NodeInner<T> {
                     .evaluate()
                     .is_some_and(|exponent| {
                         exponent.is_integer()
-                            && exponent.to_float().as_f64().rem_euclid(2.0) == 0.0
+                            && exponent.to_real().as_f64().rem_euclid(2.0) == 0.0
                     }),
                 Token::Function(Func::Sqrt) => true,
                 _ => false,

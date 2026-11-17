@@ -304,9 +304,9 @@ where
         let value = evaluate_definite_integral(solution.result(), lower, upper)?;
         let mut solution = solution;
         solution.set_result_comment(comment);
-        // Record the numeric answer in this tree's leaf type: the value goes
-        // across the float bridge, which is lossless per representation.
-        let leaf_value = T::from_float(value.to_float());
+        // Record the numeric answer in this tree's leaf type: the value was
+        // computed in the bound type `V`, so it crosses through `Real`.
+        let leaf_value = T::from_real(value.to_real());
         Ok(solution.finish(Expr::from_node(Node::<T>::float(leaf_value))))
     }
 }
@@ -329,7 +329,7 @@ where
     // Evaluate the antiderivative at a bound: a plain substitution when the
     // bound is finite, otherwise a limit toward ±∞ (improper integral).
     let value_at = |bound: &V| -> Result<Real, IntegrationError> {
-        let bound = Real::from(bound.to_float());
+        let bound = bound.to_real();
         let value = if bound.is_infinite() {
             match antiderivative.limit(variable, bound.clone()) {
                 crate::math::structs::expr::limit::Limit::Finite(value) => value,
@@ -356,7 +356,7 @@ where
     let lower_value = value_at(&lower)?;
     // `F(upper) - F(lower)`, computed in Real, then bridged to the caller's type.
     let result = upper_value - lower_value;
-    Ok(V::from_float(result.to_float()))
+    Ok(V::from_real(result))
 }
 
 /// A single integration run can be configured with a context that sets the

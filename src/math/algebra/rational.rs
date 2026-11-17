@@ -6,7 +6,7 @@
 
 use std::fmt::Display;
 
-use crate::math::numeric::ExactField;
+use crate::math::numeric::{ExactField, Real};
 use crate::math::structs::expr::node::Node;
 use crate::math::utils::gcd_u128;
 
@@ -237,8 +237,7 @@ impl Rat {
     where
         T: crate::math::numeric::FloatType + std::fmt::Display,
     {
-        use crate::math::numeric::FloatBridge;
-        Self::from_float(&value.to_float())
+        Self::from_real(&value.to_real())
     }
 
     /// Recover a *simple* rational (small denominator) from any float leaf
@@ -253,8 +252,7 @@ impl Rat {
     where
         T: crate::math::numeric::FloatType + std::fmt::Display,
     {
-        use crate::math::numeric::FloatBridge;
-        let as_f64 = value.to_float().as_f64();
+        let as_f64 = value.to_real().as_f64();
         let candidate = Self::from_leaf(value)?;
         if candidate.den.unsigned_abs() > 64 {
             return None;
@@ -414,8 +412,7 @@ impl Rat {
     where
         T: crate::math::numeric::FloatBridge,
     {
-        use crate::math::numeric::FloatBridge;
-        T::from_float(self.to_float())
+        T::from_real(self.to_real())
     }
 
     /// The square root of this value if it is a perfect square.
@@ -449,10 +446,9 @@ impl Rat {
         if value >= i64::MIN as i128 && value <= i64::MAX as i128 {
             Node::number(value as i64)
         } else {
-            use crate::math::numeric::FloatBridge;
-            Node::float(T::from_float(
-                arpfloat::Float::from_f64(value as f64).cast(arpfloat::FP128),
-            ))
+            // Out of i64 range: an f64 leaf keeps the magnitude. The value
+            // crosses through `Real`, which carries arbitrary precision.
+            Node::float(T::from_real(Real::from_f64(value as f64)))
         }
     }
 

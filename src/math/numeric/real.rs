@@ -108,6 +108,15 @@ impl Real {
         &self.0
     }
 
+    /// Approximate the value as an `f64`.
+    ///
+    /// The bridge conversions for the machine-float leaves route through this;
+    /// precision is that of the wrapped `arpfloat` value.
+    #[must_use]
+    pub fn as_f64(&self) -> f64 {
+        self.0.as_f64()
+    }
+
     // --- conversions ----------------------------------------------------
 
     /// Approximate the value as an `f64`.
@@ -502,12 +511,12 @@ impl Div for Real {
 }
 
 impl crate::math::numeric::FloatBridge for Real {
-    fn from_float(value: Float) -> Self {
-        Self(value.cast(FP128))
+    fn from_real(value: Real) -> Self {
+        value
     }
 
-    fn to_float(&self) -> Float {
-        self.0.clone()
+    fn to_real(&self) -> Real {
+        self.clone()
     }
 }
 
@@ -529,8 +538,8 @@ impl crate::math::numeric::ExpressionScalar for Real {
         }
     }
 
-    fn pow_float(self, exponent: Float) -> Self {
-        Real::pow(self, &Real(exponent.cast(FP128)))
+    fn pow_float(self, exponent: Real) -> Self {
+        Real::pow(self, &exponent)
     }
 
     fn sin(self) -> Self {
@@ -557,8 +566,8 @@ impl crate::math::numeric::ExpressionScalar for Real {
     fn ln(self) -> Self {
         Real::ln(self)
     }
-    fn log(self, base: Float) -> Self {
-        Real::ln(self) / Real::ln(crate::math::numeric::FloatBridge::from_float(base))
+    fn log(self, base: Real) -> Self {
+        Real::ln(self) / Real::ln(base)
     }
     fn pi() -> Self {
         Real::pi()

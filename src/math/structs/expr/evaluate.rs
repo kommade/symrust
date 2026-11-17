@@ -116,7 +116,7 @@ where
             node: NodeInner::from_number(*number).wrap(),
         },
         Token::Float(float) => Step {
-            value: Some(T::from_float(float.to_float())),
+            value: Some(T::from_real(float.to_real())),
             node: NodeInner::from_float(float.clone()).wrap(),
         },
         Token::Constant(constant) => Step {
@@ -129,7 +129,7 @@ where
                 // node so a partial result stays a valid expression.
                 Step {
                     value: Some(value.clone()),
-                    node: NodeInner::from_float(L::from_float(value.to_float())).wrap(),
+                    node: NodeInner::from_float(L::from_real(value.to_real())).wrap(),
                 }
             }
             None => Step {
@@ -215,7 +215,7 @@ where
                 left.pow_i64(*exponent)
             }
             NodeValue::Operand(Token::Float(exponent)) => {
-                left.pow_float(exponent.to_float())
+                left.pow_float(exponent.to_real())
             }
             _ => left.pow(right),
         },
@@ -242,11 +242,11 @@ where
             // `root_n(x)` is `x^(1/n)`; compute the reciprocal in `T` so exact
             // value types keep their precision.
             let one: T = T::from_i64(1);
-            let index_value = T::from_float(index.to_float());
+            let index_value = T::from_real(index.to_real());
             argument.pow(one / index_value)
         }
         Func::Ln => argument.ln(),
-        Func::Log(base) => argument.log(base.to_float()),
+        Func::Log(base) => argument.log(base.to_real()),
     }
 }
 
@@ -342,8 +342,8 @@ impl ExpressionScalar for Float {
             Float::powi(&self, exponent.unsigned_abs())
         }
     }
-    fn pow_float(self, exponent: Float) -> Self {
-        Float::pow(&self, &exponent.cast(FP128))
+    fn pow_float(self, exponent: Real) -> Self {
+        Float::pow(&self, exponent.as_inner())
     }
 
     fn sin(self) -> Self {
@@ -370,8 +370,8 @@ impl ExpressionScalar for Float {
     fn ln(self) -> Self {
         Float::log(&self)
     }
-    fn log(self, base: Float) -> Self {
-        Float::log(&self) / Float::log(&base.cast(FP128))
+    fn log(self, base: Real) -> Self {
+        Float::log(&self) / Float::log(base.as_inner())
     }
     fn pi() -> Self {
         Float::pi(FP128)
@@ -382,12 +382,12 @@ impl ExpressionScalar for Float {
 }
 
 impl FloatBridge for Float {
-    fn from_float(value: Float) -> Self {
-        value.cast(FP128)
+    fn from_real(value: Real) -> Self {
+        value.as_inner().clone()
     }
 
-    fn to_float(&self) -> Float {
-        self.clone()
+    fn to_real(&self) -> Real {
+        Real::from(self.clone())
     }
 }
 
@@ -402,7 +402,7 @@ macro_rules! impl_evaluable_float {
                 fn pow_i64(self, exponent: i64) -> Self {
                     self.powi(exponent as i32)
                 }
-                fn pow_float(self, exponent: Float) -> Self {
+                fn pow_float(self, exponent: Real) -> Self {
                     self.powf(exponent.as_f64() as $float)
                 }
                 fn sin(self) -> Self { self.sin() }
@@ -413,17 +413,17 @@ macro_rules! impl_evaluable_float {
                 fn atan(self) -> Self { self.atan() }
                 fn sqrt(self) -> Self { self.sqrt() }
                 fn ln(self) -> Self { self.ln() }
-                fn log(self, base: Float) -> Self {
+                fn log(self, base: Real) -> Self {
                     self.ln() / (base.as_f64() as $float).ln()
                 }
             }
 
             impl FloatBridge for $float {
-                fn from_float(value: Float) -> Self {
+                fn from_real(value: Real) -> Self {
                     value.as_f64() as $float
                 }
-                fn to_float(&self) -> Float {
-                    Float::from_f64(*self as f64).cast(FP128)
+                fn to_real(&self) -> Real {
+                    Real::from_f64(*self as f64)
                 }
             }
         )*
@@ -455,7 +455,7 @@ macro_rules! impl_evaluable_int {
                 fn pow_i64(self, exponent: i64) -> Self {
                     <Self as ExpressionScalar>::pow(self, exponent as $int)
                 }
-                fn pow_float(self, exponent: Float) -> Self {
+                fn pow_float(self, exponent: Real) -> Self {
                     (self as f64).powf(exponent.as_f64()).round() as $int
                 }
                 fn sin(self) -> Self { (self as f64).sin().round() as $int }
@@ -469,11 +469,11 @@ macro_rules! impl_evaluable_int {
             }
 
             impl FloatBridge for $int {
-                fn from_float(value: Float) -> Self {
+                fn from_real(value: Real) -> Self {
                     value.as_f64().round() as $int
                 }
-                fn to_float(&self) -> Float {
-                    Float::from_i64(FP128, *self as i64)
+                fn to_real(&self) -> Real {
+                    Real::from_i64(*self as i64)
                 }
             }
         )*
@@ -567,13 +567,13 @@ impl ExpressionScalar for crate::math::algebra::rational::Rat {
 }
 
 impl FloatBridge for crate::math::algebra::rational::Rat {
-    fn from_float(value: Float) -> Self {
-        crate::math::algebra::rational::Rat::from_float(&value)
+    fn from_real(value: Real) -> Self {
+        crate::math::algebra::rational::Rat::from_f64(value.as_f64())
             .unwrap_or(crate::math::algebra::rational::Rat::ZERO)
     }
 
-    fn to_float(&self) -> Float {
-        Float::from_f64(crate::math::algebra::rational::Rat::to_f64(self))
+    fn to_real(&self) -> Real {
+        Real::from_f64(crate::math::algebra::rational::Rat::to_f64(self))
     }
 }
 
@@ -624,12 +624,12 @@ impl ExpressionScalar for crate::math::algebra::surd::Surd {
 }
 
 impl FloatBridge for crate::math::algebra::surd::Surd {
-    fn from_float(value: Float) -> Self {
+    fn from_real(value: Real) -> Self {
         surd_from_f64(value.as_f64())
     }
 
-    fn to_float(&self) -> Float {
-        Float::from_f64(crate::math::algebra::surd::Surd::to_f64(self))
+    fn to_real(&self) -> Real {
+        Real::from_f64(crate::math::algebra::surd::Surd::to_f64(self))
     }
 }
 
@@ -724,12 +724,12 @@ impl<const N: usize> ExpressionScalar for crate::math::algebra::algebraic::Multi
 
 #[cfg(feature = "algebraic")]
 impl<const N: usize> FloatBridge for crate::math::algebra::algebraic::Multiquadratic<N> where [(); 1 << N]: Sized {
-    fn from_float(value: Float) -> Self {
+    fn from_real(value: Real) -> Self {
         crate::math::algebra::algebraic::Multiquadratic::from_rat(rat_from_f64(value.as_f64()))
     }
 
-    fn to_float(&self) -> Float {
-        Float::from_f64(crate::math::algebra::algebraic::Multiquadratic::to_f64(self))
+    fn to_real(&self) -> Real {
+        Real::from_f64(crate::math::algebra::algebraic::Multiquadratic::to_f64(self))
     }
 }
 

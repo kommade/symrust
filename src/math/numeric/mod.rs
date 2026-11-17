@@ -34,6 +34,8 @@
 
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
+// The engine's own leaf implementation below is the one place outside `real.rs`
+// that still names `arpfloat` — the trait *definitions* above never do.
 use arpfloat::{FP128, Float};
 
 #[cfg(feature = "complex")]
@@ -137,19 +139,21 @@ pub trait ExactField:
     }
 }
 
-/// The bridge to the crate's arbitrary-precision float engine.
+/// The bridge between the crate's owned float type and a leaf float type.
 ///
-/// Kept separate from [`ExpressionScalar`] so the *math* traits never reference
-/// [`arpfloat::Float`] directly. When the engine is swapped (for `Real`, or a
-/// hand-rolled float), only this bridge changes.
+/// [`Real`] is the crate's currency for every leaf value that flows through a
+/// tree: `Token::Float` carries it, and this bridge is the only place a leaf
+/// type has to meet it. Kept separate from [`ExpressionScalar`] so the *math*
+/// traits stay arithmetic-only; the engine ([`arpfloat`]) is mentioned nowhere
+/// above this trait — only inside [`Real`]'s own implementation.
 pub trait FloatBridge: Sized {
-    /// Build the value from an [`arpfloat::Float`] (a `Token::Float` leaf).
-    fn from_float(value: Float) -> Self;
+    /// Build the value from a [`Real`] (a `Token::Float` leaf).
+    fn from_real(value: Real) -> Self;
 
-    /// A best-effort conversion back to an [`arpfloat::Float`], used when the
-    /// value has to be embedded into a still-symbolic result and for the
-    /// floating-point fallbacks.
-    fn to_float(&self) -> Float;
+    /// A best-effort conversion into [`Real`], used when the value has to be
+    /// embedded into a still-symbolic result and for the floating-point
+    /// fallbacks.
+    fn to_real(&self) -> Real;
 }
 
 /// A scalar that can be fed to every operation and function an expression may
@@ -175,8 +179,8 @@ pub trait ExpressionScalar: NumCore + FloatBridge {
 
     /// `self ^ exponent` for a float exponent (a `Token::Float` power).
     /// Defaults to raising to the equivalent `Self` exponent.
-    fn pow_float(self, exponent: Float) -> Self {
-        self.pow(Self::from_float(exponent))
+    fn pow_float(self, exponent: Real) -> Self {
+        self.pow(Self::from_real(exponent))
     }
 
     // --- trigonometric -------------------------------------------------
@@ -210,20 +214,23 @@ pub trait ExpressionScalar: NumCore + FloatBridge {
     fn ln(self) -> Self;
 
     /// `log_base(self)`, defaulting to `ln(self) / ln(base)`.
-    fn log(self, base: Float) -> Self {
-        self.ln() / Self::from_float(base).ln()
+    ///
+    /// The base travels as [`Real`] because a `log_b` token carries the tree's
+    /// leaf type, and the bridge is the crossing point between the two.
+    fn log(self, base: Real) -> Self {
+        self.ln() / Self::from_real(base).ln()
     }
 
     // --- constants -----------------------------------------------------
 
     /// The constant `π`.
     fn pi() -> Self {
-        Self::from_float(Float::pi(FP128))
+        Self::from_real(Real::pi())
     }
 
     /// The constant `e`.
     fn e() -> Self {
-        Self::from_float(Float::e(FP128))
+        Self::from_real(Real::e())
     }
 }
 
@@ -320,7 +327,7 @@ pub trait FloatType: ExpressionScalar {
         if !self.is_integer() {
             return None;
         }
-        let value = self.to_float().as_f64();
+        let value = self.to_real().as_f64();
         if !value.is_finite() || value.abs() >= i64::MAX as f64 {
             return None;
         }
@@ -354,7 +361,7 @@ pub trait FloatType: ExpressionScalar {
     /// own epsilon.
     fn float_equal(&self, other: &Self) -> bool {
         let difference = (self.clone() - other.clone()).abs();
-        difference.to_float().as_f64() <= 1e-10
+        difference.to_real().as_f64() <= 1e-10
     }
 
     /// Parse a decimal numeric literal (e.g. `"3.5"`, as produced by the lexer)
@@ -372,9 +379,7 @@ pub trait FloatType: ExpressionScalar {
         let value: f64 = literal
             .parse()
             .map_err(|e| format!("Error parsing number {literal}: {e}"))?;
-        Ok(Self::from_float(
-            Float::from_f64(value).cast(arpfloat::FP128),
-        ))
+        Ok(Self::from_real(Real::from_f64(value)))
     }
 }
 
@@ -439,6 +444,8 @@ impl FloatType for crate::math::numeric::Real {
     }
 }
 
+/// The engine's own type as a leaf. Only this concrete impl (and the wrappers
+/// inside `real.rs`) touch `arpfloat` — the trait layer above carries `Real`.
 impl FloatType for Float {
     fn zero() -> Self {
         Float::zero(FP128, false)

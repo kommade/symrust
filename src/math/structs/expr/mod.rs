@@ -124,11 +124,7 @@ where
     }
 
     fn from_f64(value: f64) -> Self {
-        use crate::math::numeric::FloatBridge;
-        Self::from_node(NodeInner::<T>::from_float(
-            T::from_float(Real::from_f64(value).as_inner().clone()),
-        )
-        .wrap())
+        Self::from_node(NodeInner::<T>::from_float(T::from_real(Real::from_f64(value))).wrap())
     }
 
     fn sqrt(self) -> Self {

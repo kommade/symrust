@@ -83,7 +83,7 @@ pub(crate) fn multiply_by_rational<T: SymbolicLeaf>(
 /// A leaf literal from an `f64`, for the empirical routes (root-of-unity
 /// coefficients, numeric partial fractions) whose values come from f64 maths.
 pub(crate) fn float_from<T: SymbolicLeaf>(value: f64) -> T {
-    T::from_float(crate::math::numeric::Real::from_f64(value).as_inner().clone())
+    T::from_real(Real::from_f64(value))
 }
 
 pub(crate) fn variable<T: SymbolicLeaf>(letter: char) -> Node<T> {
