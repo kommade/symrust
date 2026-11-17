@@ -1,7 +1,8 @@
 use crate::{math::calculus::expr::{
-        Shape, add, call, div, float, function, is_constant, mul, negate, number, one, pow, shape,
+        Shape, add, call, div, float, float_from, function, is_constant, mul, negate, number, one, pow, shape,
         split_constant, sqrt_arg, sub, zero,
     },
+    math::numeric::SymbolicLeaf,
     math::parse::lexer::{Const, Func, Op, Token},
     math::structs::{
         expr::{
@@ -10,7 +11,6 @@ use crate::{math::calculus::expr::{
         },
         solution::{Recorder, Solution, StepRecorder},
     },
-    math::utils::float_math::FloatMath,
 };
 
 pub trait Derivative {
@@ -24,7 +24,9 @@ pub trait Derivative {
     /// assert_eq!(solution.result().to_string(), "4 x");
     /// assert!(!solution.steps().is_empty());
     /// ```
-    fn get_derivative_solution(self) -> Solution;
+    fn get_derivative_solution(self) -> Solution<Self, Self>
+    where
+        Self: Sized + Clone;
 }
 
 /// The differentiation rules, written once against any [`Recorder`].
@@ -33,7 +35,11 @@ pub trait Derivative {
 /// [`NoSteps`][crate::math::structs::solution::NoSteps] by the answer-only entry
 /// point and a [`StepRecorder`] by the tracked one, so there is a single
 /// implementation and the answer-only path compiles the recording away.
-trait DerivativeInternal<R: Recorder> {
+trait DerivativeInternal<R, T>
+where
+    R: Recorder<Expr<T>>,
+    T: SymbolicLeaf,
+{
     fn get_derivative(self, steps: &mut R) -> Self;
     fn chain_rule(self, steps: &mut R) -> Self;
     fn power_rule(self, steps: &mut R) -> Self;
@@ -42,7 +48,10 @@ trait DerivativeInternal<R: Recorder> {
     fn quotient_rule(self, steps: &mut R) -> Self;
 }
 
-impl Derivative for Expr {
+impl<T> Derivative for Expr<T>
+where
+    T: SymbolicLeaf,
+{
     /// Find the derivative of the expression. Attempts to simplify the expression before and after finding the derivative.
     /// # Examples
     /// ```
@@ -56,7 +65,7 @@ impl Derivative for Expr {
         differentiation(self, &mut crate::math::structs::solution::NoSteps)
     }
 
-    fn get_derivative_solution(self) -> Solution {
+    fn get_derivative_solution(self) -> Solution<Self, Self> {
         let start = self.clone();
         let mut recorder = StepRecorder::new(start, "derivative");
         let result = differentiation(self, &mut recorder);
@@ -70,7 +79,7 @@ impl Derivative for Expr {
 /// subtraction of a product (`cos(x)^2 - (sin(x) sin(x))`) where expanding had
 /// already produced a plain sum. Treat a result as worse when it introduces a
 /// `- (` or a double negation that the other form does not have.
-fn reads_worse_than(candidate: &Expr, reference: &Expr) -> bool {
+fn reads_worse_than<T: SymbolicLeaf>(candidate: &Expr<T>, reference: &Expr<T>) -> bool {
     let candidate = candidate.to_string();
     let reference = reference.to_string();
     let unwanted = |text: &str| text.contains("- (") || text.contains("- -");
@@ -78,7 +87,10 @@ fn reads_worse_than(candidate: &Expr, reference: &Expr) -> bool {
 }
 
 /// Differentiate `expression`, writing every rule application into `steps`.
-fn differentiation(expression: Expr, steps: &mut impl Recorder) -> Expr {
+fn differentiation<T>(expression: Expr<T>, steps: &mut impl Recorder<Expr<T>>) -> Expr<T>
+where
+    T: SymbolicLeaf,
+{
     let simplified = expression.simplify(false);
     let derivative_tree = simplified.tree.get_derivative(steps);
 
@@ -106,7 +118,11 @@ fn differentiation(expression: Expr, steps: &mut impl Recorder) -> Expr {
     simplified_result
 }
 
-impl<R: Recorder> DerivativeInternal<R> for Node {
+impl<R, T> DerivativeInternal<R, T> for Node<T>
+where
+    R: Recorder<Expr<T>>,
+    T: SymbolicLeaf,
+{
     fn get_derivative(self, steps: &mut R) -> Self {
         let borrowed = self.inner.borrow();
         let borrow_str = borrowed.to_string();
@@ -233,7 +249,7 @@ impl<R: Recorder> DerivativeInternal<R> for Node {
                     Func::Root(index) => {
                         // d/dx x^(1/n) = (1/n) x^(1/n − 1).
                         let arg = op_node.right.clone();
-                        let reciprocal = float(crate::math::numeric::Real::one() / index.clone());
+                        let reciprocal = float(T::one() / index.clone());
                         let exponent = reciprocal.clone().sub(number(1));
                         let power = arg.clone().pow(exponent);
                         arg.get_derivative(steps)
@@ -298,7 +314,7 @@ impl<R: Recorder> DerivativeInternal<R> for Node {
                 let inner_derivative = left.clone().get_derivative(steps);
                 let power_part = match new_exp {
                     None => panic!("evaluating the new exponent failed"),
-                    Some(exp) if exp.get_sign() => panic!("new exponent is negative"),
+                    Some(exp) if exp.is_negative() => panic!("new exponent is negative"),
                     Some(exp) if exp.is_zero() => one(),
                     Some(exp) if exp.is_one() => right.impl_mul(left),
                     Some(exp) => mul(right, pow(left, float(exp))),
@@ -401,11 +417,17 @@ impl<R: Recorder> DerivativeInternal<R> for Node {
 /// wasteful while probing candidate substitutions and can panic for exotic
 /// inputs. This lighter version never panics and only needs to be numerically
 /// accurate, so the integration techniques use it for their probes.
-pub(crate) fn differentiate(node: &Node) -> Option<Node> {
+pub(crate) fn differentiate<T>(node: &Node<T>) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     differentiate_inner(node, 0)
 }
 
-fn differentiate_inner(node: &Node, depth: usize) -> Option<Node> {
+fn differentiate_inner<T>(node: &Node<T>, depth: usize) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     if depth > 128 {
         return None;
     }
@@ -480,9 +502,9 @@ fn differentiate_inner(node: &Node, depth: usize) -> Option<Node> {
                     Func::Sqrt => div(one(), mul(number(2), sqrt_arg(right))),
                     Func::Root(index) => {
                         // d/dx x^(1/n) = (1/n) x^(1/n − 1).
-                        let reciprocal = crate::math::numeric::Real::one() / index;
-                        let exponent = float(reciprocal.to_f64() - 1.0);
-                        mul(float(reciprocal.to_f64()), pow(right, exponent))
+                        let reciprocal = T::one() / index;
+                        let exponent = float(reciprocal.clone() - T::one());
+                        mul(float(reciprocal), pow(right, exponent))
                     }
                     Func::Ln => div(one(), right),
                     Func::Log(base) => div(one(), mul(right, function(Func::Ln, float(base)))),

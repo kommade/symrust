@@ -272,7 +272,12 @@ impl Surd {
         Self::new(self.k, first_root, sign)
     }
 
-    pub fn to_node(self) -> Node {
+    /// Render this surd as an expression in the caller's leaf type: the exact
+    /// radicals stay exact regardless of the tree's coefficient.
+    pub fn to_node<T>(self) -> Node<T>
+    where
+        T: crate::math::numeric::SymbolicLeaf,
+    {
         if self.b.is_zero() {
             return self.a.to_node();
         }
@@ -354,13 +359,23 @@ pub fn sqrt_rational(value: Rat) -> Option<Surd> {
     }
 }
 
-pub fn surd_quadratic_node(linear: Surd, constant: Surd, variable: &Node) -> Node {
+pub fn surd_quadratic_node<T>(
+    linear: Surd,
+    constant: Surd,
+    variable: &Node<T>,
+) -> Node<T>
+where
+    T: crate::math::numeric::SymbolicLeaf,
+{
     let square = Node::pow(variable.clone(), Node::number(2));
     let linear_term = Node::mul(linear.to_node(), variable.clone());
     Node::add(Node::add(square, linear_term), constant.to_node())
 }
 
-pub fn surd_sqrt_node(value: Surd) -> Node {
+pub fn surd_sqrt_node<T>(value: Surd) -> Node<T>
+where
+    T: crate::math::numeric::SymbolicLeaf,
+{
     match value.sqrt() {
         Some(root) => root.to_node(),
         None => Node::sqrt(value.to_node()),

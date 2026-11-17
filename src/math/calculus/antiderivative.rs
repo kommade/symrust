@@ -50,7 +50,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::math::numeric::{FloatBridge, Real};
+use crate::math::numeric::{FloatBridge, Real, SymbolicLeaf};
 use crate::{
     math::parse::lexer::{Func, Op, Token},
     math::structs::{
@@ -64,7 +64,7 @@ use crate::{
 };
 
 use self::{
-    helpers::{Shape, float_from, number, one, zero},
+    helpers::{Shape, float, float_from, number, one, zero},
     rational::RationalFunction,
 };
 
@@ -141,7 +141,7 @@ pub trait Antiderivative {
     /// assert_eq!(solution.result().to_string(), "x ^ 2");
     /// assert!(!solution.steps().is_empty());
     /// ```
-    fn get_antiderivative_solution(&self) -> Result<Solution, IntegrationError>
+    fn get_antiderivative_solution(&self) -> Result<Solution<Self, Self>, IntegrationError>
     where
         Self: Sized;
     fn get_antiderivative_with_context(
@@ -157,10 +157,10 @@ pub trait Antiderivative {
     /// evaluated in `T`. Bounds may be infinite (`Real::infinity()`, or any `T`
     /// where `T::is_infinite()` holds) to request an improper integral; the
     /// infinite case is not yet implemented.
-    fn integrate<T>(&self, lower: T, upper: T) -> Result<T, IntegrationError>
+    fn integrate<V>(&self, lower: V, upper: V) -> Result<V, IntegrationError>
     where
         Self: Sized,
-        T: crate::math::numeric::FloatType + Display
+        V: crate::math::numeric::FloatType + Display
     {
         self.integrate_with_context(lower, upper, IntegratorContext::default())
     }
@@ -169,15 +169,15 @@ pub trait Antiderivative {
     ///
     /// See [`Antiderivative::integrate`] for the result and
     /// [`IntegratorContext`] for the context fields.
-    fn integrate_with_context<T>(
+    fn integrate_with_context<V>(
         &self,
-        lower: T,
-        upper: T,
+        lower: V,
+        upper: V,
         context: IntegratorContext,
-    ) -> Result<T, IntegrationError>
+    ) -> Result<V, IntegrationError>
     where
         Self: Sized,
-        T: crate::math::numeric::FloatType + Display;
+        V: crate::math::numeric::FloatType + Display;
 
     /// Evaluate a definite integral, recording every step the search applies.
     ///
@@ -195,13 +195,16 @@ pub trait Antiderivative {
     /// assert_eq!(solution.result().to_string(), "9");
     /// assert!(!solution.steps().is_empty());
     /// ```
-    fn integrate_solution<T>(&self, lower: T, upper: T) -> Result<Solution, IntegrationError>
+    fn integrate_solution<V>(&self, lower: V, upper: V) -> Result<Solution<Self, Self>, IntegrationError>
     where
-        Self: Sized,
-        T: crate::math::numeric::FloatType + Display;
+        Self: Sized + Clone,
+        V: crate::math::numeric::FloatType + Display;
 }
 
-impl Antiderivative for Expr {
+impl<T> Antiderivative for Expr<T>
+where
+    T: SymbolicLeaf,
+{
     /// Find the antiderivative of an expression.
     ///
     /// # Examples
@@ -235,7 +238,7 @@ impl Antiderivative for Expr {
         antiderivative_with_context(self, context, &mut NoSteps)
     }
 
-    fn get_antiderivative_solution(&self) -> Result<Solution, IntegrationError>
+    fn get_antiderivative_solution(&self) -> Result<Solution<Self, Self>, IntegrationError>
     where
         Self: Sized,
     {
@@ -263,29 +266,33 @@ impl Antiderivative for Expr {
     /// let value = expr.integrate(Real::from_i64(0), Real::from_i64(3)).unwrap();
     /// assert_eq!(value, Real::from_i64(9));
     /// ```
-    fn integrate<T>(&self, lower: T, upper: T) -> Result<T, IntegrationError>
+    fn integrate<V>(&self, lower: V, upper: V) -> Result<V, IntegrationError>
     where
-        T: crate::math::numeric::FloatType + Display,
+        V: crate::math::numeric::FloatType + Display,
     {
         self.integrate_with_context(lower, upper, IntegratorContext::default())
     }
 
-    fn integrate_with_context<T>(
+    fn integrate_with_context<V>(
         &self,
-        lower: T,
-        upper: T,
+        lower: V,
+        upper: V,
         context: IntegratorContext,
-    ) -> Result<T, IntegrationError>
+    ) -> Result<V, IntegrationError>
     where
-        T: crate::math::numeric::FloatType + Display,
+        V: crate::math::numeric::FloatType + Display,
     {
         let antiderivative = self.get_antiderivative_with_context(context)?;
         evaluate_definite_integral(&antiderivative, lower, upper)
     }
 
-    fn integrate_solution<T>(&self, lower: T, upper: T) -> Result<Solution, IntegrationError>
+    fn integrate_solution<V>(
+        &self,
+        lower: V,
+        upper: V,
+    ) -> Result<Solution<Self, Self>, IntegrationError>
     where
-        T: crate::math::numeric::FloatType + Display,
+        V: crate::math::numeric::FloatType + Display + Clone,
     {
         // Format the comment before the bounds are moved into the evaluation.
         let comment = format!(
@@ -297,9 +304,10 @@ impl Antiderivative for Expr {
         let value = evaluate_definite_integral(solution.result(), lower, upper)?;
         let mut solution = solution;
         solution.set_result_comment(comment);
-        Ok(solution.finish(Expr::from_node(Node::float(
-            Real::from(value.to_float()),
-        ))))
+        // Record the numeric answer in this tree's leaf type: the value goes
+        // across the float bridge, which is lossless per representation.
+        let leaf_value = T::from_float(value.to_float());
+        Ok(solution.finish(Expr::from_node(Node::<T>::float(leaf_value))))
     }
 }
 
@@ -307,19 +315,20 @@ impl Antiderivative for Expr {
 ///
 /// A finite bound is a plain substitution. An infinite bound is taken as a
 /// limit, which lets an improper integral converge or report that it does not.
-fn evaluate_definite_integral<T>(
-    antiderivative: &Expr,
-    lower: T,
-    upper: T,
-) -> Result<T, IntegrationError>
+fn evaluate_definite_integral<B, V>(
+    antiderivative: &Expr<B>,
+    lower: V,
+    upper: V,
+) -> Result<V, IntegrationError>
 where
-    T: crate::math::numeric::FloatType + Display,
+    B: SymbolicLeaf,
+    V: crate::math::numeric::FloatType + Display,
 {
     let variable = crate::math::calculus::expr::independent_variable(&antiderivative.tree);
 
     // Evaluate the antiderivative at a bound: a plain substitution when the
     // bound is finite, otherwise a limit toward ±∞ (improper integral).
-    let value_at = |bound: &T| -> Result<Real, IntegrationError> {
+    let value_at = |bound: &V| -> Result<Real, IntegrationError> {
         let bound = Real::from(bound.to_float());
         let value = if bound.is_infinite() {
             match antiderivative.limit(variable, bound.clone()) {
@@ -345,9 +354,9 @@ where
 
     let upper_value = value_at(&upper)?;
     let lower_value = value_at(&lower)?;
-    // `F(upper) - F(lower)`, computed in Real, then cast to the caller's type.
+    // `F(upper) - F(lower)`, computed in Real, then bridged to the caller's type.
     let result = upper_value - lower_value;
-    Ok(T::from_float(result.to_float()))
+    Ok(V::from_float(result.to_float()))
 }
 
 /// A single integration run can be configured with a context that sets the
@@ -392,11 +401,14 @@ impl Default for IntegratorContext {
 /// Both public entry points funnel through here: `get_antiderivative` passes
 /// [`NoSteps`] and `get_antiderivative_solution` passes a [`StepRecorder`], so
 /// there is a single implementation and the answer-only path records nothing.
-fn antiderivative_with_context(
-    expression: &Expr,
+fn antiderivative_with_context<T>(
+    expression: &Expr<T>,
     context: IntegratorContext,
-    recorder: &mut impl Recorder,
-) -> Result<Expr, IntegrationError> {
+    recorder: &mut impl Recorder<Expr<T>>,
+) -> Result<Expr<T>, IntegrationError>
+where
+    T: SymbolicLeaf,
+{
     let simplified = expression.clone().simplify(false);
     let mut integrator = Integrator::from_context(context, recorder);
     let tree = integrator.integrate_with_verification(&simplified.tree)?;
@@ -404,7 +416,11 @@ fn antiderivative_with_context(
 }
 
 /// Shared state for a single integration run.
-pub(super) struct Integrator<'a, R: Recorder + ?Sized> {
+pub(super) struct Integrator<'a, R, T>
+where
+    R: Recorder<Expr<T>> + ?Sized,
+    T: SymbolicLeaf,
+{
     deadline: Instant,
     steps: u64,
     depth: usize,
@@ -415,9 +431,15 @@ pub(super) struct Integrator<'a, R: Recorder + ?Sized> {
     parts_depth: usize,
     /// Where the rules that are applied are recorded.
     recorder: &'a mut R,
+    /// Pins the recorded tree's leaf type without affecting the layout.
+    _leaf: std::marker::PhantomData<fn() -> T>,
 }
 
-impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
+impl<'a, R, T> Integrator<'a, R, T>
+where
+    R: Recorder<Expr<T>> + ?Sized,
+    T: SymbolicLeaf,
+{
     fn from_context(context: IntegratorContext, recorder: &'a mut R) -> Self {
         Self {
             deadline: context.deadline,
@@ -427,6 +449,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
             variable: 'x',
             parts_depth: context.parts_depth,
             recorder,
+            _leaf: std::marker::PhantomData,
         }
     }
 
@@ -435,7 +458,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
         &mut self,
         step_name: &str,
         description: impl FnOnce() -> String,
-        result: impl FnOnce() -> Node,
+        result: impl FnOnce() -> Node<T>,
     ) {
         let recorder = &mut *self.recorder;
         recorder.record(
@@ -458,7 +481,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
         recorder.record_without_result(step_name, description, Expr::default);
     }
 
-    pub(super) fn variable_node(&self) -> Node {
+    pub(super) fn variable_node(&self) -> Node<T> {
         helpers::variable(self.variable)
     }
 
@@ -473,7 +496,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
         Ok(())
     }
 
-    fn integrate_with_verification(&mut self, node: &Node) -> Result<Node, IntegrationError> {
+    fn integrate_with_verification(&mut self, node: &Node<T>) -> Result<Node<T>, IntegrationError> {
         self.variable = helpers::independent_variable(node);
         let result = self.integrate(node)?;
         // Verification uses numeric differentiation, which can panic on domain
@@ -488,7 +511,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
         Ok(helpers::simplify_deep(&result))
     }
 
-    pub(super) fn integrate(&mut self, node: &Node) -> Result<Node, IntegrationError> {
+    pub(super) fn integrate(&mut self, node: &Node<T>) -> Result<Node<T>, IntegrationError> {
         self.tick()?;
         let simplified = node.clone().simplify(false, true);
         let key = describe(&simplified);
@@ -505,7 +528,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
         result
     }
 
-    fn integrate_inner(&mut self, node: &Node) -> Result<Node, IntegrationError> {
+    fn integrate_inner(&mut self, node: &Node<T>) -> Result<Node<T>, IntegrationError> {
         if self.depth > MAX_DEPTH {
             return Err(IntegrationError::Timeout);
         }
@@ -692,9 +715,9 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
     fn record_technique(
         &mut self,
         step_name: &'static str,
-        node: &Node,
-        result: Option<Node>,
-    ) -> Option<Node> {
+        node: &Node<T>,
+        result: Option<Node<T>>,
+    ) -> Option<Node<T>> {
         if let Some(found) = &result {
             let described = describe_signed(node);
             let found = found.clone();
@@ -704,18 +727,18 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
     }
 
     /// Elementary antiderivatives of the form `f(a x + b)`.
-    fn try_table(&mut self, node: &Node) -> Option<Node> {
+    fn try_table(&mut self, node: &Node<T>) -> Option<Node<T>> {
         let result = self.find_standard_rule(node);
         self.record_technique("standard integral", node, result)
     }
 
-    fn find_standard_rule(&self, node: &Node) -> Option<Node> {
+    fn find_standard_rule(&self, node: &Node<T>) -> Option<Node<T>> {
         match helpers::shape(node) {
             Shape::Operand(Token::Indp(_)) => {
                 let variable = self.variable_node();
                 Some(helpers::divide_by(
                     helpers::pow(variable, number(2)),
-                    float_from(2.0),
+                    float_from::<T>(2.0),
                 ))
             }
             Shape::Operator(Token::Operator(Op::Pow), base, exponent) => {
@@ -726,7 +749,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
                 {
                     if helpers::linear_coefficients(&argument).is_some() {
                         if let Some(value) = helpers::constant_value(&exponent) {
-                            let halved = helpers::float(value * float_from(0.5));
+                            let halved = helpers::float(value * float_from::<T>(0.5));
                             if let Some(result) = self.power_of(argument, halved) {
                                 return Some(result);
                             }
@@ -742,7 +765,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
                         (base, helpers::negate(exponent))
                     }
                     Shape::Operator(Token::Function(Func::Sqrt), _, argument) => {
-                        (argument, helpers::negate(helpers::float(float_from(0.5))))
+                        (argument, helpers::negate(helpers::float(float_from::<T>(0.5))))
                     }
                     _ => return None,
                 };
@@ -758,7 +781,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
                     {
                         if helpers::linear_coefficients(&base).is_some() {
                             if let Some(value) = helpers::constant_value(&exponent) {
-                                let halved = helpers::float(value * float_from(0.5));
+                                let halved = helpers::float(value * float_from::<T>(0.5));
                                 if let Some(result) = self.power_of(base, halved) {
                                     return Some(result);
                                 }
@@ -775,14 +798,14 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
     }
 
     /// The power rule, and the exponential rule when the base is constant.
-    fn power_of(&self, base: Node, exponent: Node) -> Option<Node> {
+    fn power_of(&self, base: Node<T>, exponent: Node<T>) -> Option<Node<T>> {
         // Exponentials: the base is constant.
         if let Some(constant) = helpers::constant_value(&base) {
-            if !constant.is_normal() || constant.get_sign() {
+            if !constant.is_normal() || constant.is_negative() {
                 return None;
             }
             let (slope, _) = helpers::linear_coefficients(&exponent)?;
-            let is_e = constant.float_equal(&Real::e());
+            let is_e = constant.float_equal(&T::e());
             let current = helpers::pow(base, exponent);
             if is_e {
                 if slope.is_one() {
@@ -794,7 +817,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
             if slope.is_one() {
                 return Some(helpers::div(current, logarithm));
             }
-            let negative = slope.get_sign();
+            let negative = slope.is_negative();
             let magnitude = if negative { slope.neg() } else { slope };
             let denominator = helpers::mul(helpers::float(magnitude), logarithm);
             let numerator = if negative { current.negate() } else { current };
@@ -806,7 +829,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
         if exponent_value.is_neg_one() {
             return Some(helpers::divide_by(helpers::function(Func::Ln, base), slope));
         }
-        let new_exponent = exponent_value.clone() + Real::one();
+        let new_exponent = exponent_value.clone() + T::one();
         if new_exponent.is_zero() {
             return None;
         }
@@ -818,12 +841,12 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
 
     /// `integral of ln(u)^n dx` using the reduction formula
     /// `I_n = u ln(u)^n / a - n I_(n-1)`.
-    fn try_logarithm_power(&mut self, node: &Node) -> Option<Node> {
+    fn try_logarithm_power(&mut self, node: &Node<T>) -> Option<Node<T>> {
         let result = self.logarithm_power(node);
         self.record_technique("logarithm reduction", node, result)
     }
 
-    fn logarithm_power(&self, node: &Node) -> Option<Node> {
+    fn logarithm_power(&self, node: &Node<T>) -> Option<Node<T>> {
         let Shape::Operator(Token::Operator(Op::Pow), base, exponent) = helpers::shape(node) else {
             return None;
         };
@@ -846,19 +869,19 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
     }
 
     /// `k / sqrt(q)` where `q` is a quadratic that can be completed to a square.
-    fn try_quadratic_reciprocal(&mut self, node: &Node) -> Option<Node> {
+    fn try_quadratic_reciprocal(&mut self, node: &Node<T>) -> Option<Node<T>> {
         let result = self.find_quadratic_reciprocal(node);
         self.record_technique("quadratic reciprocal", node, result)
     }
 
-    fn find_quadratic_reciprocal(&self, node: &Node) -> Option<Node> {
+    fn find_quadratic_reciprocal(&self, node: &Node<T>) -> Option<Node<T>> {
         let (coefficient, argument) = match helpers::shape(node) {
             Shape::Operator(Token::Operator(Op::Pow), base, exponent) => {
                 let power = helpers::constant_value(&exponent)?;
-                if !power.float_equal(&float_from(-0.5)) {
+                if !power.float_equal(&float_from::<T>(-0.5)) {
                     return None;
                 }
-                (Real::one(), base)
+                (T::one(), base)
             }
             Shape::Operator(Token::Operator(Op::Div), numerator, denominator) => {
                 let coefficient = helpers::constant_value(&numerator)?;
@@ -868,7 +891,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
                     }
                     Shape::Operator(Token::Operator(Op::Pow), base, exponent) => {
                         let power = helpers::constant_value(&exponent)?;
-                        if !power.float_equal(&float_from(0.5)) {
+                        if !power.float_equal(&float_from::<T>(0.5)) {
                             return None;
                         }
                         (coefficient, base)
@@ -910,22 +933,22 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
     }
 
     /// `k sqrt(q)` where `q` is a quadratic, using the standard area formulas.
-    fn try_quadratic_root(&mut self, node: &Node) -> Option<Node> {
+    fn try_quadratic_root(&mut self, node: &Node<T>) -> Option<Node<T>> {
         let result = self.find_quadratic_sqrt(node);
         self.record_technique("quadratic root", node, result)
     }
 
-    fn find_quadratic_sqrt(&self, node: &Node) -> Option<Node> {
+    fn find_quadratic_sqrt(&self, node: &Node<T>) -> Option<Node<T>> {
         let (coefficient, argument) = match helpers::shape(node) {
             Shape::Operator(Token::Function(Func::Sqrt), _, argument) => {
-                (Real::one(), argument)
+                (T::one(), argument)
             }
             Shape::Operator(Token::Operator(Op::Pow), base, exponent) => {
                 let power = helpers::constant_value(&exponent)?;
-                if !power.float_equal(&float_from(0.5)) {
+                if !power.float_equal(&float_from::<T>(0.5)) {
                     return None;
                 }
-                (Real::one(), base)
+                (T::one(), base)
             }
             _ => return None,
         };
@@ -944,7 +967,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
         let centre = helpers::add(variable, shift.to_node());
         let root = helpers::sqrt_arg(argument);
         let half_term =
-            helpers::divide_by(helpers::mul(centre.clone(), root.clone()), float_from(2.0));
+            helpers::divide_by(helpers::mul(centre.clone(), root.clone()), float_from::<T>(2.0));
         let result = if quadratic.is_negative() {
             if completed.is_negative() || completed.is_zero() {
                 return None;
@@ -977,7 +1000,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
     }
 
     /// `integral of e^(a x + b) sin(c x + d) dx` and the cosine counterpart.
-    fn try_exponential_trig(&mut self, node: &Node) -> Option<Node> {
+    fn try_exponential_trig(&mut self, node: &Node<T>) -> Option<Node<T>> {
         let result = self.find_exponential_trig(node);
         self.record_technique("exponential times trig", node, result)
     }
@@ -990,12 +1013,12 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
     /// `integral of e^u sin(a u + b) du = e^u (sin - a cos)/(1 + a^2)` and
     /// `integral of e^u cos(a u + b) du = e^u (cos + a sin)/(1 + a^2)`
     /// (and `x = e^u`), the antiderivative follows directly.
-    fn try_log_trig(&mut self, node: &Node) -> Option<Node> {
+    fn try_log_trig(&mut self, node: &Node<T>) -> Option<Node<T>> {
         let result = self.find_log_trig(node);
         self.record_technique("logarithm times trig", node, result)
     }
 
-    fn find_log_trig(&self, node: &Node) -> Option<Node> {
+    fn find_log_trig(&self, node: &Node<T>) -> Option<Node<T>> {
         let Shape::Operator(Token::Function(func), _, argument) = helpers::shape(node) else {
             return None;
         };
@@ -1008,7 +1031,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
         if slope.is_zero() {
             return None;
         }
-        let denominator = Real::one() + slope.clone() * slope.clone();
+        let denominator = T::one() + slope.clone() * slope.clone();
         if denominator.is_zero() {
             return None;
         }
@@ -1026,13 +1049,13 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
         Some(helpers::divide_by(helpers::mul(x, combination), denominator))
     }
 
-    fn find_exponential_trig(&self, node: &Node) -> Option<Node> {
+    fn find_exponential_trig(&self, node: &Node<T>) -> Option<Node<T>> {
         let product = helpers::flatten_product(node);
         if !product.denom.is_empty() {
             return None;
         }
-        let mut exponential: Option<(Node, Real)> = None;
-        let mut trigonometric: Option<(Func, Node, Real, Real)> = None;
+        let mut exponential: Option<(Node<T>, T)> = None;
+        let mut trigonometric: Option<(Func<T>, Node<T>, T, T)> = None;
         for factor in &product.numer {
             if helpers::is_constant(factor) {
                 continue;
@@ -1040,7 +1063,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
             match helpers::shape(factor) {
                 Shape::Operator(Token::Operator(Op::Pow), base, exponent) => {
                     let constant = helpers::constant_value(&base)?;
-                    if !constant.is_normal() || constant.get_sign() {
+                    if !constant.is_normal() || constant.is_negative() {
                         return None;
                     }
                     let (slope, _) = helpers::linear_coefficients(&exponent)?;
@@ -1083,12 +1106,12 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
         Some(helpers::divide_by(combination, denominator))
     }
 
-    fn try_substitution(&mut self, node: &Node) -> Result<Option<Node>, IntegrationError> {
+    fn try_substitution(&mut self, node: &Node<T>) -> Result<Option<Node<T>>, IntegrationError> {
         let result = self.find_substitution(node)?;
         Ok(self.record_technique("substitution", node, result))
     }
 
-    fn find_substitution(&mut self, node: &Node) -> Result<Option<Node>, IntegrationError> {
+    fn find_substitution(&mut self, node: &Node<T>) -> Result<Option<Node<T>>, IntegrationError> {
         let product = helpers::flatten_product(node);
         // `f'(x) / f(x)` integrates to a logarithm.
         for (index, divisor) in product.denom.iter().enumerate() {
@@ -1111,7 +1134,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
             if helpers::is_constant(factor) {
                 continue;
             }
-            let ratio_of = |target: &Node| {
+            let ratio_of = |target: &Node<T>| {
                 helpers::proportional_to(&product.numer, &product.denom, Some(index), target)
             };
             match helpers::shape(factor) {
@@ -1128,12 +1151,12 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
                 Shape::Operator(Token::Operator(Op::Pow), base, exponent) => {
                     if let Some(constant) = helpers::constant_value(&base) {
                         // Exponential with a non linear argument.
-                        if !constant.is_normal() || constant.get_sign() {
+                        if !constant.is_normal() || constant.is_negative() {
                             continue;
                         }
                         if let (Some(inner), is_e) = (
                             helpers::differentiate(&exponent),
-                            constant.float_equal(&Real::e()),
+                            constant.float_equal(&T::e()),
                         ) {
                             if let Some(ratio) = ratio_of(&inner) {
                                 let antiderivative = if is_e {
@@ -1154,7 +1177,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
                             let antiderivative = if exponent_value.is_neg_one() {
                                 helpers::function(Func::Ln, base)
                             } else {
-                                let new_exponent = exponent_value + Real::one();
+                                let new_exponent = exponent_value + T::one();
                                 if new_exponent.is_zero() {
                                     continue;
                                 }
@@ -1174,7 +1197,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
                     let square = helpers::pow(factor.clone(), number(2));
                     return Ok(Some(helpers::divide_by(
                         helpers::multiply_by(square, ratio),
-                        float_from(2.0),
+                        float_from::<T>(2.0),
                     )));
                 }
             }
@@ -1182,7 +1205,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
         Ok(None)
     }
 
-    fn try_by_parts(&mut self, node: &Node) -> Result<Option<Node>, IntegrationError> {
+    fn try_by_parts(&mut self, node: &Node<T>) -> Result<Option<Node<T>>, IntegrationError> {
         // `integrate_by_parts` records its own steps — the choice of `u` and
         // `dv`, then the assembled `u v` term — before running the
         // sub-integrals they cause. Wrapping it in `record_technique` would add
@@ -1191,12 +1214,12 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
         self.integrate_by_parts(node)
     }
 
-    fn integrate_by_parts(&mut self, node: &Node) -> Result<Option<Node>, IntegrationError> {
+    fn integrate_by_parts(&mut self, node: &Node<T>) -> Result<Option<Node<T>>, IntegrationError> {
         if self.parts_depth >= MAX_PARTS_DEPTH {
             return Ok(None);
         }
         let product = helpers::flatten_product(node);
-        let mut factors: Vec<Node> = product
+        let mut factors: Vec<Node<T>> = product
             .numer
             .iter()
             .filter(|factor| !helpers::is_constant(factor))
@@ -1220,7 +1243,7 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
         order.sort_by_key(|index| liate_priority(&factors[*index]));
         for index in order {
             let candidate = factors[index].clone();
-            let rest: Vec<Node> = factors
+            let rest: Vec<Node<T>> = factors
                 .iter()
                 .enumerate()
                 .filter(|(position, _)| *position != index)
@@ -1269,10 +1292,13 @@ impl<'a, R: Recorder + ?Sized> Integrator<'a, R> {
 }
 
 /// Whether the node is `u^(-n)`, i.e. a reciprocal power.
-fn is_reciprocal_power(node: &Node) -> bool {
+fn is_reciprocal_power<T>(node: &Node<T>) -> bool
+where
+    T: SymbolicLeaf,
+{
     if let Shape::Operator(Token::Operator(Op::Pow), _base, exponent) = helpers::shape(node) {
         if let Some(value) = helpers::constant_value(&exponent) {
-            return value.get_sign();
+            return value.is_negative();
         }
     }
     false
@@ -1280,7 +1306,10 @@ fn is_reciprocal_power(node: &Node) -> bool {
 
 /// `1 / factor` as a negative power, so integration by parts can treat a
 /// denominator like any other factor.
-fn reciprocal_power(factor: &Node) -> Node {
+fn reciprocal_power<T>(factor: &Node<T>) -> Node<T>
+where
+    T: SymbolicLeaf,
+{
     match helpers::shape(factor) {
         Shape::Operator(Token::Operator(Op::Pow), base, exponent) => {
             helpers::pow(base, helpers::negate(exponent))
@@ -1290,7 +1319,10 @@ fn reciprocal_power(factor: &Node) -> Node {
 }
 
 /// How suitable a factor is as the `u` in integration by parts (LIATE).
-fn liate_priority(node: &Node) -> u8 {
+fn liate_priority<T>(node: &Node<T>) -> u8
+where
+    T: SymbolicLeaf,
+{
     match helpers::shape(node) {
         Shape::Operator(Token::Function(func), _, _) => match func {
             Func::Ln | Func::Log(_) => 0,
@@ -1311,7 +1343,10 @@ fn liate_priority(node: &Node) -> u8 {
 }
 
 /// Antiderivatives of the basic functions, without the chain rule factor.
-fn antiderivative_of_function(func: &Func, argument: Node) -> Option<Node> {
+fn antiderivative_of_function<T>(func: &Func<T>, argument: Node<T>) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     Some(match func {
         Func::Sin => helpers::negate(helpers::function(Func::Cos, argument)),
         Func::Cos => helpers::function(Func::Sin, argument),
@@ -1388,18 +1423,21 @@ fn antiderivative_of_function(func: &Func, argument: Node) -> Option<Node> {
         ),
         Func::Root(index) => {
             // ∫ x^(1/n) dx = x^(1/n + 1) / (1/n + 1).
-            let reciprocal = Real::one() / index.clone();
-            let exponent = float_from(reciprocal.to_f64() + 1.0);
+            let reciprocal = T::one() / index.clone();
+            let exponent_value = reciprocal + T::one();
             helpers::divide_by(
-                helpers::pow(argument.clone(), helpers::float(exponent.clone())),
-                exponent,
+                helpers::pow(argument.clone(), helpers::float(exponent_value.clone())),
+                exponent_value,
             )
         }
     })
 }
 
 /// `(a b)^n = a^n b^n` for small integer `n`, when the base is a product.
-fn expand_product_power(node: &Node) -> Option<Node> {
+fn expand_product_power<T>(node: &Node<T>) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     let Shape::Operator(Token::Operator(Op::Pow), base, exponent) = helpers::shape(node) else {
         return None;
     };
@@ -1422,13 +1460,19 @@ fn expand_product_power(node: &Node) -> Option<Node> {
     }
 }
 
-fn describe(node: &Node) -> String {
+fn describe<T>(node: &Node<T>) -> String
+where
+    T: SymbolicLeaf,
+{
     node.inner.borrow().to_string()
 }
 
 /// The ` with u = ... and du = ... dx` suffix used when a linear argument
 /// requires the chain rule.
-fn chain_rule_note(argument: &Node, slope: &Real) -> String {
+fn chain_rule_note<T>(argument: &Node<T>, slope: &T) -> String
+where
+    T: SymbolicLeaf,
+{
     if slope.is_one() {
         String::new()
     } else {
@@ -1442,7 +1486,10 @@ fn chain_rule_note(argument: &Node, slope: &Real) -> String {
 
 /// Describe an expression with a leading minus sign pulled out, so that
 /// `(-x) cos(x)` is reported as `-x cos(x)`.
-fn describe_signed(node: &Node) -> String {
+fn describe_signed<T>(node: &Node<T>) -> String
+where
+    T: SymbolicLeaf,
+{
     let simplified = helpers::simplify_deep(node);
     if simplified.inner.borrow().is_neg() {
         let magnitude = helpers::simplify_deep(&simplified.negate());
@@ -1457,7 +1504,10 @@ fn describe_signed(node: &Node) -> String {
 ///
 /// Handles `ln(x)`, `k ln(x)`, `a ln(x) + b`, `a ln(x) - b`, `b + a ln(x)`,
 /// and negations thereof. Returns `None` for any other shape.
-fn log_argument_slope(node: &Node, depth: usize) -> Option<Real> {
+fn log_argument_slope<T>(node: &Node<T>, depth: usize) -> Option<T>
+where
+    T: SymbolicLeaf,
+{
     if depth > 64 {
         return None;
     }
@@ -1465,7 +1515,7 @@ fn log_argument_slope(node: &Node, depth: usize) -> Option<Real> {
         // `ln(x)` on its own contributes a slope of 1.
         Shape::Operator(Token::Function(Func::Ln), _, argument) => {
             if matches!(helpers::shape(&argument), Shape::Operand(Token::Indp(_))) {
-                Some(Real::one())
+                Some(T::one())
             } else {
                 None
             }
@@ -1510,8 +1560,11 @@ fn log_argument_slope(node: &Node, depth: usize) -> Option<Real> {
 
 /// Format a constant for the logs, preferring exact fractions over the long
 /// decimal expansion of a float.
-fn describe_number(value: &Real) -> String {
-    if let Some(rational) = crate::math::algebra::rational::Rat::from_float_simple(value.as_inner()) {
+fn describe_number<T>(value: &T) -> String
+where
+    T: SymbolicLeaf,
+{
+    if let Some(rational) = crate::math::algebra::rational::Rat::from_leaf_simple(value) {
         let (numerator, denominator) = rational.parts();
         if denominator == 1 {
             return numerator.to_string();

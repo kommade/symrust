@@ -323,22 +323,33 @@ impl<T: Display, S: Display> Display for ElementaryStep<T, S> {
 ///
 /// The derivative works at the [`Node`][crate::math::structs::expr::node::Node] level
 /// and the integrator at the [`Expr`] level; this trait lets
-/// [`calc_step!`][crate::calc_step] accept either.
+/// [`calc_step!`][crate::calc_step] accept either. Both come in the tree's leaf
+/// type, which the recorded solution carries.
 ///
 /// This is an implementation detail of the step-recording machinery.
 pub(crate) trait IntoStepResult {
+    /// The recorded form of this value.
+    type Recorded;
     /// The expression to record for this step.
-    fn into_step_result(self) -> Expr;
+    fn into_step_result(self) -> Self::Recorded;
 }
 
-impl IntoStepResult for Expr {
-    fn into_step_result(self) -> Expr {
+impl<T> IntoStepResult for Expr<T>
+where
+    T: crate::math::numeric::SymbolicLeaf,
+{
+    type Recorded = Self;
+    fn into_step_result(self) -> Self::Recorded {
         self
     }
 }
 
-impl IntoStepResult for crate::math::structs::expr::node::Node {
-    fn into_step_result(self) -> Expr {
+impl<T> IntoStepResult for crate::math::structs::expr::node::Node<T>
+where
+    T: crate::math::numeric::SymbolicLeaf,
+{
+    type Recorded = Expr<T>;
+    fn into_step_result(self) -> Self::Recorded {
         Expr::from_node(self)
     }
 }

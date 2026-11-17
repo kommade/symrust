@@ -10,10 +10,9 @@
 
 use std::ops::Neg;
 
-use crate::{math::numeric::Real,
+use crate::{math::numeric::SymbolicLeaf,
     math::parse::lexer::{Func, Op, Token},
     math::structs::expr::node::{Node, NodeFunctions, NodeInner},
-    math::utils::float_math::FloatMath,
 };
 
 /// Differentiation lives in the derivative module; the integration
@@ -26,7 +25,10 @@ pub(super) use crate::math::calculus::expr::*;
 pub(super) const SAMPLES: [f64; 5] = [0.3721, 1.2413, -0.9173, 2.6329, -2.1177];
 
 /// The coefficients `(a, b)` of an expression of the form `a x + b`.
-pub(super) fn linear_coefficients(node: &Node) -> Option<(Real, Real)> {
+pub(super) fn linear_coefficients<T>(node: &Node<T>) -> Option<(T, T)>
+where
+    T: SymbolicLeaf,
+{
     let (slope, intercept) = linear_coefficients_inner(node, 0)?;
     if slope.is_zero() {
         None
@@ -35,12 +37,15 @@ pub(super) fn linear_coefficients(node: &Node) -> Option<(Real, Real)> {
     }
 }
 
-fn linear_coefficients_inner(node: &Node, depth: usize) -> Option<(Real, Real)> {
+fn linear_coefficients_inner<T>(node: &Node<T>, depth: usize) -> Option<(T, T)>
+where
+    T: SymbolicLeaf,
+{
     if depth > 64 {
         return None;
     }
-    let zero_value = Real::zero();
-    let one_value = Real::one();
+    let zero_value = T::zero();
+    let one_value = T::one();
     match shape(node) {
         Shape::Operand(Token::Indp(_)) => Some((one_value, zero_value)),
         Shape::Operand(_) => {
@@ -98,11 +103,17 @@ fn linear_coefficients_inner(node: &Node, depth: usize) -> Option<(Real, Real)> 
 }
 
 /// Replace every occurrence of the independent variable with `value`.
-pub(super) fn substitute(node: &Node, value: &Real) -> Node {
+pub(super) fn substitute<T>(node: &Node<T>, value: &T) -> Node<T>
+where
+    T: SymbolicLeaf,
+{
     substitute_inner(node, value, 0)
 }
 
-fn substitute_inner(node: &Node, value: &Real, depth: usize) -> Node {
+fn substitute_inner<T>(node: &Node<T>, value: &T, depth: usize) -> Node<T>
+where
+    T: SymbolicLeaf,
+{
     if depth > 256 {
         return node.clone();
     }
@@ -125,23 +136,29 @@ fn substitute_inner(node: &Node, value: &Real, depth: usize) -> Node {
     }
 }
 
-pub(super) fn evaluate_at(node: &Node, value: &Real) -> Option<Real> {
+pub(super) fn evaluate_at<T>(node: &Node<T>, value: &T) -> Option<T>
+where
+    T: SymbolicLeaf,
+{
     numeric_evaluate(&substitute(node, value))
 }
 
 /// Numerically compare `product(factors) / product(divisors)` with `target`
 /// and return the constant ratio if the two are proportional.
-pub(super) fn proportional_to(
-    factors: &[Node],
-    divisors: &[Node],
+pub(super) fn proportional_to<T>(
+    factors: &[Node<T>],
+    divisors: &[Node<T>],
     skip: Option<usize>,
-    target: &Node,
-) -> Option<Real> {
-    let mut ratio: Option<Real> = None;
+    target: &Node<T>,
+) -> Option<T>
+where
+    T: SymbolicLeaf,
+{
+    let mut ratio: Option<T> = None;
     let mut agreements = 0;
     for sample in SAMPLES {
-        let point = float_from(sample);
-        let mut value = Real::one();
+        let point = float_from::<T>(sample);
+        let mut value = T::one();
         let mut valid = true;
         for (index, factor) in factors.iter().enumerate() {
             if Some(index) == skip {
@@ -199,20 +216,23 @@ pub(super) fn proportional_to(
 ///
 /// The simplifier does not cancel `x^3 / x`, which matters for the techniques
 /// that need to see a product of a polynomial and a logarithm.
-pub(super) fn reduce_fraction(node: &Node) -> Option<Node> {
+pub(super) fn reduce_fraction<T>(node: &Node<T>) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     let product = flatten_product(node);
     if product.denom.is_empty() {
         return None;
     }
     let before = product.numer.len() + product.denom.len();
-    struct Entry {
+    struct Entry<T> {
         key: String,
-        base: Node,
+        base: Node<T>,
         numerator: i64,
         denominator: i64,
     }
-    let mut entries: Vec<Entry> = Vec::new();
-    let add = |factor: &Node, positive: bool, entries: &mut Vec<Entry>| {
+    let mut entries: Vec<Entry<T>> = Vec::new();
+    let add = |factor: &Node<T>, positive: bool, entries: &mut Vec<Entry<T>>| {
         let (base, exponent) = match shape(factor) {
             Shape::Operator(Token::Operator(Op::Pow), base, exponent) => {
                 match constant_integer(&exponent) {
@@ -255,7 +275,7 @@ pub(super) fn reduce_fraction(node: &Node) -> Option<Node> {
         let factor = if net.unsigned_abs() == 1 {
             entry.base
         } else {
-            pow(entry.base, number(net.unsigned_abs() as i64))
+            pow(entry.base, number::<T>(net.unsigned_abs() as i64))
         };
         if net > 0 {
             numer.push(factor);
@@ -274,11 +294,17 @@ pub(super) fn reduce_fraction(node: &Node) -> Option<Node> {
 /// [`Node::simplify`] does not descend into function arguments, which leaves
 /// results such as `ln(x - 0)` unchanged. This pass fixes that and generally
 /// tidies nested constructions produced by the integration rules.
-pub(super) fn simplify_deep(node: &Node) -> Node {
+pub(super) fn simplify_deep<T>(node: &Node<T>) -> Node<T>
+where
+    T: SymbolicLeaf,
+{
     simplify_deep_inner(node, 0).simplify(false, true)
 }
 
-fn simplify_deep_inner(node: &Node, depth: usize) -> Node {
+fn simplify_deep_inner<T>(node: &Node<T>, depth: usize) -> Node<T>
+where
+    T: SymbolicLeaf,
+{
     if depth > 128 {
         return node.clone();
     }
@@ -308,9 +334,7 @@ fn simplify_deep_inner(node: &Node, depth: usize) -> Node {
             // e^(ln(u)) = u
             if let Shape::Operator(Token::Operator(Op::Pow), base, exponent) = shape(&simplified) {
                 if let Shape::Operator(Token::Function(Func::Ln), _, argument) = shape(&exponent) {
-                    if constant_value(&base)
-                        .is_some_and(|value| value.float_equal(&Real::e()))
-                    {
+                    if constant_value(&base).is_some_and(|value| value.float_equal(&T::e())) {
                         return argument;
                     }
                 }
@@ -322,7 +346,10 @@ fn simplify_deep_inner(node: &Node, depth: usize) -> Node {
 }
 
 /// The value of a node that is a plain numeric literal.
-pub(super) fn numeric_value(node: &Node) -> Option<Real> {
+pub(super) fn numeric_value<T>(node: &Node<T>) -> Option<T>
+where
+    T: SymbolicLeaf,
+{
     match shape(node) {
         Shape::Operand(Token::Number(_)) | Shape::Operand(Token::Float(_)) => constant_value(node),
         _ => None,
@@ -330,12 +357,15 @@ pub(super) fn numeric_value(node: &Node) -> Option<Real> {
 }
 
 /// Fold all numeric factors of a product into a single coefficient.
-fn normalise_product(node: &Node) -> Node {
+fn normalise_product<T>(node: &Node<T>) -> Node<T>
+where
+    T: SymbolicLeaf,
+{
     let product = flatten_product(node);
     if product.numer.len() < 2 && product.denom.is_empty() {
         return node.clone();
     }
-    let mut factor = Real::one();
+    let mut factor = T::one();
     let mut numer = Vec::new();
     let mut denom = Vec::new();
     for item in product.numer {
@@ -368,36 +398,52 @@ fn normalise_product(node: &Node) -> Node {
 }
 
 /// Split a factor into its numeric coefficient and its symbolic part.
-fn split_numeric(node: &Node) -> (Real, Option<Node>) {
+fn split_numeric<T>(node: &Node<T>) -> (T, Option<Node<T>>)
+where
+    T: SymbolicLeaf,
+{
     if let Some(value) = numeric_value(node) {
         return (value, None);
     }
     if let Shape::Operator(Token::Operator(Op::Sub), left, right) = shape(node) {
         if is_zero(&left) {
             let (value, rest) = split_numeric(&right);
-            return (value.neg(), rest);
+            return (-value, rest);
         }
     }
-    (Real::one(), Some(node.clone()))
+    (T::one(), Some(node.clone()))
 }
 
 /// Check a candidate antiderivative against the integrand.
 ///
 /// The derivative of the candidate is approximated with a central difference.
-/// `arpfloat` carries far more precision than the step size needs, so the
-/// approximation is accurate enough to catch genuinely wrong results.
-pub(super) fn verify(integrand: &Node, candidate: &Node) -> bool {
-    let step = float_from(1e-4);
-    let tolerance = float_from(1e-5);
+/// `Real` carries far more precision than the step size needs, so the
+/// approximation is accurate enough to catch genuinely wrong results. The
+/// check itself stays in `Real`: it re-types the trees and compares numbers,
+/// so it validates the mathematical claim regardless of the leaf the caller
+/// computes in.
+pub(super) fn verify<T>(integrand: &Node<T>, candidate: &Node<T>) -> bool
+where
+    T: SymbolicLeaf,
+{
+    use crate::math::numeric::Real;
+    type RealNode = Node<Real>;
+    let as_real = |node: &Node<T>| -> RealNode {
+        Node::from_typed(node)
+    };
+    let integrand = as_real(integrand);
+    let candidate = as_real(candidate);
+    let step = float_from::<Real>(1e-4);
+    let tolerance = float_from::<Real>(1e-5);
     let mut checked = 0;
     for sample in SAMPLES {
-        let point = float_from(sample);
+        let point = float_from::<Real>(sample);
         let left = point.clone() - step.clone();
         let right = point.clone() + step.clone();
         let (Some(plus), Some(minus), Some(expected)) = (
-            evaluate_at(candidate, &right),
-            evaluate_at(candidate, &left),
-            evaluate_at(integrand, &point),
+            evaluate_at(&candidate, &right),
+            evaluate_at(&candidate, &left),
+            evaluate_at(&integrand, &point),
         ) else {
             continue;
         };

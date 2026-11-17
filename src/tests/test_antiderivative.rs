@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use crate::{
     create_expr, math::calculus::{antiderivative::Antiderivative, derivative::Derivative},
+    math::numeric::Real,
     math::structs::expr::Expr,
 };
 
@@ -274,7 +275,7 @@ fn antiderivative_latex() {
 #[test]
 fn antiderivative_with_custom_variable() {
     super::setup();
-    let expr = Expr::new("2t + 1".to_string(), Some('t')).unwrap();
+    let expr = Expr::<Real>::new("2t + 1".to_string(), Some('t')).unwrap();
     let antiderivative = expr.get_antiderivative().unwrap();
     assert_eq!(antiderivative.to_string(), "t ^ 2 + t");
 }

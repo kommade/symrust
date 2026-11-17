@@ -13,9 +13,9 @@ use crate::{math::algebra::{
         surd::Surd,
     },
     math::calculus::expr::float_from,
-    math::numeric::Real,
+    math::numeric::SymbolicLeaf,
     math::parse::lexer::{Func, Op, Token},
-    math::structs::expr::node::Node,
+    math::structs::expr::{Expr, node::Node},
     math::structs::solution::Recorder,
 };
 
@@ -24,17 +24,23 @@ use super::super::helpers::{self, Shape};
 use super::terms::{general_term, linear_term, quadratic_term};
 
 /// A rational function `numerator / denominator`.
-pub(crate) struct RationalFunction {
+///
+/// The polynomials live over `Rat` regardless of the tree's coefficient; only
+/// the written denominator is kept as a node of the caller's leaf type.
+pub(crate) struct RationalFunction<T> {
     pub(crate) numer: Poly,
     pub(crate) denom: Poly,
     /// The denominator as written, if it was a division. Keeping the original
     /// shape lets repeated factors such as `(x^2 + 1)^3` be recognised without
     /// factoring the expanded polynomial.
-    pub(crate) denom_node: Option<Node>,
+    pub(crate) denom_node: Option<Node<T>>,
 }
 
-impl RationalFunction {
-    pub(crate) fn from_node(node: &Node) -> Option<Self> {
+impl<T> RationalFunction<T>
+where
+    T: SymbolicLeaf,
+{
+    pub(crate) fn from_node(node: &Node<T>) -> Option<Self> {
         let (numer, denom) = fraction_of(node, 0)?;
         if denom.is_zero() {
             return None;
@@ -57,19 +63,25 @@ impl RationalFunction {
             denom_node,
         })
     }
-    pub(crate) fn integrate<R: Recorder + ?Sized>(
+    pub(crate) fn integrate<R>(
         &self,
-        variable: &Node,
-        integrator: &mut super::super::Integrator<'_, R>,
-    ) -> Option<Node> {
+        variable: &Node<T>,
+        integrator: &mut super::super::Integrator<'_, R, T>,
+    ) -> Option<Node<T>>
+    where
+        R: Recorder<Expr<T>> + ?Sized,
+    {
         self.integrate_rational(variable, integrator)
     }
 
-    fn integrate_rational<R: Recorder + ?Sized>(
+    fn integrate_rational<R>(
         &self,
-        variable: &Node,
-        integrator: &mut super::super::Integrator<'_, R>,
-    ) -> Option<Node> {
+        variable: &Node<T>,
+        integrator: &mut super::super::Integrator<'_, R, T>,
+    ) -> Option<Node<T>>
+    where
+        R: Recorder<Expr<T>> + ?Sized,
+    {
         let (quotient, remainder) = self.numer.div_rem(&self.denom)?;
         let mut terms = Vec::new();
         if !quotient.is_zero() {
@@ -93,12 +105,15 @@ impl RationalFunction {
         }
         Some(helpers::sum(terms))
     }
-    fn integrate_proper<R: Recorder + ?Sized>(
+    fn integrate_proper<R>(
         &self,
         numerator: &Poly,
-        variable: &Node,
-        integrator: &mut super::super::Integrator<'_, R>,
-    ) -> Option<Node> {
+        variable: &Node<T>,
+        integrator: &mut super::super::Integrator<'_, R, T>,
+    ) -> Option<Node<T>>
+    where
+        R: Recorder<Expr<T>> + ?Sized,
+    {
         let factorization = factorise(&self.denom).or_else(|| {
             self.denom_node
                 .as_ref()
@@ -234,7 +249,10 @@ struct Descriptor {
 
 /// Factor the denominator using its written shape, so that repeated factors
 /// like `(x^2 + 1)^3` do not need to be factored out of the expansion.
-fn factorise_from_shape(node: &Node, denom: &Poly) -> Option<Factorization> {
+fn factorise_from_shape<T>(node: &Node<T>, denom: &Poly) -> Option<Factorization>
+where
+    T: SymbolicLeaf,
+{
     let mut factors = Vec::new();
     let mut leading = Rat::ONE;
     collect_factors(node, 1, &mut factors, &mut leading, 0)?;
@@ -252,13 +270,16 @@ fn factorise_from_shape(node: &Node, denom: &Poly) -> Option<Factorization> {
     Some(Factorization { leading, factors })
 }
 
-fn collect_factors(
-    node: &Node,
+fn collect_factors<T>(
+    node: &Node<T>,
     multiplier: i64,
     factors: &mut Vec<(Factor, usize)>,
     leading: &mut Rat,
     depth: usize,
-) -> Option<()> {
+) -> Option<()>
+where
+    T: SymbolicLeaf,
+{
     if depth > 16 {
         return None;
     }
@@ -321,7 +342,10 @@ fn collect_factors(
 }
 
 /// Split an expression into a numerator and denominator polynomial.
-fn fraction_of(node: &Node, depth: usize) -> Option<(Poly, Poly)> {
+fn fraction_of<T>(node: &Node<T>, depth: usize) -> Option<(Poly, Poly)>
+where
+    T: SymbolicLeaf,
+{
     if depth > 64 {
         return None;
     }
@@ -381,11 +405,17 @@ fn fraction_of(node: &Node, depth: usize) -> Option<(Poly, Poly)> {
 }
 
 impl Poly {
-    pub(crate) fn from_node(node: &Node) -> Option<Self> {
+    pub(crate) fn from_node<T>(node: &Node<T>) -> Option<Self>
+    where
+        T: SymbolicLeaf,
+    {
         Self::from_node_inner(node, 0)
     }
 
-    fn from_node_inner(node: &Node, depth: usize) -> Option<Self> {
+    fn from_node_inner<T>(node: &Node<T>, depth: usize) -> Option<Poly>
+    where
+        T: SymbolicLeaf,
+    {
         if depth > 64 {
             return None;
         }
@@ -393,7 +423,7 @@ impl Poly {
             Shape::Operand(Token::Indp(_)) => Some(Self::variable()),
             Shape::Operand(_) => {
                 let value = helpers::constant_value(node)?;
-                Some(Self::constant(Rat::from_real(&value)?))
+                Some(Self::constant(Rat::from_leaf(&value)?))
             }
             Shape::Operator(token, left, right) => match token {
                 Token::Operator(Op::Add) => {

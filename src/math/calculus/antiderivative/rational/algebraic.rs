@@ -13,7 +13,7 @@ use crate::{math::algebra::{
         surd::Surd,
     },
     math::calculus::expr::float_from,
-    math::numeric::Real,
+    math::numeric::SymbolicLeaf,
     math::parse::lexer::{Func, Op, Token},
     math::structs::expr::node::Node,
     math::structs::solution::Recorder,
@@ -29,11 +29,14 @@ use crate::math::numeric::Complex;
 
 
 #[cfg(feature = "algebraic")]
-fn exact_cubic_binomial_term(
+fn exact_cubic_binomial_term<T>(
     coefficients: &[Rat],
     factor: &Poly,
-    variable: &Node,
-) -> Option<Node> {
+    variable: &Node<T>,
+) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     let degree = factor.degree()?;
     if degree != 3 {
         return None;
@@ -96,7 +99,7 @@ fn exact_cubic_binomial_term(
         helpers::mul(helpers::sub(b_value.clone(), a_value.clone()), r.clone()),
     );
 
-    let mut terms: Vec<Node> = Vec::new();
+    let mut terms: Vec<Node<T>> = Vec::new();
 
     // A / (x − r)  →  A ln|x − r|.
     let linear = helpers::sub(x.clone(), r.clone());
@@ -149,7 +152,7 @@ fn exact_cubic_binomial_term(
         factor.to_node(&x_check),
     );
     let finite = [0.3721_f64, 2.6329, -2.1177, 5.0].iter().any(|sample| {
-        helpers::evaluate_at(&result, &crate::math::numeric::Real::from_f64(*sample))
+        helpers::evaluate_at(&result, &float_from::<T>(*sample))
             .is_some_and(|value| value.is_normal())
     });
     if finite && helpers::verify(&integrand, &result) {
@@ -161,7 +164,10 @@ fn exact_cubic_binomial_term(
 
 /// Build a node for an exact rational number.
 #[cfg(feature = "algebraic")]
-fn rational_node(value: Rat) -> Node {
+fn rational_node<T>(value: Rat) -> Node<T>
+where
+    T: SymbolicLeaf,
+{
     let (num, den) = value.parts();
     let numerator = Rat::integer_node(num);
     if den == 1 {
@@ -173,12 +179,22 @@ fn rational_node(value: Rat) -> Node {
 
 /// Multiply a node by an exact rational.
 #[cfg(feature = "algebraic")]
-fn multiply_rational(node: Node, value: Rat) -> Node {
+fn multiply_rational<T>(node: Node<T>, value: Rat) -> Node<T>
+where
+    T: SymbolicLeaf,
+{
     Node::multiply_by_rational(node, value)
 }
 
 #[cfg(feature = "algebraic")]
-pub(crate) fn algebraic_factor_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
+pub(crate) fn algebraic_factor_term<T>(
+    coefficients: &[Rat],
+    factor: &Poly,
+    variable: &Node<T>,
+) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     use crate::math::calculus::expr::float_from;
 
     let degree = factor.degree()?;
@@ -254,14 +270,14 @@ pub(crate) fn algebraic_factor_term(coefficients: &[Rat], factor: &Poly, variabl
     let b_value = n2 - a_value;
     let c_value = (a_value * q - n0) / r;
 
-    let mut terms: Vec<Node> = Vec::new();
+    let mut terms: Vec<Node<T>> = Vec::new();
 
     // A/(x - r) integrates to A ln|x - r|.
     if a_value.abs() > 1e-12 {
-        let base = helpers::sub(variable.clone(), helpers::float(float_from(r)));
+        let base = helpers::sub(variable.clone(), helpers::float(float_from::<T>(r)));
         terms.push(helpers::multiply_by(
             helpers::function(Func::Ln, base),
-            float_from(a_value),
+            float_from::<T>(a_value),
         ));
     }
 
@@ -271,14 +287,14 @@ pub(crate) fn algebraic_factor_term(coefficients: &[Rat], factor: &Poly, variabl
         let quadratic_node = helpers::add(
             helpers::add(
                 helpers::pow(variable.clone(), helpers::number(2)),
-                helpers::multiply_by(variable.clone(), float_from(p)),
+                helpers::multiply_by(variable.clone(), float_from::<T>(p)),
             ),
-            helpers::float(float_from(q)),
+            helpers::float(float_from::<T>(q)),
         );
         if b_value.abs() > 1e-12 {
             terms.push(helpers::multiply_by(
                 helpers::function(Func::Ln, quadratic_node),
-                float_from(b_value / 2.0),
+                float_from::<T>(b_value / 2.0),
             ));
         }
         let remainder = c_value - b_value * p / 2.0;
@@ -288,13 +304,13 @@ pub(crate) fn algebraic_factor_term(coefficients: &[Rat], factor: &Poly, variabl
                 return None;
             }
             let sqrt_d = discriminant.sqrt();
-            let centre = helpers::add(variable.clone(), helpers::float(float_from(p / 2.0)));
+            let centre = helpers::add(variable.clone(), helpers::float(float_from::<T>(p / 2.0)));
             let scaled = helpers::div(
-                helpers::mul(centre, helpers::float(float_from(2.0))),
-                helpers::float(float_from(sqrt_d)),
+                helpers::mul(centre, helpers::float(float_from::<T>(2.0))),
+                helpers::float(float_from::<T>(sqrt_d)),
             );
             let atan = helpers::function(Func::Atan, scaled);
-            terms.push(helpers::multiply_by(atan, float_from(remainder * 2.0 / sqrt_d)));
+            terms.push(helpers::multiply_by(atan, float_from::<T>(remainder * 2.0 / sqrt_d)));
         }
     }
 
@@ -309,12 +325,15 @@ pub(crate) fn algebraic_factor_term(coefficients: &[Rat], factor: &Poly, variabl
 /// deflated denominator has degree at most two the remainder integrates exactly
 /// (log/atan); a larger complex remainder returns `None`.
 #[cfg(feature = "algebraic")]
-fn higher_degree_term(
+fn higher_degree_term<T>(
     coefficients: &[Rat],
     factor: &Poly,
     roots: &[crate::math::algebra::algebraic::RealAlgebraic],
-    variable: &Node,
-) -> Option<Node> {
+    variable: &Node<T>,
+) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     let degree = factor.degree()?;
     if degree.saturating_sub(roots.len()) > 2 {
         // The real roots leave a cubic-or-higher complex remainder. Factor it
@@ -331,7 +350,9 @@ fn higher_degree_term(
         move |x: f64| poly_at(&deriv, x)
     };
 
-    let mut terms: Vec<Node> = Vec::new();
+    // Numerically split the roots of the cubic (Durand–Kerner over f64), then
+    // emit the partial-fraction terms with the caller's leaf coefficients.
+    let mut terms: Vec<Node<T>> = Vec::new();
     let mut poles: Vec<(f64, f64)> = Vec::new();
     for root in roots {
         let r = root.to_f64();
@@ -342,10 +363,10 @@ fn higher_degree_term(
         let a = numer_at(r) / slope;
         poles.push((r, a));
         if a.abs() > 1e-9 {
-            let base = helpers::sub(variable.clone(), helpers::float(float_from(r)));
+            let base = helpers::sub(variable.clone(), helpers::float(float_from::<T>(r)));
             terms.push(helpers::multiply_by(
                 helpers::function(Func::Ln, base),
-                float_from(a),
+                float_from::<T>(a),
             ));
         }
     }
@@ -405,7 +426,14 @@ fn add_scaled(target: &mut Vec<f64>, source: &[f64], scale: f64) {
 }
 
 #[cfg(feature = "algebraic")]
-fn integrate_low_degree(numerator: &[f64], denominator: &[f64], variable: &Node) -> Option<Node> {
+fn integrate_low_degree<T>(
+    numerator: &[f64],
+    denominator: &[f64],
+    variable: &Node<T>,
+) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     let n = |i: usize| numerator.get(i).copied().unwrap_or(0.0);
     let d = |i: usize| denominator.get(i).copied().unwrap_or(0.0);
 
@@ -422,7 +450,7 @@ fn integrate_low_degree(numerator: &[f64], denominator: &[f64], variable: &Node)
             let exponent = power as i64 + 1;
             terms.push(helpers::multiply_by(
                 helpers::pow(variable.clone(), helpers::number(power as i64 + 1)),
-                float_from(coefficient / d(0) / exponent as f64),
+                float_from::<T>(coefficient / d(0) / exponent as f64),
             ));
         }
         return Some(helpers::sum(terms));
@@ -433,17 +461,17 @@ fn integrate_low_degree(numerator: &[f64], denominator: &[f64], variable: &Node)
         let (d0, d1) = (d(0), d(1));
         let mut terms = Vec::new();
         if b1.abs() > 1e-12 {
-            terms.push(helpers::multiply_by(variable.clone(), float_from(b1 / d1)));
+            terms.push(helpers::multiply_by(variable.clone(), float_from::<T>(b1 / d1)));
             terms.push(helpers::multiply_by(
                 helpers::function(Func::Ln, linear_node(d0, d1, variable)),
-                float_from(-b1 * d0 / (d1 * d1)),
+                float_from::<T>(-b1 * d0 / (d1 * d1)),
             ));
         }
         let constant = b0 - b1 * d0 / d1;
         if constant.abs() > 1e-12 {
             terms.push(helpers::multiply_by(
                 helpers::function(Func::Ln, linear_node(d0, d1, variable)),
-                float_from(constant / d1),
+                float_from::<T>(constant / d1),
             ));
         }
         return Some(helpers::sum(terms));
@@ -455,7 +483,7 @@ fn integrate_low_degree(numerator: &[f64], denominator: &[f64], variable: &Node)
     if log_coefficient.abs() > 1e-12 {
         terms.push(helpers::multiply_by(
             helpers::function(Func::Ln, quadratic_node(a, b, e, variable)),
-            float_from(log_coefficient),
+            float_from::<T>(log_coefficient),
         ));
     }
     let remainder = n(0) - n(1) * b / (2.0 * a);
@@ -465,38 +493,44 @@ fn integrate_low_degree(numerator: &[f64], denominator: &[f64], variable: &Node)
             return None;
         }
         let sqrt_d = discriminant.abs().sqrt();
-        let centre = helpers::add(variable.clone(), helpers::float(float_from(b / (2.0 * a))));
+        let centre = helpers::add(variable.clone(), helpers::float(float_from::<T>(b / (2.0 * a))));
         let scaled = helpers::div(
-            helpers::mul(centre, helpers::float(float_from(2.0 * a))),
-            helpers::float(float_from(sqrt_d)),
+            helpers::mul(centre, helpers::float(float_from::<T>(2.0 * a))),
+            helpers::float(float_from::<T>(sqrt_d)),
         );
         terms.push(helpers::multiply_by(
             helpers::function(Func::Atan, scaled),
-            float_from(remainder * 2.0 / sqrt_d),
+            float_from::<T>(remainder * 2.0 / sqrt_d),
         ));
     }
     Some(helpers::sum(terms))
 }
 
 #[cfg(feature = "algebraic")]
-fn linear_node(constant: f64, slope: f64, variable: &Node) -> Node {
+fn linear_node<T>(constant: f64, slope: f64, variable: &Node<T>) -> Node<T>
+where
+    T: SymbolicLeaf,
+{
     helpers::add(
-        helpers::multiply_by(variable.clone(), float_from(slope)),
-        helpers::float(float_from(constant)),
+        helpers::multiply_by(variable.clone(), float_from::<T>(slope)),
+        helpers::float(float_from::<T>(constant)),
     )
 }
 
 #[cfg(feature = "algebraic")]
-fn quadratic_node(a: f64, b: f64, e: f64, variable: &Node) -> Node {
+fn quadratic_node<T>(a: f64, b: f64, e: f64, variable: &Node<T>) -> Node<T>
+where
+    T: SymbolicLeaf,
+{
     helpers::add(
         helpers::add(
             helpers::multiply_by(
                 helpers::pow(variable.clone(), helpers::number(2)),
-                float_from(a),
+                float_from::<T>(a),
             ),
-            helpers::multiply_by(variable.clone(), float_from(b)),
+            helpers::multiply_by(variable.clone(), float_from::<T>(b)),
         ),
-        helpers::float(float_from(e)),
+        helpers::float(float_from::<T>(e)),
     )
 }
 
@@ -504,7 +538,10 @@ fn quadratic_node(a: f64, b: f64, e: f64, variable: &Node) -> Node {
 /// `e^{iπm/n}`. The argument is assembled from `π` so the expression carries no
 /// decimal approximation.
 #[cfg(feature = "algebraic")]
-fn cos_root_of_unity(m: i64, n: i64) -> Node {
+fn cos_root_of_unity<T>(m: i64, n: i64) -> Node<T>
+where
+    T: SymbolicLeaf,
+{
     // Use the raw `call` (not `function`) so the exact `π·m/n` argument is not
     // simplified down to a decimal.
     helpers::call(Func::Cos, root_of_unity_angle(m, n))
@@ -512,14 +549,20 @@ fn cos_root_of_unity(m: i64, n: i64) -> Node {
 
 /// Build the exact node `sin(π·m/n)`, the imaginary part of `e^{iπm/n}`.
 #[cfg(feature = "algebraic")]
-fn sin_root_of_unity(m: i64, n: i64) -> Node {
+fn sin_root_of_unity<T>(m: i64, n: i64) -> Node<T>
+where
+    T: SymbolicLeaf,
+{
     helpers::call(Func::Sin, root_of_unity_angle(m, n))
 }
 
 /// The exact angle `π·m/n` as a symbolic node `π · m / n`, so it renders as
 /// `π·m/n` rather than a decimal.
 #[cfg(feature = "algebraic")]
-fn root_of_unity_angle(m: i64, n: i64) -> Node {
+fn root_of_unity_angle<T>(m: i64, n: i64) -> Node<T>
+where
+    T: SymbolicLeaf,
+{
     use crate::math::parse::lexer::Const;
     if m == 0 {
         return helpers::zero();
@@ -553,7 +596,14 @@ fn poly_at_complex(coefficients: &[f64], z: &Complex) -> Complex {
 /// `θ = π·m/n`. We emit `cosθ`/`sinθ` symbolically (built from `π`), so the
 /// result is exact rather than a long decimal.
 #[cfg(all(feature = "algebraic", feature = "complex"))]
-fn exact_root_of_unity_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
+fn exact_root_of_unity_term<T>(
+    coefficients: &[Rat],
+    factor: &Poly,
+    variable: &Node<T>,
+) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     let degree = factor.degree()?;
     if degree < 2 {
         return None;
@@ -573,9 +623,9 @@ fn exact_root_of_unity_term(coefficients: &[Rat], factor: &Poly, variable: &Node
     let denom: Vec<f64> = (0..=degree).map(|i| factor.coeff(i).to_f64()).collect();
     let deriv = derivative_coeffs(&denom);
     let numer: Vec<f64> = coefficients.iter().map(|value| value.to_f64()).collect();
-    let variable: Node = Node::clone(variable);
+    let variable: Node<T> = Node::clone(variable);
 
-    let mut terms: Vec<Node> = Vec::new();
+    let mut terms: Vec<Node<T>> = Vec::new();
     let mut consumed = vec![false; primitive.len()];
     for i in 0..primitive.len() {
         if consumed[i] {
@@ -597,10 +647,10 @@ fn exact_root_of_unity_term(coefficients: &[Rat], factor: &Poly, variable: &Node
                 return None;
             }
             if a_real.abs() > 1e-12 {
-                let base = helpers::sub(variable.clone(), helpers::float(float_from(r)));
+                let base = helpers::sub(variable.clone(), helpers::float(float_from::<T>(r)));
                 terms.push(helpers::multiply_by(
                     helpers::function(Func::Ln, base),
-                    float_from(a_real),
+                    float_from::<T>(a_real),
                 ));
             }
             continue;
@@ -641,14 +691,14 @@ fn exact_root_of_unity_term(coefficients: &[Rat], factor: &Poly, variable: &Node
                     helpers::pow(variable.clone(), helpers::number(2)),
                     helpers::multiply_by(
                         helpers::mul(variable.clone(), cos_node.clone()),
-                        float_from(-2.0),
+                        float_from::<T>(-2.0),
                     ),
                 ),
                 helpers::one(),
             );
             terms.push(helpers::multiply_by(
                 helpers::function(Func::Ln, quadratic),
-                float_from(a_real),
+                float_from::<T>(a_real),
             ));
         }
 
@@ -658,7 +708,7 @@ fn exact_root_of_unity_term(coefficients: &[Rat], factor: &Poly, variable: &Node
             let scaled = helpers::div(centre, sin_node);
             terms.push(helpers::multiply_by(
                 helpers::function(Func::Atan, scaled),
-                float_from(-2.0 * a_imag),
+                float_from::<T>(-2.0 * a_imag),
             ));
         }
     }
@@ -736,7 +786,14 @@ fn gcd(a: i64, b: i64) -> i64 {
 /// the residue `N_p(Z)/p'(Z)` is carried inside the sum). It needs only exact
 /// rational arithmetic, so it works whenever `algebraic` alone is enabled.
 #[cfg(feature = "algebraic")]
-fn root_sum_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
+fn root_sum_term<T>(
+    coefficients: &[Rat],
+    factor: &Poly,
+    variable: &Node<T>,
+) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     let degree = factor.degree()?;
     if degree < 1 {
         return None;
@@ -764,7 +821,14 @@ fn root_sum_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option
 /// `1/(x^8+1)` as a fallback; the exact root-sum form (see [`root_sum_term`]) is
 /// preferred and normally succeeds first.
 #[cfg(feature = "algebraic")]
-fn numeric_factor_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
+fn numeric_factor_term<T>(
+    coefficients: &[Rat],
+    factor: &Poly,
+    variable: &Node<T>,
+) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     // Exact closed form: write the integral over the (unknown) roots `Z` of the
     // irreducible factor as a formal root sum
     //   Σ_{Z: p(Z)=0} N_p(Z) ln|x − Z| / p'(Z),
@@ -848,7 +912,7 @@ fn numeric_factor_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> 
     // degree < deg(Q_i). Solve the small linear system by matching coefficients.
     let coefficients_solution = solve_numeric_partial_fractions(&numer, &factors)?;
 
-    let mut terms: Vec<Node> = Vec::new();
+    let mut terms: Vec<Node<T>> = Vec::new();
     let mut index = 0;
     for factor_poly in &factors {
         let fdeg = factor_poly.len() - 1;
@@ -1012,7 +1076,13 @@ fn poly_exact_div(factors: &[Vec<f64>], skip: usize) -> Option<Vec<f64>> {
 /// carried in the `u`-variable, multiplied by `u^p`, and integrated termwise with
 /// the power rule, then substituted back. Returns `None` unless the integrand has
 /// exactly one non-polynomial factor `(linear)^p` and the rest is a polynomial.
-pub(crate) fn linear_power_substitution(node: &Node, variable: &Node) -> Option<Node> {
+pub(crate) fn linear_power_substitution<T>(
+    node: &Node<T>,
+    variable: &Node<T>,
+) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     let product = helpers::flatten_product(node);
     if !product.denom.iter().all(helpers::is_constant) {
         return None;
@@ -1037,10 +1107,10 @@ pub(crate) fn linear_power_substitution(node: &Node, variable: &Node) -> Option<
     if slope_real.is_zero() {
         return None;
     }
-    let slope = Rat::from_real(&slope_real)?;
-    let intercept = Rat::from_real(&intercept_real)?;
+    let slope = Rat::from_leaf(&slope_real)?;
+    let intercept = Rat::from_leaf(&intercept_real)?;
     // The remaining factors (over any numeric denominators) form `P(x)`.
-    let mut rest_factors: Vec<Node> = Vec::new();
+    let mut rest_factors: Vec<Node<T>> = Vec::new();
     for (index, factor) in product.numer.iter().enumerate() {
         if index != radical_index {
             rest_factors.push(factor.clone());
@@ -1086,12 +1156,12 @@ pub(crate) fn linear_power_substitution(node: &Node, variable: &Node) -> Option<
 
     // ∫ (Σ c_k u^k) · u^p du, then substitute back u = a x + b.
     let u_node = linear_base.clone();
-    let mut terms: Vec<Node> = Vec::new();
+    let mut terms: Vec<Node<T>> = Vec::new();
     for (k, &coef_k) in u_powers.iter().enumerate() {
         if coef_k.is_zero() {
             continue;
         }
-        let total = k as f64 + exponent_value.to_f64();
+        let total = k as f64 + exponent_value.to_float().as_f64();
         let new_exponent = total + 1.0;
         if new_exponent.abs() < 1e-12 {
             // ∫ u^{-1} du = ln|u|
@@ -1104,7 +1174,7 @@ pub(crate) fn linear_power_substitution(node: &Node, variable: &Node) -> Option<
         }
         let coefficient = coef_k.div(slope)?.div(Rat::from_f64(new_exponent)?)?;
         terms.push(helpers::multiply_by_rational(
-            helpers::pow(u_node.clone(), helpers::float(float_from(new_exponent))),
+            helpers::pow(u_node.clone(), helpers::float(float_from::<T>(new_exponent))),
             coefficient,
         ));
     }

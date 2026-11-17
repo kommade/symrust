@@ -370,7 +370,12 @@ impl Poly {
     /// Zero coefficients are skipped, so `x² + 1` does not gain a `0 x` term,
     /// and a unit coefficient is left implicit (`x`, not `1 x`).
     #[must_use]
-    pub fn to_node(&self, variable: &Node) -> Node {
+    /// Render the polynomial as an expression in `variable`, with the
+    /// caller's leaf type carrying the coefficients.
+    pub fn to_node<T>(&self, variable: &Node<T>) -> Node<T>
+    where
+        T: crate::math::numeric::SymbolicLeaf,
+    {
         let mut terms = Vec::new();
         for (degree, coefficient) in self.coeffs.iter().enumerate() {
             if coefficient.is_zero() {
@@ -397,8 +402,7 @@ impl Poly {
     /// dropped, so the result reads like a polynomial a person would write.
     /// This is the same rendering [`std::fmt::Display`] uses.
     #[must_use]
-    pub fn describe(&self) -> String {
-        let mut parts: Vec<String> = Vec::new();
+    pub fn describe(&self) -> String {        let mut parts: Vec<String> = Vec::new();
         for degree in (0..=self.degree().unwrap_or(0)).rev() {
             let coefficient = self.coeff(degree);
             if coefficient.is_zero() {

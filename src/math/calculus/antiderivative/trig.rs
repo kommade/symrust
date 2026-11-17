@@ -3,20 +3,20 @@
 use super::Integrator;
 use super::helpers::{self, Shape};
 use crate::math::algebra::{polynomial::Poly, rational::Rat};
-use crate::math::numeric::Real;
+use crate::math::numeric::SymbolicLeaf;
 use crate::{math::structs::solution::Recorder,
     math::parse::lexer::{Func, Op, Token},
-    math::structs::expr::node::{Node, NodeFunctions},
+    math::structs::expr::{Expr, node::{Node, NodeFunctions}},
 };
 
 #[derive(Clone, Debug)]
-struct TrigPower {
-    func: Func,
-    arg: Node,
+struct TrigPower<T> {
+    func: Func<T>,
+    arg: Node<T>,
     exponent: i64,
 }
 
-fn is_trig(func: &Func) -> bool {
+fn is_trig<T>(func: &Func<T>) -> bool {
     matches!(
         func,
         Func::Sin | Func::Cos | Func::Tan | Func::Sec | Func::Csc | Func::Cot
@@ -24,7 +24,7 @@ fn is_trig(func: &Func) -> bool {
 }
 
 /// The reciprocal of a trigonometric function.
-fn reciprocal(func: &Func) -> Option<Func> {
+fn reciprocal<T>(func: &Func<T>) -> Option<Func<T>> {
     Some(match func {
         Func::Sin => Func::Csc,
         Func::Cos => Func::Sec,
@@ -36,7 +36,10 @@ fn reciprocal(func: &Func) -> Option<Func> {
     })
 }
 
-fn as_trig_power(node: &Node) -> Option<TrigPower> {
+fn as_trig_power<T>(node: &Node<T>) -> Option<TrigPower<T>>
+where
+    T: SymbolicLeaf,
+{
     match helpers::shape(node) {
         Shape::Operator(Token::Function(func), _, arg) => {
             if is_trig(&func) {
@@ -68,12 +71,15 @@ fn as_trig_power(node: &Node) -> Option<TrigPower> {
 
 /// Collect the trigonometric factors of a product, distributing outer integer
 /// exponents over inner products (`(sin(x) cos(x))^2` becomes `sin(x)^2 cos(x)^2`).
-fn collect_trig_powers(
-    node: &Node,
+fn collect_trig_powers<T>(
+    node: &Node<T>,
     multiplier: i64,
-    out: &mut Vec<TrigPower>,
+    out: &mut Vec<TrigPower<T>>,
     depth: usize,
-) -> Option<()> {
+) -> Option<()>
+where
+    T: SymbolicLeaf,
+{
     if depth > 16 {
         return None;
     }
@@ -100,11 +106,17 @@ fn collect_trig_powers(
     }
 }
 
-fn mul_rat(node: Node, value: Rat) -> Node {
-    helpers::scale(node, value.to_real())
+fn mul_rat<T>(node: Node<T>, value: Rat) -> Node<T>
+where
+    T: SymbolicLeaf,
+{
+    helpers::scale(node, value.to_leaf())
 }
 
-fn poly_in_node(base: &Node, poly: &Poly) -> Node {
+fn poly_in_node<T>(base: &Node<T>, poly: &Poly) -> Node<T>
+where
+    T: SymbolicLeaf,
+{
     let mut terms = Vec::new();
     for (degree, coefficient) in poly.coefficients().iter().enumerate() {
         if coefficient.is_zero() {
@@ -138,10 +150,14 @@ fn monomial(exponent: i64) -> Option<Poly> {
     Some(Poly::new(coeffs))
 }
 
-pub(super) fn try_integrate<R: Recorder + ?Sized>(
-    integrator: &mut Integrator<'_, R>,
-    node: &Node,
-) -> Option<Node> {
+pub(super) fn try_integrate<T, R>(
+    integrator: &mut Integrator<'_, R, T>,
+    node: &Node<T>,
+) -> Option<Node<T>>
+where
+    R: Recorder<Expr<T>> + ?Sized,
+    T: SymbolicLeaf,
+{
     // `integrate_trig` returns `None` when it has nothing to contribute; it used
     // to report success by handing back the integrand unchanged, which made every
     // rational integral record a `trigonometric reduction: u => u` step.
@@ -154,17 +170,21 @@ pub(super) fn try_integrate<R: Recorder + ?Sized>(
     Some(result)
 }
 
-fn integrate_trig<R: Recorder + ?Sized>(
-    integrator: &mut Integrator<'_, R>,
-    node: &Node,
-) -> Option<Node> {
+fn integrate_trig<T, R>(
+    integrator: &mut Integrator<'_, R, T>,
+    node: &Node<T>,
+) -> Option<Node<T>>
+where
+    R: Recorder<Expr<T>> + ?Sized,
+    T: SymbolicLeaf,
+{
     let product = helpers::flatten_product(node);
     if product.numer.is_empty() && product.denom.is_empty() {
         return None;
     }
     let mut powers = Vec::new();
     let mut others = Vec::new();
-    let mut constant = Real::one();
+    let mut constant = T::one();
     for factor in &product.numer {
         if let Some(value) = helpers::constant_value(factor) {
             constant = constant * value;
@@ -201,11 +221,15 @@ fn integrate_trig<R: Recorder + ?Sized>(
     let result = integrate_monomials(integrator, &powers, arg.clone())?;
     Some(helpers::multiply_by(result, constant))
 }
-fn integrate_monomials<R: Recorder + ?Sized>(
-    integrator: &mut Integrator<'_, R>,
-    powers: &[TrigPower],
-    arg: Node,
-) -> Option<Node> {
+fn integrate_monomials<T, R>(
+    integrator: &mut Integrator<'_, R, T>,
+    powers: &[TrigPower<T>],
+    arg: Node<T>,
+) -> Option<Node<T>>
+where
+    R: Recorder<Expr<T>> + ?Sized,
+    T: SymbolicLeaf,
+{
     let (slope, _) = helpers::linear_coefficients(&arg)?;
     let variable = integrator.variable_node();
 
@@ -359,7 +383,7 @@ fn integrate_monomials<R: Recorder + ?Sized>(
         let doubled = helpers::mul(helpers::number(2), arg.clone());
         let expression = helpers::scale(
             helpers::function(Func::Csc, doubled),
-            helpers::float_from(2.0),
+            helpers::float_from::<T>(2.0),
         );
         let result = integrator.integrate(&expression).ok();
         integrator.step(
@@ -452,7 +476,16 @@ fn integrate_monomials<R: Recorder + ?Sized>(
     None
 }
 
-fn sin_cos(m: i64, n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<Node> {
+fn sin_cos<T>(
+    m: i64,
+    n: i64,
+    arg: &Node<T>,
+    variable: &Node<T>,
+    slope: &T,
+) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     if m < 0 || n < 0 {
         return None;
     }
@@ -503,7 +536,10 @@ fn sin_cos(m: i64, n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<
     None
 }
 
-fn tan_power(n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<Node> {
+fn tan_power<T>(n: i64, arg: &Node<T>, variable: &Node<T>, slope: &T) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     let tangent = helpers::function(Func::Tan, arg.clone());
     match n {
         0 => Some(variable.clone()),
@@ -524,7 +560,10 @@ fn tan_power(n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<Node> 
     }
 }
 
-fn cot_power(n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<Node> {
+fn cot_power<T>(n: i64, arg: &Node<T>, variable: &Node<T>, slope: &T) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     let cotangent = helpers::function(Func::Cot, arg.clone());
     match n {
         0 => Some(variable.clone()),
@@ -545,7 +584,10 @@ fn cot_power(n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<Node> 
     }
 }
 
-fn sec_power(n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<Node> {
+fn sec_power<T>(n: i64, arg: &Node<T>, variable: &Node<T>, slope: &T) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     let secant = helpers::function(Func::Sec, arg.clone());
     let tangent = helpers::function(Func::Tan, arg.clone());
     match n {
@@ -573,7 +615,10 @@ fn sec_power(n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<Node> 
     }
 }
 
-fn csc_power(n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<Node> {
+fn csc_power<T>(n: i64, arg: &Node<T>, variable: &Node<T>, slope: &T) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     let cosecant = helpers::function(Func::Csc, arg.clone());
     let cotangent = helpers::function(Func::Cot, arg.clone());
     match n {
@@ -601,7 +646,16 @@ fn csc_power(n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<Node> 
     }
 }
 
-fn tan_sec(m: i64, n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<Node> {
+fn tan_sec<T>(
+    m: i64,
+    n: i64,
+    arg: &Node<T>,
+    variable: &Node<T>,
+    slope: &T,
+) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     let tangent = helpers::function(Func::Tan, arg.clone());
     let secant = helpers::function(Func::Sec, arg.clone());
     if n % 2 == 0 {
@@ -636,14 +690,23 @@ fn tan_sec(m: i64, n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<
         }
         let exponent = n + 2 * degree as i64;
         terms.push(mul_rat(
-            sec_power(exponent, arg, variable, &Real::one())?,
+            sec_power(exponent, arg, variable, &T::one())?,
             *coefficient,
         ));
     }
     Some(helpers::divide_by(helpers::sum(terms), slope.clone()))
 }
 
-fn cot_csc(m: i64, n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<Node> {
+fn cot_csc<T>(
+    m: i64,
+    n: i64,
+    arg: &Node<T>,
+    variable: &Node<T>,
+    slope: &T,
+) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     let cotangent = helpers::function(Func::Cot, arg.clone());
     let cosecant = helpers::function(Func::Csc, arg.clone());
     if n % 2 == 0 {
@@ -676,7 +739,7 @@ fn cot_csc(m: i64, n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<
         }
         let exponent = n + 2 * degree as i64;
         terms.push(mul_rat(
-            csc_power(exponent, arg, variable, &Real::one())?,
+            csc_power(exponent, arg, variable, &T::one())?,
             *coefficient,
         ));
     }
@@ -685,11 +748,15 @@ fn cot_csc(m: i64, n: i64, arg: &Node, variable: &Node, slope: &Real) -> Option<
 
 /// Rewrite a product of trigonometric functions with different arguments
 /// using the product to sum identities.
-fn rewrite_product<R: Recorder + ?Sized>(
-    integrator: &mut Integrator<'_, R>,
-    powers: &[TrigPower],
-    others: &[Node],
-) -> Option<Node> {
+fn rewrite_product<T, R>(
+    integrator: &mut Integrator<'_, R, T>,
+    powers: &[TrigPower<T>],
+    others: &[Node<T>],
+) -> Option<Node<T>>
+where
+    R: Recorder<Expr<T>> + ?Sized,
+    T: SymbolicLeaf,
+{
     if powers.len() != 2 || powers.iter().any(|power| power.exponent != 1) {
         return None;
     }
@@ -714,7 +781,7 @@ fn rewrite_product<R: Recorder + ?Sized>(
         ),
         _ => return None,
     };
-    let mut integrand = helpers::scale(expression, helpers::float_from(0.5));
+    let mut integrand = helpers::scale(expression, helpers::float_from::<T>(0.5));
     for other in others {
         integrand = helpers::mul(integrand, other.clone());
     }

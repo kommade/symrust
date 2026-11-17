@@ -12,7 +12,7 @@ use crate::{math::algebra::{
         surd::Surd,
     },
     math::calculus::expr::float_from,
-    math::numeric::Real,
+    math::numeric::SymbolicLeaf,
     math::parse::lexer::{Func, Op, Token},
     math::structs::expr::node::Node,
     math::structs::solution::Recorder,
@@ -29,7 +29,15 @@ use crate::math::algebra::rational::square_root_of;
 use crate::math::algebra::surd::{surd_quadratic_node, surd_sqrt_node};
 
 /// Turn `coefficient / (x - root)^power` into a node.
-pub(super) fn linear_term(coefficient: Rat, root: Rat, power: usize, variable: &Node) -> Node {
+pub(super) fn linear_term<T>(
+    coefficient: Rat,
+    root: Rat,
+    power: usize,
+    variable: &Node<T>,
+) -> Node<T>
+where
+    T: SymbolicLeaf,
+{
     if coefficient.is_zero() {
         return helpers::zero();
     }
@@ -45,14 +53,17 @@ pub(super) fn linear_term(coefficient: Rat, root: Rat, power: usize, variable: &
 }
 
 /// Integrate `(slope * x + offset) / (x^2 + linear * x + constant)^power`.
-pub(super) fn quadratic_term(
+pub(super) fn quadratic_term<T>(
     slope: Rat,
     offset: Rat,
     linear: Rat,
     constant: Rat,
     power: usize,
-    variable: &Node,
-) -> Option<Node> {
+    variable: &Node<T>,
+) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     if slope.is_zero() && offset.is_zero() {
         return Some(helpers::zero());
     }
@@ -102,7 +113,14 @@ pub(super) fn quadratic_term(
 /// The order is deliberate: the cheaper exact/quadratic-extension method ("C")
 /// always runs first, and the general algebraic method ("B") is only tried as a
 /// fallback when C cannot resolve the factor.
-pub(super) fn general_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
+pub(super) fn general_term<T>(
+    coefficients: &[Rat],
+    factor: &Poly,
+    variable: &Node<T>,
+) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     // C first: a quartic that splits over a quadratic extension.
     if factor.degree() == Some(4) {
         if let Some(term) = quartic_term(coefficients, factor, variable) {
@@ -121,7 +139,14 @@ pub(super) fn general_term(coefficients: &[Rat], factor: &Poly, variable: &Node)
 /// integrates the resulting term. With the feature off it emits a warning
 /// explaining that enabling the feature would let this integral proceed,
 /// instead of failing silently.
-fn general_term_algebraic(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
+fn general_term_algebraic<T>(
+    coefficients: &[Rat],
+    factor: &Poly,
+    variable: &Node<T>,
+) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     #[cfg(feature = "algebraic")]
     {
         super::algebraic::algebraic_factor_term(
@@ -157,11 +182,14 @@ fn general_term_algebraic(coefficients: &[Rat], factor: &Poly, variable: &Node) 
 /// can fall back.
 /// Split a factor into `(linear_base, exponent)` when it is `(linear)^p`,
 /// `sqrt(linear)`, or `(sqrt(linear))^k`.
-pub(super) fn linear_power_parts(factor: &Node) -> Option<(Node, Real)> {
+pub(super) fn linear_power_parts<T>(factor: &Node<T>) -> Option<(Node<T>, T)>
+where
+    T: SymbolicLeaf,
+{
     match helpers::shape(factor) {
         Shape::Operator(Token::Function(Func::Sqrt), _, argument) => {
             if helpers::linear_coefficients(&argument).is_some() {
-                return Some((argument, float_from(0.5)));
+                return Some((argument, float_from::<T>(0.5)));
             }
             None
         }
@@ -172,7 +200,7 @@ pub(super) fn linear_power_parts(factor: &Node) -> Option<(Node, Real)> {
             {
                 if helpers::linear_coefficients(&argument).is_some() {
                     let value = helpers::constant_value(&exponent)?;
-                    return Some((argument, value * float_from(0.5)));
+                    return Some((argument, value * float_from::<T>(0.5)));
                 }
             }
             // `(linear)^p`
@@ -199,7 +227,14 @@ pub(super) fn binomial(n: u64, k: u64) -> Option<u128> {
     Some(result)
 }
 
-fn quartic_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<Node> {
+fn quartic_term<T>(
+    coefficients: &[Rat],
+    factor: &Poly,
+    variable: &Node<T>,
+) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     let (first, second) = split_quartic(factor)?;
     let first_node = surd_quadratic_node(first.linear, first.constant, variable);
     let second_node = surd_quadratic_node(second.linear, second.constant, variable);
@@ -245,13 +280,16 @@ fn quartic_term(coefficients: &[Rat], factor: &Poly, variable: &Node) -> Option<
 
 /// Integrate `(s1 x + s0) / (x^2 + linear x + constant)` with surd
 /// coefficients by completing the square.
-fn quadratic_surd_term(
+fn quadratic_surd_term<T>(
     slope: Surd,
     offset: Surd,
     linear: Surd,
     constant: Surd,
-    variable: &Node,
-) -> Option<Node> {
+    variable: &Node<T>,
+) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     if slope.is_zero() && offset.is_zero() {
         return Some(helpers::zero());
     }
@@ -306,7 +344,10 @@ fn quadratic_surd_term(
 }
 
 /// `integral of dt / (t^2 + k^2)^power` where `t = centre`.
-fn quadratic_power_integral(centre: Node, k_squared: Rat, power: usize) -> Option<Node> {
+fn quadratic_power_integral<T>(centre: Node<T>, k_squared: Rat, power: usize) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
     if power == 1 {
         if k_squared.is_negative() {
             // ln((t - s) / (t + s)) / (2 s) with s = sqrt(-k^2)

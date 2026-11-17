@@ -311,6 +311,51 @@ pub trait FloatType: ExpressionScalar {
     fn abs(&self) -> Self;
     /// Truncate towards zero.
     fn trunc(&self) -> Self;
+    /// The value as an integer, when it is one.
+    ///
+    /// The calculus engine reads integer exponents and coefficient factors
+    /// with this. The default bridges through the float engine; a type with a
+    /// wider integer range overrides it.
+    fn to_i64(&self) -> Option<i64> {
+        if !self.is_integer() {
+            return None;
+        }
+        let value = self.to_float().as_f64();
+        if !value.is_finite() || value.abs() >= i64::MAX as f64 {
+            return None;
+        }
+        Some(value as i64)
+    }
+
+    /// The greatest common divisor of two integer-valued constants, together
+    /// with the reduced `(self, other)` pair.
+    ///
+    /// Returns `(1, 0, 0)` when either side is not an integer, which is the
+    /// "no common factor" answer the coefficient splitter already treats as
+    /// pass-through. The default bridges through i64; [`Real`] overrides with
+    /// its exact version.
+    fn gcd(&self, other: &Self) -> (u64, i64, i64) {
+        let (Some(left), Some(right)) = (self.to_i64(), other.to_i64()) else {
+            return (1, 0, 0);
+        };
+        if left == 0 || right == 0 {
+            return (1, 0, 0);
+        }
+        let divisor =
+            crate::math::utils::gcd_u128(left.unsigned_abs() as u128, right.unsigned_abs() as u128) as i64;
+        (divisor.unsigned_abs(), left / divisor, right / divisor)
+    }
+
+    /// Whether two values agree within the crate's comparison tolerance.
+    ///
+    /// The proportional-sample checks and the `e` detection compare sampled
+    /// values, so exact equality would reject legitimate results. The default
+    /// tolerance is loose enough for f64 sampling; [`Real`] overrides with its
+    /// own epsilon.
+    fn float_equal(&self, other: &Self) -> bool {
+        let difference = (self.clone() - other.clone()).abs();
+        difference.to_float().as_f64() <= 1e-10
+    }
 
     /// Parse a decimal numeric literal (e.g. `"3.5"`, as produced by the lexer)
     /// directly into `Self`.
@@ -339,6 +384,19 @@ impl FloatType for crate::math::numeric::Real {
     }
     fn one() -> Self {
         Real::one()
+    }
+    fn to_i64(&self) -> Option<i64> {
+        if self.is_integer() {
+            Some(Real::to_i64(self))
+        } else {
+            None
+        }
+    }
+    fn gcd(&self, other: &Self) -> (u64, i64, i64) {
+        Real::gcd(self, other)
+    }
+    fn float_equal(&self, other: &Self) -> bool {
+        Real::float_equal(self, other)
     }
     fn neg_one() -> Self {
         Real::neg_one()

@@ -51,7 +51,10 @@ fn integer_cbrt(value: u128) -> Option<u128> {
 }
 
 /// `sqrt(value)` as a node, staying exact whenever possible.
-pub fn square_root_of(value: Rat) -> Node {
+pub fn square_root_of<T>(value: Rat) -> Node<T>
+where
+    T: crate::math::numeric::SymbolicLeaf,
+{
     if let Some(exact) = value.sqrt_exact() {
         return exact.to_node();
     }
@@ -238,6 +241,30 @@ impl Rat {
         Self::from_float(&value.to_float())
     }
 
+    /// Recover a *simple* rational (small denominator) from any float leaf
+    /// type.
+    ///
+    /// The leaf-generic mirror of [`Self::from_float_simple`]: used when a
+    /// coefficient should only be rewritten as a fraction when the fraction is
+    /// readable (`3 / 4`), never the exact binary expansion of an imprecise
+    /// value. Bounds denote `x / 64` or better, and the recovered fraction must
+    /// round-trip to the same `f64`.
+    pub fn from_leaf_simple<T>(value: &T) -> Option<Self>
+    where
+        T: crate::math::numeric::FloatType + std::fmt::Display,
+    {
+        use crate::math::numeric::FloatBridge;
+        let as_f64 = value.to_float().as_f64();
+        let candidate = Self::from_leaf(value)?;
+        if candidate.den.unsigned_abs() > 64 {
+            return None;
+        }
+        if (candidate.to_f64() - as_f64).abs() > 1e-12 {
+            return None;
+        }
+        Some(candidate)
+    }
+
     /// Recover a *simple* rational (small denominator) from a float.
     ///
     /// Used for display purposes: `1/3` is nicer than `0.3333333333333333`.
@@ -377,6 +404,18 @@ impl Rat {
     /// The value as the crate's [`Real`](crate::math::numeric::Real) float type.
     pub fn to_real(&self) -> crate::math::numeric::Real {
         crate::math::numeric::Real::from_f64(self.to_f64())
+    }
+
+    /// The value in the caller's leaf float type.
+    ///
+    /// The rational goes through the float engine, so the precision is that of
+    /// the leaf's own representation.
+    pub fn to_leaf<T>(&self) -> T
+    where
+        T: crate::math::numeric::FloatBridge,
+    {
+        use crate::math::numeric::FloatBridge;
+        T::from_float(self.to_float())
     }
 
     /// The square root of this value if it is a perfect square.

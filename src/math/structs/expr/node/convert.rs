@@ -24,7 +24,8 @@ impl<T: FloatType + Display> Node<T> {
     /// example, L'Hôpital's differentiation bridge), whose rules still run
     /// over `Real`.
     #[must_use]
-    pub fn from_typed(source: &Node<T>) -> Node<Real> {        fn convert_token<T: FloatType + Display>(token: &Token<T>) -> Token<Real> {
+    pub fn from_typed(source: &Node<T>) -> Node<Real> {
+        fn convert_token<T: FloatType + Display>(token: &Token<T>) -> Token<Real> {
             use crate::math::numeric::FloatBridge;
             match token {
                 Token::Function(func) => Token::Function(match func {
