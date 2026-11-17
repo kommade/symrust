@@ -11,15 +11,20 @@
 //! from an existing receiver).
 //!
 //! Every constructor is generic over the leaf type, so a `Node<f64>` and a
-//! `Node<Real>` are built the same way. The one exception is
-//! [`Node::multiply_by_rational`], which builds its coefficient through
-//! [`Rat::integer_node`] and therefore only exists for [`Real`].
+//! The names deliberately mirror the mathematical reading: `Node::add(a, b)` is
+//! the tree for `a + b`, not the arithmetic operation `a + b` (that consuming
+//! form is [`NodeOperations`](super::NodeOperations), which builds the same node
+//! from an existing receiver).
 
 use super::{Node, NodeInner, NodeValue};
 use crate::math::algebra::rational::Rat;
-use crate::math::numeric::{FloatBridge, FloatType, Real, SymbolicLeaf};
+use crate::math::numeric::{FloatBridge, FloatType, SymbolicLeaf};
 use crate::math::parse::lexer::{Func, Op, Token};
 
+// `add`/`sub`/`mul`/`div` are *constructors*: they take the operands and build
+// the matching tree, unlike `std::ops`' receiver methods. The names are kept so
+// generated formulas read like the expressions they denote.
+#[allow(clippy::should_implement_trait)]
 impl<T: FloatType + std::fmt::Display> Node<T> {
     /// The number `value` as an integer leaf.
     #[must_use]

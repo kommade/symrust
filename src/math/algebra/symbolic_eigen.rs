@@ -203,13 +203,13 @@ where
     let mut entries: Vec<Vec<ExprPoly<T>>> = Vec::with_capacity(size);
     for row in 0..size {
         let mut values = Vec::with_capacity(size);
-        for column in 0..size {
+        for (column, cell) in matrix[row].iter().enumerate().take(size) {
             let entry = if row == column {
                 // λ - a_ii
-                ExprPoly::lambda().sub(&ExprPoly::constant(matrix[row][column].clone()))
+                ExprPoly::lambda().sub(&ExprPoly::constant(cell.clone()))
             } else {
                 // -a_ij
-                ExprPoly::constant((-matrix[row][column].clone()).simplify(true))
+                ExprPoly::constant((-cell.clone()).simplify(true))
             };
             values.push(entry);
         }
@@ -342,13 +342,13 @@ where
         let mut entries: Vec<Vec<ExprPoly<T>>> = Vec::with_capacity(size);
         for row in 0..size {
             let mut values = Vec::with_capacity(size);
-            for column in 0..size {
+            for (column, cell) in self[row].iter().enumerate().take(size) {
                 let entry = if row == column {
                     // λ - a_ii
-                    ExprPoly::lambda().sub(&ExprPoly::constant(self[row][column].clone()))
+                    ExprPoly::lambda().sub(&ExprPoly::constant(cell.clone()))
                 } else {
                     // -a_ij
-                    ExprPoly::constant((-self[row][column].clone()).simplify(true))
+                    ExprPoly::constant((-cell.clone()).simplify(true))
                 };
                 values.push(entry);
             }
