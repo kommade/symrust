@@ -17,7 +17,7 @@
 
 use super::{Node, NodeInner, NodeValue};
 use crate::math::algebra::rational::Rat;
-use crate::math::numeric::{FloatType, FloatBridge, Real};
+use crate::math::numeric::{FloatBridge, FloatType, Real, SymbolicLeaf};
 use crate::math::parse::lexer::{Func, Op, Token};
 
 impl<T: FloatType + std::fmt::Display> Node<T> {
@@ -111,7 +111,7 @@ impl<T: FloatType + std::fmt::Display> Node<T> {
     }
 }
 
-impl<T: FloatType + std::fmt::Display> Node<T> {
+impl<T: SymbolicLeaf> Node<T> {
     /// `node` multiplied by an exact rational.
     ///
     /// A rational is written with a trailing division rather than a decimal, so
@@ -182,7 +182,7 @@ impl<T: FloatType + std::fmt::Display> Node<T> {
 /// that can appear as operands (variables, constants, root sums).
 fn tokens_equal<T>(left: &Token<T>, right: &Token<T>) -> bool
 where
-    T: FloatType + std::fmt::Display,
+    T: SymbolicLeaf,
 {
     match (left, right) {
         (Token::Number(a), Token::Number(b)) => a == b,

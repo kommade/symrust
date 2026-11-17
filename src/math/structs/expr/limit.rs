@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 
 use crate::math::calculus::expr::{Shape, shape};
-use crate::math::numeric::{FloatType, Real};
+use crate::math::numeric::{Real, SymbolicLeaf};
 use crate::math::parse::lexer::{Const, Func, Op, Token};
 use crate::math::structs::expr::node::{Node, NodeInner};
 
@@ -74,7 +74,7 @@ const MAX_LHOPITAL_DEPTH: usize = 10;
 /// How many points a numeric probe samples.
 const PROBE_STEPS: usize = 12;
 
-impl<T: FloatType + Display> Expr<T> {
+impl<T: SymbolicLeaf> Expr<T> {
     /// Evaluate `lim_{var -> toward} self`.
     ///
     /// `toward` may be any `Real`, including [`Real::infinity`] or
@@ -422,11 +422,11 @@ impl<T: FloatType + Display> Expr<T> {
 /// Whether `node` is a polynomial in the independent variable (sums, products
 /// and non-negative integer powers of the variable and constants; no division
 /// by a non-constant or functions).
-fn is_polynomial<T: FloatType + Display>(node: &Node<T>) -> bool {
+fn is_polynomial<T: SymbolicLeaf>(node: &Node<T>) -> bool {
     is_polynomial_inner(node, 0)
 }
 
-fn is_polynomial_inner<T: FloatType + Display>(node: &Node<T>, depth: usize) -> bool {
+fn is_polynomial_inner<T: SymbolicLeaf>(node: &Node<T>, depth: usize) -> bool {
     if depth > 128 {
         return false;
     }
@@ -450,7 +450,7 @@ fn is_polynomial_inner<T: FloatType + Display>(node: &Node<T>, depth: usize) -> 
 }
 
 /// Whether `node` is a non-negative integer constant.
-fn is_nonneg_integer_constant<T: FloatType + Display>(node: &Node<T>) -> bool {
+fn is_nonneg_integer_constant<T: SymbolicLeaf>(node: &Node<T>) -> bool {
     match shape(node) {
         Shape::Operand(Token::Number(n)) => n >= 0,
         Shape::Operand(Token::Float(v)) => v.is_integer() && !v.is_negative(),
@@ -460,7 +460,7 @@ fn is_nonneg_integer_constant<T: FloatType + Display>(node: &Node<T>) -> bool {
 
 /// Whether `node` is an exponential that grows without bound, e.g. `2^u` or
 /// `e^u` with `u -> ∞` (`base` a constant strictly greater than 1).
-fn is_exponential_growth<T: FloatType + Display>(node: &Node<T>) -> bool {
+fn is_exponential_growth<T: SymbolicLeaf>(node: &Node<T>) -> bool {
     let Shape::Operator(Token::Operator(Op::Pow), base, _exponent) = shape(node) else {
         return false;
     };
@@ -491,7 +491,7 @@ enum Form {
 }
 
 /// Classify the direct limit of `expr` at `var -> toward`.
-fn form<T: FloatType + Display>(expr: &Expr<T>, var: char, toward: &Real) -> Form {
+fn form<T: SymbolicLeaf>(expr: &Expr<T>, var: char, toward: &Real) -> Form {
     match expr.substitute_evaluate(var, toward) {
         Some(value) if value.is_zero() => Form::Zero,
         Some(value) if value.is_one() => Form::One,
@@ -502,7 +502,7 @@ fn form<T: FloatType + Display>(expr: &Expr<T>, var: char, toward: &Real) -> For
 
 /// Split an expression of the shape `p / q` into its numerator and denominator
 /// nodes; returns `None` when it is not a top-level quotient.
-fn as_fraction<T: FloatType + Display>(expr: &Expr<T>) -> Option<(Node<T>, Node<T>)> {
+fn as_fraction<T: SymbolicLeaf>(expr: &Expr<T>) -> Option<(Node<T>, Node<T>)> {
     match shape(&expr.tree) {
         Shape::Operator(Token::Operator(Op::Div), numerator, denominator) => {
             Some((numerator, denominator))

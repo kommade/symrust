@@ -69,10 +69,10 @@ fn collapse_matrix_literals<T: FloatType + Display>(
     Ok(result)
 }
 
-/// Parse the inside of a `[[...], [...]]` literal into a `Matrix<Expr>`.
+/// Parse the inside of a `[[...], [...]]` literal into a `Matrix<Expr<T>>`.
 fn parse_matrix_rows<T: FloatType + Display>(
     tokens: &[Token<T>],
-) -> Result<crate::math::algebra::linear::Matrix<crate::math::structs::expr::Expr>, ParseError> {
+) -> Result<crate::math::algebra::linear::Matrix<crate::math::structs::expr::Expr<T>>, ParseError> {
     use crate::math::algebra::linear::Matrix;
     use crate::math::structs::expr::Expr;
 
@@ -105,10 +105,10 @@ fn parse_matrix_rows<T: FloatType + Display>(
         ));
     }
 
-    let mut values: Vec<Vec<Expr>> = Vec::with_capacity(rows.len());
+    let mut values: Vec<Vec<Expr<T>>> = Vec::with_capacity(rows.len());
     let mut width: Option<usize> = None;
     for row in rows {
-        let cells: Vec<Expr> = split_on_commas(row)
+        let cells: Vec<Expr<T>> = split_on_commas(row)
             .into_iter()
             .map(parse_entry)
             .collect::<Result<_, _>>()?;
@@ -131,13 +131,13 @@ fn parse_matrix_rows<T: FloatType + Display>(
     Ok(Matrix::from_rows(values))
 }
 
-/// Parse the inside of a `[a, b, c]` literal into a `Vector<Expr>`.
+/// Parse the inside of a `[a, b, c]` literal into a `Vector<Expr<T>>`.
 fn parse_vector_entries<T: FloatType + Display>(
     tokens: &[Token<T>],
-) -> Result<crate::math::algebra::linear::Vector<crate::math::structs::expr::Expr>, ParseError> {
+) -> Result<crate::math::algebra::linear::Vector<crate::math::structs::expr::Expr<T>>, ParseError> {
     use crate::math::algebra::linear::Vector;
 
-    let entries: Vec<crate::math::structs::expr::Expr> = split_on_commas(tokens)
+    let entries: Vec<crate::math::structs::expr::Expr<T>> = split_on_commas(tokens)
         .into_iter()
         .map(parse_entry)
         .collect::<Result<_, _>>()?;
@@ -171,19 +171,13 @@ fn split_on_commas<T>(tokens: &[Token<T>]) -> Vec<&[Token<T>]> {
     parts
 }
 
-/// Parse one entry as an expression.
-///
-/// Entries are parsed as a tree over `T` and then re-typed into the `Expr`
-/// (that is, `Expr<Real>`) a matrix stores. Numeric leaves convert through
-/// `f64`, which is exact for the integers and rationals matrix literals
-/// normally contain.
+/// Parse one entry as an expression over the tree's own leaf type.
 fn parse_entry<T: FloatType + Display>(
     tokens: &[Token<T>],
-) -> Result<crate::math::structs::expr::Expr, ParseError> {
+) -> Result<crate::math::structs::expr::Expr<T>, ParseError> {
     let mut parser = Parser::<T>::new(tokens.to_vec());
     let node = parser.parse()?;
-    let real_node = crate::math::structs::expr::node::Node::<T>::from_typed(&node);
-    Ok(crate::math::structs::expr::Expr::from_node(real_node))
+    Ok(crate::math::structs::expr::Expr::from_node(node))
 }
 
 impl Error for ParseError {}

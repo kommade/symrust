@@ -33,13 +33,14 @@ use std::fmt::Display;
 
 use crate::math::algebra::linear::{Matrix, SquareMatrixFns};
 use crate::math::algebra::rational::Rat;
-use crate::math::numeric::{ExactField, Matrixable};
+use crate::math::numeric::{ExactField, Matrixable, SymbolicLeaf};
 use crate::math::structs::expr::Expr;
 use crate::math::structs::expr::node::Node;
 use crate::math::structs::solution::{Recorder, Solution, StepRecorder};
 
-/// Step-tracked operations on a [`Matrix`] of expressions.
-impl Matrix<Expr> {
+/// Step-tracked operations on a [`Matrix`] of expressions over any leaf
+/// type `T` ([`SymbolicLeaf`] makes `Expr<T>` a [`Matrixable`] coefficient).
+impl<T> Matrix<Expr<T>> where T: SymbolicLeaf {
     /// Row echelon form (reduced when `normalise`), recording each elementary
     /// row operation.
     ///
@@ -47,7 +48,7 @@ impl Matrix<Expr> {
     /// always divides by the *current* pivot so the target entry becomes
     /// exactly zero.
     #[must_use]
-    pub fn row_reduce_solution(&self, normalise: bool) -> Solution {
+    pub fn row_reduce_solution(&self, normalise: bool) -> Solution<Expr<T>, Expr<T>> {
         row_reduce_tracked(self, normalise)
     }
 
@@ -55,7 +56,7 @@ impl Matrix<Expr> {
     ///
     /// Returns `None` when the matrix is not square.
     #[must_use]
-    pub fn determinant_solution(&self) -> Option<Solution> {
+    pub fn determinant_solution(&self) -> Option<Solution<Expr<T>, Expr<T>>> {
         determinant_tracked(self)
     }
 }
@@ -753,14 +754,14 @@ fn scalar_matrix<T: Matrixable>(value: T) -> Matrix<T> {
     Matrix::from_vec(1, 1, vec![value]).expect("a 1 x 1 matrix always fits")
 }
 
-/// Step-tracked operations on a [`Matrix`] of expressions.
-impl Matrix<Expr> {
+/// Step-tracked operations on a [`Matrix`] of expressions over any leaf type.
+impl<T> Matrix<Expr<T>> where T: SymbolicLeaf {
     /// The inverse by Gauss-Jordan elimination of `[A | I]`, recording the
     /// steps.
     ///
     /// Returns `None` when the matrix is not square or not invertible.
     #[must_use]
-    pub fn inverse_solution(&self) -> Option<Solution> {
+    pub fn inverse_solution(&self) -> Option<Solution<Expr<T>, Expr<T>>> {
         inverse_tracked(self)
     }
 
@@ -768,7 +769,7 @@ impl Matrix<Expr> {
     ///
     /// Returns `None` when a column is linearly dependent on the earlier ones.
     #[must_use]
-    pub fn qr_solution(&self) -> Option<Solution> {
+    pub fn qr_solution(&self) -> Option<Solution<Expr<T>, Expr<T>>> {
         qr_tracked(self)
     }
 
@@ -777,7 +778,7 @@ impl Matrix<Expr> {
     /// Returns `None` when [`Matrix::svd`] has no decomposition for these
     /// entries.
     #[must_use]
-    pub fn svd_solution(&self) -> Option<Solution> {
+    pub fn svd_solution(&self) -> Option<Solution<Expr<T>, Expr<T>>> {
         svd_tracked(self)
     }
 
@@ -786,38 +787,49 @@ impl Matrix<Expr> {
     /// Returns `None` when the matrix is not diagonalisable over the
     /// coefficient type.
     #[must_use]
-    pub fn eigen_solution(&self) -> Option<Solution> {
+    pub fn eigen_solution(&self) -> Option<Solution<Expr<T>, Expr<T>>> {
         eigen_tracked(self)
     }
 }
 
 /// Wrap a matrix as an expression so it can be recorded as a step result.
 #[must_use]
-pub(crate) fn matrix_expr(matrix: &Matrix<Expr>) -> Expr {
+pub(crate) fn matrix_expr<T>(matrix: &Matrix<Expr<T>>) -> Expr<T>
+where
+    T: SymbolicLeaf,
+{
     Expr::from_node(Node::matrix(matrix.clone()))
 }
 
 /// The constant expression `1`.
-fn one() -> Expr {
-    Expr::from_f64(1.0)
+fn one<T>() -> Expr<T>
+where
+    T: SymbolicLeaf,
+{
+    Expr::from_node(Node::one())
 }
 
 /// Reduce an entry to the most readable exact form.
 ///
 /// The work is done by [`Expr::tidy`], which is shared with the symbolic
 /// eigen-solver; this alias keeps the recorded-step code reading naturally.
-pub(crate) fn tidy(entry: Expr) -> Expr {
+pub(crate) fn tidy<T>(entry: Expr<T>) -> Expr<T>
+where
+    T: SymbolicLeaf,
+{
     entry.tidy()
 }
 
 /// Swap rows `a` and `b`, recording the step.
-fn swap_rows(
-    matrix: &mut Matrix<Expr>,
+fn swap_rows<T>(
+    matrix: &mut Matrix<Expr<T>>,
     a: usize,
     b: usize,
-    recorder: &mut StepRecorder,
+    recorder: &mut StepRecorder<Expr<T>>,
     why: &str,
-) {
+) where
+    T: SymbolicLeaf,
+{
     if a == b {
         return;
     }
@@ -835,13 +847,15 @@ fn swap_rows(
 }
 
 /// Multiply row `row` by `factor`, recording the step.
-fn scale_row(
-    matrix: &mut Matrix<Expr>,
+fn scale_row<T>(
+    matrix: &mut Matrix<Expr<T>>,
     row: usize,
-    factor: Expr,
-    recorder: &mut StepRecorder,
+    factor: Expr<T>,
+    recorder: &mut StepRecorder<Expr<T>>,
     why: &str,
-) {
+) where
+    T: SymbolicLeaf,
+{
     if factor == one() {
         return;
     }
@@ -858,14 +872,16 @@ fn scale_row(
 }
 
 /// Subtract `multiple` times row `source` from row `target`, recording the step.
-fn eliminate_row(
-    matrix: &mut Matrix<Expr>,
+fn eliminate_row<T>(
+    matrix: &mut Matrix<Expr<T>>,
     target: usize,
     source: usize,
-    multiple: Expr,
-    recorder: &mut StepRecorder,
+    multiple: Expr<T>,
+    recorder: &mut StepRecorder<Expr<T>>,
     why: &str,
-) {
+) where
+    T: SymbolicLeaf,
+{
     for column in 0..matrix.columns() {
         matrix[target][column] = tidy(
             matrix[target][column].clone() - multiple.clone() * matrix[source][column].clone(),
@@ -896,7 +912,10 @@ fn eliminate_row(
 /// Row echelon form (reduced when `normalise`), recording each elementary row
 /// operation. See [`Matrix::row_reduce_solution`].
 #[must_use]
-fn row_reduce_tracked(matrix: &Matrix<Expr>, normalise: bool) -> Solution {
+fn row_reduce_tracked<T>(matrix: &Matrix<Expr<T>>, normalise: bool) -> Solution<Expr<T>, Expr<T>>
+where
+    T: SymbolicLeaf,
+{
     let mut work = matrix.clone();
     let mut recorder = StepRecorder::new(
         matrix_expr(matrix),
@@ -950,7 +969,10 @@ fn row_reduce_tracked(matrix: &Matrix<Expr>, normalise: bool) -> Solution {
 /// The determinant by Gaussian elimination, recording the steps.
 /// See [`Matrix::determinant_solution`].
 #[must_use]
-fn determinant_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
+fn determinant_tracked<T>(matrix: &Matrix<Expr<T>>) -> Option<Solution<Expr<T>, Expr<T>>>
+where
+    T: SymbolicLeaf,
+{
     if matrix.rows() != matrix.columns() {
         return None;
     }
@@ -1013,14 +1035,17 @@ fn determinant_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
 /// Returns `None` when the matrix is not square or not invertible.
 /// See [`Matrix::inverse_solution`].
 #[must_use]
-fn inverse_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
+fn inverse_tracked<T>(matrix: &Matrix<Expr<T>>) -> Option<Solution<Expr<T>, Expr<T>>>
+where
+    T: SymbolicLeaf,
+{
     if matrix.rows() != matrix.columns() {
         return None;
     }
     let size = matrix.rows();
 
     // Build `[A | I]`.
-    let mut augmented = Matrix::<Expr>::new(size, size * 2);
+    let mut augmented = Matrix::<Expr<T>>::new(size, size * 2);
     for row in 0..size {
         for column in 0..size {
             augmented[row][column] = matrix[row][column].clone();
@@ -1079,7 +1104,7 @@ fn inverse_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
     }
 
     // Read the right-hand half out as the inverse.
-    let mut inverse = Matrix::<Expr>::new(size, size);
+    let mut inverse = Matrix::<Expr<T>>::new(size, size);
     for row in 0..size {
         for column in 0..size {
             inverse[row][column] = augmented[row][size + column].clone();
@@ -1096,14 +1121,17 @@ fn inverse_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
 /// `QᵀA`. Returns `None` when a column is linearly dependent on the earlier
 /// ones (a zero norm). See [`Matrix::qr_solution`].
 #[must_use]
-fn qr_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
+fn qr_tracked<T>(matrix: &Matrix<Expr<T>>) -> Option<Solution<Expr<T>, Expr<T>>>
+where
+    T: SymbolicLeaf,
+{
     let (rows, columns) = (matrix.rows(), matrix.columns());
     let mut recorder = StepRecorder::new(matrix_expr(matrix), "QR factorisation (Gram-Schmidt)");
 
     // Work on the columns of A, building Q column by column.
-    let mut q: Vec<Vec<Expr>> = Vec::with_capacity(columns);
+    let mut q: Vec<Vec<Expr<T>>> = Vec::with_capacity(columns);
     for j in 0..columns {
-        let mut vector: Vec<Expr> = (0..rows).map(|row| matrix[row][j].clone()).collect();
+        let mut vector: Vec<Expr<T>> = (0..rows).map(|row| matrix[row][j].clone()).collect();
 
         // Orthogonalise against every already-built q_i.
         for (i, existing) in q.iter().enumerate() {
@@ -1184,13 +1212,13 @@ fn qr_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
     }
 
     // Assemble Q and compute R = Qᵀ A.
-    let mut q_matrix = Matrix::<Expr>::new(rows, columns);
+    let mut q_matrix = Matrix::<Expr<T>>::new(rows, columns);
     for (column, entries) in q.iter().enumerate() {
         for (row, value) in entries.iter().enumerate() {
             q_matrix[row][column] = value.clone();
         }
     }
-    let mut r_matrix = Matrix::<Expr>::new(columns, columns);
+    let mut r_matrix = Matrix::<Expr<T>>::new(columns, columns);
     for i in 0..columns {
         for j in 0..columns {
             if i > j {
@@ -1215,14 +1243,20 @@ fn qr_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
 
 /// A single column rendered as an `n x 1` matrix expression, for showing a
 /// partially built basis.
-fn column_matrix(values: &[Expr]) -> Expr {
+fn column_matrix<T>(values: &[Expr<T>]) -> Expr<T>
+where
+    T: SymbolicLeaf,
+{
     matrix_expr(&Matrix::from_rows(
         values.iter().map(|value| vec![value.clone()]).collect(),
     ))
 }
 
 /// Dot product of two entry slices.
-fn dot(left: &[Expr], right: &[Expr]) -> Expr {
+fn dot<T>(left: &[Expr<T>], right: &[Expr<T>]) -> Expr<T>
+where
+    T: SymbolicLeaf,
+{
     let mut total = Expr::from_f64(0.0);
     for (a, b) in left.iter().zip(right) {
         total = tidy(total + a.clone() * b.clone());
@@ -1251,7 +1285,10 @@ fn dot(left: &[Expr], right: &[Expr]) -> Expr {
 /// Returns `None` when [`Matrix::svd`][crate::math::algebra::linear::Matrix::svd] has
 /// no decomposition for these entries. See [`Matrix::svd_solution`].
 #[must_use]
-fn svd_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
+fn svd_tracked<T>(matrix: &Matrix<Expr<T>>) -> Option<Solution<Expr<T>, Expr<T>>>
+where
+    T: SymbolicLeaf,
+{
     let decomposition = matrix.svd()?;
     let sigma = decomposition.sigma().clone();
     let left = decomposition.left_singular_vectors().clone();
@@ -1307,8 +1344,11 @@ fn svd_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
 ///
 /// `MatrixMul::mul_matrix` would compute the same product, but this version
 /// tidies every partial sum, which is what keeps the recorded entries short.
-fn multiply_matrix(left: &Matrix<Expr>, right: &Matrix<Expr>) -> Matrix<Expr> {
-    let mut result = Matrix::<Expr>::new(left.rows(), right.columns());
+fn multiply_matrix<T>(left: &Matrix<Expr<T>>, right: &Matrix<Expr<T>>) -> Matrix<Expr<T>>
+where
+    T: SymbolicLeaf,
+{
+    let mut result = Matrix::<Expr<T>>::new(left.rows(), right.columns());
     for row in 0..left.rows() {
         for column in 0..right.columns() {
             let mut total = Expr::from_f64(0.0);
@@ -1330,7 +1370,10 @@ fn multiply_matrix(left: &Matrix<Expr>, right: &Matrix<Expr>) -> Matrix<Expr> {
 /// when the matrix is not diagonalisable over the coefficient type. See
 /// [`Matrix::eigen_solution`].
 #[must_use]
-fn eigen_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
+fn eigen_tracked<T>(matrix: &Matrix<Expr<T>>) -> Option<Solution<Expr<T>, Expr<T>>>
+where
+    T: SymbolicLeaf,
+{
     if matrix.rows() != matrix.columns() {
         return None;
     }
@@ -1366,7 +1409,7 @@ fn eigen_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
         || Expr::from_f64(0.0),
     );
 
-    let mut seen: Vec<Expr> = Vec::new();
+    let mut seen: Vec<Expr<T>> = Vec::new();
     for lambda in eigenvalues {
         if seen.contains(&lambda) {
             continue;
@@ -1393,7 +1436,10 @@ fn eigen_tracked(matrix: &Matrix<Expr>) -> Option<Solution> {
 }
 
 /// Render a polynomial in `λ` as a readable string, e.g. `λ^2 - 2 λ + 1`.
-fn describe_polynomial(polynomial: &super::symbolic_eigen::ExprPoly) -> String {
+fn describe_polynomial<T>(polynomial: &super::symbolic_eigen::ExprPoly<T>) -> String
+where
+    T: SymbolicLeaf,
+{
     let terms: Vec<String> = polynomial
         .coefficients()
         .iter()

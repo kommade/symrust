@@ -2,7 +2,7 @@ use std::{error::Error, fmt::Display};
 
 use crate::math::algebra::linear::Matrix;
 use crate::math::algebra::linear::Vector;
-use crate::math::numeric::{FloatType, Real};
+use crate::math::numeric::{FloatType, Real, SymbolicLeaf};
 use crate::math::structs::expr::Expr;
 
 /// A formal sum over the (unknown, generally complex) roots of a polynomial.
@@ -199,7 +199,7 @@ impl Display for Const {
     }
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub enum Token<T = Real> {
     Function(Func<T>),
     Operator(Op),
@@ -212,16 +212,17 @@ pub enum Token<T = Real> {
     RootSum(RootSumData),
     /// A matrix literal, `[[a, b], [c, d]]`.
     ///
-    /// The entries are expressions, so a matrix can carry symbolic values. It is
-    /// a leaf like [`RootSumData`]: concrete rather than generic over `T`, since
-    /// a matrix is not itself a scalar of the tree's leaf type.
-    Matrix(Matrix<Expr>),
+    /// The entries are expressions over this token's own leaf type, so a
+    /// matrix can carry symbolic values and follow the tree everywhere: an
+    /// `Expr<f64>` matrix literal holds `Expr<f64>` entries. The matrix
+    /// structure itself needs no field arithmetic, which is why
+    /// `Matrix<T>` carries no bound on `T`.
+    Matrix(Matrix<Expr<T>>),
     /// A vector literal, `[a, b, c]`.
     ///
     /// A vector is a distinct value, not a one-column matrix, and its entries
-    /// are expressions like a matrix's. It is concrete rather than generic over
-    /// `T` for the same reason [`Token::Matrix`] is.
-    Vector(Vector<Expr>),
+    /// are expressions over this token's own leaf type.
+    Vector(Vector<Expr<T>>),
     /// The opening `[` of a matrix literal.
     LBracket,
     /// The closing `]` of a matrix literal.
@@ -232,7 +233,7 @@ pub enum Token<T = Real> {
     RPar,
 }
 
-impl<T: FloatType + Display> Display for Token<T> {
+impl<T: SymbolicLeaf> Display for Token<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::Function(func) => write!(f, "{func}"),
@@ -249,6 +250,28 @@ impl<T: FloatType + Display> Display for Token<T> {
             Self::Comma => write!(f, ","),
             Self::LPar => write!(f, "("),
             Self::RPar => write!(f, ")"),
+        }
+    }
+}
+
+/// A handful of rules (tree-equality shortcuts) compare tokens. Equality is
+/// decided by the tokens' rendered forms, which keeps the bound at
+/// [`SymbolicLeaf`]: no token arm needs the leaf type's own `PartialEq`.
+impl<T: SymbolicLeaf> PartialEq for Token<T> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Operator(a), Self::Operator(b)) => a == b,
+            (Self::Constant(a), Self::Constant(b)) => a == b,
+            (Self::Number(a), Self::Number(b)) => a == b,
+            (Self::Indp(a), Self::Indp(b)) | (Self::Var(a), Self::Var(b)) => a == b,
+            (Self::LBracket, Self::LBracket)
+            | (Self::RBracket, Self::RBracket)
+            | (Self::Comma, Self::Comma)
+            | (Self::LPar, Self::LPar)
+            | (Self::RPar, Self::RPar) => true,
+            // Function, float, root sum, matrix and vector carry leaf data:
+            // their rendered forms are the canonical comparison.
+            (a, b) => a.to_string() == b.to_string(),
         }
     }
 }
@@ -272,12 +295,12 @@ impl<T> Token<T> {
     pub const fn from_var(c: char) -> Self {
         Self::Var(c)
     }
-    /// A matrix literal token, with [`Expr`] entries.
-    pub fn from_matrix(matrix: Matrix<Expr>) -> Self {
+    /// A matrix literal token, with [`Expr`] entries of this leaf type.
+    pub fn from_matrix(matrix: Matrix<Expr<T>>) -> Self {
         Self::Matrix(matrix)
     }
-    /// A vector literal token, with [`Expr`] entries.
-    pub fn from_vector(vector: Vector<Expr>) -> Self {
+    /// A vector literal token, with [`Expr`] entries of this leaf type.
+    pub fn from_vector(vector: Vector<Expr<T>>) -> Self {
         Self::Vector(vector)
     }
     pub const fn is_implicitly_mul(&self) -> bool {

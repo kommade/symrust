@@ -50,7 +50,10 @@ impl<T: Clone> Clone for Expr<T> {
 /// The previous implementation compared LaTeX renderings. That was a stopgap:
 /// it conflated distinct trees that happened to print alike (such as `(a+b)+c`
 /// and `a+(b+c)`) and could not distinguish a matrix from an equal-looking list.
-impl<T: FloatType + Display> PartialEq for Expr<T> {
+impl<T> PartialEq for Expr<T>
+where
+    T: SymbolicLeaf,
+{
     fn eq(&self, other: &Self) -> bool {
         self.tree.same_tree(&other.tree)
     }
@@ -60,7 +63,7 @@ impl<T: FloatType + Display> PartialEq for Expr<T> {
 ///
 /// This is sound because [`PartialEq`] compares structure: if two trees are
 /// equal the comparison is reflexive, symmetric and transitive.
-impl<T: FloatType + Display> Eq for Expr<T> {}
+impl<T: SymbolicLeaf> Eq for Expr<T> {}
 
 impl<T: SymbolicLeaf> Neg for Expr<T> {
     type Output = Self;
@@ -161,7 +164,7 @@ impl<T: FloatType + Display> Default for Expr<T> {
     }
 }
 
-impl<T: FloatType + Display> Display for Expr<T> {
+impl<T: SymbolicLeaf> Display for Expr<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.tree.inner.borrow())
     }
@@ -211,7 +214,7 @@ impl<T: FloatType + Display> Expr<T> {
     }
 }
 
-impl<T: FloatType + Display> Expr<T> {
+impl<T: SymbolicLeaf> Expr<T> {
     /// Whether the expression is the literal number zero.
     ///
     /// This is a structural test, not an evaluation: `0 / 1` is not the zero
@@ -230,7 +233,9 @@ impl<T: FloatType + Display> Expr<T> {
     pub fn is_zero(&self) -> bool {
         self.tree.is_number_zero()
     }
+}
 
+impl<T: FloatType + Display> Expr<T> {
     /// Whether the expression contains the independent variable.
     ///
     /// Used to decide whether a matrix token is symbolic, and to drive the
@@ -241,7 +246,7 @@ impl<T: FloatType + Display> Expr<T> {
     }
 }
 
-impl<T: FloatType + Display> Expr<T> {
+impl<T: SymbolicLeaf> Expr<T> {
     /// Whether the expression contains a formal root sum (`Σ_{Z: p(Z)=0} …`).
     ///
     /// A root sum is the exact antiderivative form used when an irreducible

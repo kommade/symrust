@@ -20,8 +20,9 @@ impl<T: FloatType + Display> Node<T> {
     ///
     /// The inverse of [`from_real`](Self::from_real): numeric leaves are carried
     /// across the float bridge, and the symbolic structure is preserved
-    /// exactly. Used when a matrix literal, lexed at the caller's leaf type, is
-    /// stored as a concrete `Expr` (that is, `Expr<Real>`).
+    /// exactly. Used at the boundaries of the exact symbolic kernel (for
+    /// example, L'Hôpital's differentiation bridge), whose rules still run
+    /// over `Real`.
     #[must_use]
     pub fn from_typed(source: &Node<T>) -> Node<Real> {        fn convert_token<T: FloatType + Display>(token: &Token<T>) -> Token<Real> {
             use crate::math::numeric::FloatBridge;
@@ -48,8 +49,8 @@ impl<T: FloatType + Display> Node<T> {
                 Token::Indp(c) => Token::Indp(*c),
                 Token::Var(c) => Token::Var(*c),
                 Token::RootSum(data) => Token::RootSum(data.clone()),
-                Token::Matrix(matrix) => Token::Matrix(matrix.clone()),
-                Token::Vector(vector) => Token::Vector(vector.clone()),
+                Token::Matrix(matrix) => Token::Matrix(convert_matrix(matrix)),
+                Token::Vector(vector) => Token::Vector(convert_vector(vector)),
                 Token::LBracket => Token::LBracket,
                 Token::RBracket => Token::RBracket,
                 Token::Comma => Token::Comma,
@@ -68,6 +69,73 @@ impl<T: FloatType + Display> Node<T> {
             NodeValue::Empty => NodeInner::empty(),
         }
     }
+}
+
+/// Re-type a matrix literal's entries: `Expr<T>` to `Expr<Real>`, entrywise.
+///
+/// Only the numeric leaves change type; the symbolic structure of each entry,
+/// and the matrix shape, are preserved exactly.
+fn convert_matrix<T: FloatType + Display>(
+    matrix: &crate::math::algebra::linear::Matrix<Expr<T>>,
+) -> crate::math::algebra::linear::Matrix<Expr> {
+    use crate::math::algebra::linear::Matrix;
+    let mut data = Vec::with_capacity(matrix.rows() * matrix.columns());
+    for row in 0..matrix.rows() {
+        for column in 0..matrix.columns() {
+            let entry = &matrix[row][column];
+            data.push(Expr::from_node(from_typed_node(entry.tree())));
+        }
+    }
+    Matrix::from_vec(matrix.rows(), matrix.columns(), data)
+        .expect("the shape is carried over entrywise")
+}
+
+/// Re-type a vector literal's entries: `Expr<T>` to `Expr<Real>`, entrywise.
+fn convert_vector<T: FloatType + Display>(
+    vector: &crate::math::algebra::linear::Vector<Expr<T>>,
+) -> crate::math::algebra::linear::Vector<Expr> {
+    use crate::math::algebra::linear::Vector;
+    Vector::from_vec(
+        vector
+            .as_slice()
+            .iter()
+            .map(|entry| Expr::from_node(from_typed_node(entry.tree())))
+            .collect(),
+    )
+}
+
+/// Re-type a matrix literal's entries: `Expr<Real>` to `Expr<T>`, entrywise.
+///
+/// The mirror of [`convert_matrix`]: numeric leaves are re-typed into the
+/// caller's leaf type, the symbolic structure of each entry and the matrix
+/// shape are preserved exactly.
+pub(super) fn matrix_from_real<T: FloatType + Display>(
+    matrix: &crate::math::algebra::linear::Matrix<Expr>,
+) -> crate::math::algebra::linear::Matrix<Expr<T>> {
+    use crate::math::algebra::linear::Matrix;
+    let mut data = Vec::with_capacity(matrix.rows() * matrix.columns());
+    for row in 0..matrix.rows() {
+        for column in 0..matrix.columns() {
+            let entry = &matrix[row][column];
+            data.push(Expr::<T>::from_node(Node::<T>::from_real(entry.tree())));
+        }
+    }
+    Matrix::from_vec(matrix.rows(), matrix.columns(), data)
+        .expect("the shape is carried over entrywise")
+}
+
+/// Re-type a vector literal's entries: `Expr<Real>` to `Expr<T>`, entrywise.
+pub(super) fn vector_from_real<T: FloatType + Display>(
+    vector: &crate::math::algebra::linear::Vector<Expr>,
+) -> crate::math::algebra::linear::Vector<Expr<T>> {
+    use crate::math::algebra::linear::Vector;
+    Vector::from_vec(
+        vector
+            .as_slice()
+            .iter()
+            .map(|entry| Expr::<T>::from_node(Node::<T>::from_real(entry.tree())))
+            .collect(),
+    )
 }
 
 /// See [`Node::from_typed`]; the recursion step kept out of the impl so the

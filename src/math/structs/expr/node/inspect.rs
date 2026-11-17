@@ -3,7 +3,7 @@
 use std::{cell::RefCell, cmp::Ordering, error::Error, fmt::Display, rc::Rc};
 
 use crate::{
-    math::numeric::{FloatBridge, FloatType},
+    math::numeric::{FloatBridge, FloatType, SymbolicLeaf},
     math::parse::lexer::{Const, Func, Op, Token},
     math::structs::expr::Expr,
     math::utils::fmt::unnecessary_brackets,
@@ -28,7 +28,7 @@ fn is_exactly_two<T: FloatType + Display>(value: &T) -> bool {
 /// `None`.
 pub(crate) fn square_root_of_rational_square<T>(node: &Node<T>) -> Option<Node<T>>
 where
-    T: FloatType + Display,
+    T: SymbolicLeaf,
 {
     use crate::math::algebra::factorization::factorise;
     use crate::math::algebra::polynomial::Poly;
@@ -126,7 +126,7 @@ fn poly_to_variable_node<T>(
     variable: char,
 ) -> Node<T>
 where
-    T: FloatType + Display,
+    T: SymbolicLeaf,
 {
     use crate::math::structs::expr::node::Node as _;
 
@@ -215,7 +215,7 @@ impl<T: FloatType + Display> NodeInner<T> {
     }
 }
 
-impl<T: FloatType + Display> NodeInner<T> {
+impl<T: SymbolicLeaf> NodeInner<T> {
     pub(crate) fn is_constant_node(node: &Node<T>) -> bool {
         !node.inner.borrow().has_indp
     }
@@ -290,6 +290,12 @@ impl<T: FloatType + Display> NodeInner<T> {
         let right_borrow = right.inner.borrow();
         left_borrow.eq(&right_borrow)
     }
+}
+
+/// The sign and unit predicates. Only the leaf's own numeric reading is
+/// involved, so the plain [`FloatType`] bound suffices here; callers that run
+/// under the stronger [`SymbolicLeaf`] bound satisfy it automatically.
+impl<T: FloatType + Display> NodeInner<T> {
     pub(crate) fn is_fn(&self) -> bool {
         match &self.value {
             NodeValue::Operator(op_node) => match op_node.token {

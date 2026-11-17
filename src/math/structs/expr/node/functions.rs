@@ -838,7 +838,7 @@ impl<T: SymbolicLeaf> Node<T> {
         }
         fn collect_sum_terms<T>(node: Node<T>, sign: i8, acc: &mut Vec<(Node<T>, i8)>)
         where
-            T: FloatType + Display,
+            T: SymbolicLeaf,
         {
             let borrowed = node.inner.borrow();
             if let NodeValue::Operator(op_node) = &borrowed.value {
@@ -870,7 +870,7 @@ impl<T: SymbolicLeaf> Node<T> {
 
         fn collect_mul_terms<T>(node: Node<T>, acc: &mut Vec<Node<T>>)
         where
-            T: FloatType + Display,
+            T: SymbolicLeaf,
         {
             let borrowed = node.inner.borrow();
             if let NodeValue::Operator(op_node) = &borrowed.value {
@@ -902,7 +902,7 @@ impl<T: SymbolicLeaf> Node<T> {
 
         fn rebuild_product<T>(factors: Vec<Node<T>>) -> Node<T>
         where
-            T: FloatType + Display,
+            T: SymbolicLeaf,
         {
             if factors.is_empty() {
                 return NodeInner::<T>::one();
@@ -917,7 +917,7 @@ impl<T: SymbolicLeaf> Node<T> {
 
         fn rebuild_sum<T>(terms: Vec<Node<T>>) -> Node<T>
         where
-            T: FloatType + Display,
+            T: SymbolicLeaf,
         {
             if terms.is_empty() {
                 return NodeInner::<T>::zero();
@@ -932,7 +932,7 @@ impl<T: SymbolicLeaf> Node<T> {
 
         fn sort_terms<T>(terms: &mut Vec<(usize, Node<T>)>)
         where
-            T: FloatType + Display + PartialOrd + Neg<Output = T> + std::fmt::Debug,
+            T: SymbolicLeaf,
         {
             terms.sort_by(|(idx_a, node_a), (idx_b, node_b)| {
                 let degree_a = NodeInner::<T>::extract_pow_components(node_a, true)
@@ -950,7 +950,7 @@ impl<T: SymbolicLeaf> Node<T> {
 
         fn remove_common_factor<T>(term: Node<T>, factor: &Node<T>) -> Option<Node<T>>
         where
-            T: FloatType + Display,
+            T: SymbolicLeaf,
         {
             let mut factors = Vec::new();
             collect_mul_terms(term, &mut factors);
@@ -966,7 +966,7 @@ impl<T: SymbolicLeaf> Node<T> {
 
         fn has_common_factor<T>(term: Node<T>, factor: &Node<T>) -> bool
         where
-            T: FloatType + Display,
+            T: SymbolicLeaf,
         {
             remove_common_factor(term, factor).is_some()
         }

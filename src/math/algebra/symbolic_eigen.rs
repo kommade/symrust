@@ -20,22 +20,22 @@
 //! the existing null-space computation to produce eigenvectors.
 
 use crate::math::algebra::linear::Matrix;
-use crate::math::numeric::ExactField;
+use crate::math::numeric::{ExactField, Real, SymbolicLeaf};
 use crate::math::structs::expr::Expr;
 
-/// A polynomial in `λ` with [`Expr`] coefficients, stored low-to-high.
+/// A polynomial in `λ` with [`Expr<T>`] coefficients, stored low-to-high.
 ///
 /// `[a0, a1, a2]` means `a0 + a1·λ + a2·λ²`.
 #[derive(Clone, Debug)]
-pub struct ExprPoly {
+pub struct ExprPoly<T = Real> {
     /// Coefficients from the constant term upwards. Trailing zeros are trimmed.
-    coefficients: Vec<Expr>,
+    coefficients: Vec<Expr<T>>,
 }
 
-impl ExprPoly {
+impl<T: SymbolicLeaf> ExprPoly<T> {
     /// A polynomial from low-to-high coefficients.
     #[must_use]
-    pub fn new(coefficients: Vec<Expr>) -> Self {
+    pub fn new(coefficients: Vec<Expr<T>>) -> Self {
         let mut polynomial = Self { coefficients };
         polynomial.trim();
         polynomial
@@ -49,7 +49,7 @@ impl ExprPoly {
 
     /// The constant polynomial `value`.
     #[must_use]
-    pub fn constant(value: Expr) -> Self {
+    pub fn constant(value: Expr<T>) -> Self {
         Self::new(vec![value])
     }
 
@@ -76,7 +76,7 @@ impl ExprPoly {
 
     /// The (trimmed) coefficients, low-to-high.
     #[must_use]
-    pub fn coefficients(&self) -> &[Expr] {
+    pub fn coefficients(&self) -> &[Expr<T>] {
         &self.coefficients
     }
 
@@ -148,7 +148,7 @@ impl ExprPoly {
 
     /// `self` multiplied by the constant `factor`.
     #[must_use]
-    pub fn scale(&self, factor: Expr) -> Self {
+    pub fn scale(&self, factor: Expr<T>) -> Self {
         Self::new(
             self.coefficients
                 .iter()
@@ -173,7 +173,10 @@ impl ExprPoly {
 /// Unlike the numeric-only version this replaces, exact values survive: a
 /// rational stays a fraction and a surd stays a surd, because the shared
 /// [`Expr::tidy`] routes closed values through `Rat` rather than `f64`.
-fn tidy(entry: Expr) -> Expr {
+fn tidy<T>(entry: Expr<T>) -> Expr<T>
+where
+    T: SymbolicLeaf,
+{
     entry.tidy()
 }
 
@@ -184,7 +187,10 @@ fn tidy(entry: Expr) -> Expr {
 /// the matrix size, which is fine for the small matrices this is meant for and
 /// keeps the code short enough to audit.
 #[must_use]
-pub fn characteristic_polynomial(matrix: &Matrix<Expr>) -> Option<ExprPoly> {
+pub fn characteristic_polynomial<T>(matrix: &Matrix<Expr<T>>) -> Option<ExprPoly<T>>
+where
+    T: SymbolicLeaf,
+{
     if matrix.rows() != matrix.columns() {
         return None;
     }
@@ -194,7 +200,7 @@ pub fn characteristic_polynomial(matrix: &Matrix<Expr>) -> Option<ExprPoly> {
     }
 
     // Build λI - A as a grid of constant-or-λ polynomials.
-    let mut entries: Vec<Vec<ExprPoly>> = Vec::with_capacity(size);
+    let mut entries: Vec<Vec<ExprPoly<T>>> = Vec::with_capacity(size);
     for row in 0..size {
         let mut values = Vec::with_capacity(size);
         for column in 0..size {
@@ -214,7 +220,10 @@ pub fn characteristic_polynomial(matrix: &Matrix<Expr>) -> Option<ExprPoly> {
 }
 
 /// Cofactor-expansion determinant of a square matrix of polynomials.
-fn determinant(matrix: &[Vec<ExprPoly>]) -> Option<ExprPoly> {
+fn determinant<T>(matrix: &[Vec<ExprPoly<T>>]) -> Option<ExprPoly<T>>
+where
+    T: SymbolicLeaf,
+{
     let size = matrix.len();
     if size == 0 {
         return Some(ExprPoly::constant(Expr::from_f64(1.0)));
@@ -228,7 +237,7 @@ fn determinant(matrix: &[Vec<ExprPoly>]) -> Option<ExprPoly> {
         if entry.degree().is_none() {
             continue;
         }
-        let minor: Vec<Vec<ExprPoly>> = (1..size)
+        let minor: Vec<Vec<ExprPoly<T>>> = (1..size)
             .map(|row| {
                 (0..size)
                     .filter(|&c| c != column)
@@ -246,7 +255,7 @@ fn determinant(matrix: &[Vec<ExprPoly>]) -> Option<ExprPoly> {
     Some(total)
 }
 
-impl ExprPoly {
+impl<T: SymbolicLeaf> ExprPoly<T> {
     /// The roots of this polynomial, when it has a closed form.
     ///
     /// Supported for degree 1 (`-b/a`) and degree 2 (the quadratic formula).
@@ -257,19 +266,20 @@ impl ExprPoly {
     /// # Examples
     /// ```
     /// use rust_calculus::math::algebra::symbolic_eigen::ExprPoly;
-    /// use rust_calculus::math::numeric::ExactField;
+    /// use rust_calculus::math::numeric::{ExactField, Real};
     /// use rust_calculus::math::structs::expr::Expr;
+    ///
     /// // λ² - 4 has the roots -2 and 2.
     /// let poly = ExprPoly::new(vec![
-    ///     Expr::from_f64(-4.0),
-    ///     Expr::from_f64(0.0),
-    ///     Expr::from_f64(1.0),
+    ///     Expr::<Real>::from_f64(-4.0),
+    ///     Expr::<Real>::from_f64(0.0),
+    ///     Expr::<Real>::from_f64(1.0),
     /// ]);
     /// let roots = poly.roots().unwrap();
     /// assert_eq!(roots.len(), 2);
     /// ```
     #[must_use]
-    pub fn roots(&self) -> Option<Vec<Expr>> {
+    pub fn roots(&self) -> Option<Vec<Expr<T>>> {
         let degree = self.degree()?;
         let coefficients = self.coefficients();
         match degree {
@@ -306,7 +316,10 @@ impl ExprPoly {
     }
 }
 
-impl Matrix<Expr> {
+impl<T> Matrix<Expr<T>>
+where
+    T: SymbolicLeaf,
+{
     /// The characteristic polynomial `det(λI - A)`, expanded symbolically.
     ///
     /// The expansion is a straight cofactor expansion along the first row, run
@@ -316,7 +329,7 @@ impl Matrix<Expr> {
     ///
     /// Returns `None` if the matrix is not square.
     #[must_use]
-    pub fn characteristic_polynomial(&self) -> Option<ExprPoly> {
+    pub fn characteristic_polynomial(&self) -> Option<ExprPoly<T>> {
         if self.rows() != self.columns() {
             return None;
         }
@@ -326,7 +339,7 @@ impl Matrix<Expr> {
         }
 
         // Build λI - A as a grid of constant-or-λ polynomials.
-        let mut entries: Vec<Vec<ExprPoly>> = Vec::with_capacity(size);
+        let mut entries: Vec<Vec<ExprPoly<T>>> = Vec::with_capacity(size);
         for row in 0..size {
             let mut values = Vec::with_capacity(size);
             for column in 0..size {
@@ -352,7 +365,7 @@ impl Matrix<Expr> {
     /// followed by [`ExprPoly::roots`], so it supports degree 1 and degree 2 and
     /// returns `None` beyond that or for a non-square matrix.
     #[must_use]
-    pub fn symbolic_eigenvalues(&self) -> Option<Vec<Expr>> {
+    pub fn symbolic_eigenvalues(&self) -> Option<Vec<Expr<T>>> {
         self.characteristic_polynomial()?.roots()
     }
 }

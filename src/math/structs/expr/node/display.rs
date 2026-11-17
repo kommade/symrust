@@ -6,7 +6,7 @@ use std::{cell::RefCell, cmp::Ordering, error::Error, fmt::Display, ops::Neg, rc
 use crate::{
     math::algebra::matrix_steps::tidy,
     math::algebra::rational::Rat,
-    math::numeric::{FloatType, Real},
+    math::numeric::SymbolicLeaf,
     math::parse::lexer::{Const, Func, Op, Token},
     math::structs::expr::Expr,
     math::utils::fmt::unnecessary_brackets,
@@ -22,7 +22,7 @@ use super::functions::{NodeFunctions, NodeOperations};
 /// Negation is stored as a subtraction from zero, so without this a product
 /// such as `2 * -x` would render its left factor and then the raw `0 - x`.
 /// Returns `None` when the node is not a negation.
-fn negated_operand<T: FloatType + Display>(node: &Node<T>) -> Option<String> {
+fn negated_operand<T: SymbolicLeaf>(node: &Node<T>) -> Option<String> {
     let borrow = node.inner.borrow();
     let NodeValue::Operator(op_node) = &borrow.value else {
         return None;
@@ -58,8 +58,8 @@ fn is_atom(rendered: &str) -> bool {
 /// `1/5 [1 2 2 4]`. Only a factor that divides *every* entry is taken out, so the
 /// rendering never misrepresents the matrix. Entries that are not exact
 /// rationals (a surd, a symbolic term) leave the matrix printed as it is.
-fn write_matrix_with_factor(
-    matrix: &crate::math::algebra::linear::Matrix<Expr>,
+fn write_matrix_with_factor<T: SymbolicLeaf>(
+    matrix: &crate::math::algebra::linear::Matrix<Expr<T>>,
     f: &mut std::fmt::Formatter<'_>,
 ) -> std::fmt::Result {
     match common_factor(matrix) {
@@ -75,9 +75,9 @@ fn write_matrix_with_factor(
 }
 
 /// Write the matrix entries, each divided by `divisor` when it is given.
-fn write_matrix_entries(
-    matrix: &crate::math::algebra::linear::Matrix<Expr>,
-    divisor: Option<&Expr>,
+fn write_matrix_entries<T: SymbolicLeaf>(
+    matrix: &crate::math::algebra::linear::Matrix<Expr<T>>,
+    divisor: Option<&Expr<T>>,
     f: &mut std::fmt::Formatter<'_>,
 ) -> std::fmt::Result {
     for row in 0..matrix.rows() {
@@ -105,7 +105,9 @@ fn write_matrix_entries(
 /// Returns `None` when the matrix is all zeros, when any entry is not an exact
 /// rational, or when the only common factor is a unit (`±1`), since writing
 /// `1 [[1 2], [3 4]]` would help nobody.
-fn common_factor(matrix: &crate::math::algebra::linear::Matrix<Expr>) -> Option<Node<Real>> {
+fn common_factor<T: SymbolicLeaf>(
+    matrix: &crate::math::algebra::linear::Matrix<Expr<T>>,
+) -> Option<Node<T>> {
     // Track the running greatest common divisor as an exact fraction.
     let mut numerator = 0i128;
     let mut denominator = 1i128;
@@ -117,7 +119,7 @@ fn common_factor(matrix: &crate::math::algebra::linear::Matrix<Expr>) -> Option<
                 return None;
             }
             let value = entry.tree().inner.borrow().evaluate()?;
-            let rational = Rat::from_real(&value)?;
+            let rational = Rat::from_leaf(&value)?;
             if rational.is_zero() {
                 continue;
             }
@@ -154,7 +156,9 @@ fn integer_gcd(a: i128, b: i128) -> i128 {
     crate::math::utils::gcd_i128(a, b)
 }
 
-pub(crate) fn matrix_to_latex(matrix: &crate::math::algebra::linear::Matrix<Expr>) -> String {
+pub(crate) fn matrix_to_latex<T: SymbolicLeaf>(
+    matrix: &crate::math::algebra::linear::Matrix<Expr<T>>,
+) -> String {
     let mut rows = Vec::with_capacity(matrix.rows());
     for row in 0..matrix.rows() {
         let mut entries = Vec::with_capacity(matrix.columns());
@@ -174,7 +178,9 @@ pub(crate) fn matrix_to_latex(matrix: &crate::math::algebra::linear::Matrix<Expr
 ///
 /// A vector is its own kind of value, so it renders as a column rather than as
 /// a one-column `pmatrix`.
-pub(crate) fn vector_to_latex(vector: &crate::math::algebra::linear::Vector<Expr>) -> String {
+pub(crate) fn vector_to_latex<T: SymbolicLeaf>(
+    vector: &crate::math::algebra::linear::Vector<Expr<T>>,
+) -> String {
     let entries: Vec<String> = vector
         .as_slice()
         .iter()
@@ -186,7 +192,7 @@ pub(crate) fn vector_to_latex(vector: &crate::math::algebra::linear::Vector<Expr
     )
 }
 
-impl<T: FloatType + Display> NodeInner<T> {
+impl<T: SymbolicLeaf> NodeInner<T> {
     pub(crate) fn to_latex(&self) -> Result<String, NodeError> {
         match &self.value {
             NodeValue::Operand(token) => match token {
@@ -356,7 +362,7 @@ impl<T: FloatType + Display> NodeInner<T> {
     }
 }
 
-impl<T: FloatType + Display> Display for NodeInner<T> {
+impl<T: SymbolicLeaf> Display for NodeInner<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.value {
             NodeValue::Operand(Token::Matrix(ref matrix)) => {
@@ -607,7 +613,7 @@ impl<T: FloatType + Display> Display for NodeInner<T> {
 }
 /// Two node inners are equal when their LaTeX renderings match. The renderer
 /// is leaf-generic, so the comparison is too.
-impl<T: FloatType + Display> PartialEq for NodeInner<T> {
+impl<T: SymbolicLeaf> PartialEq for NodeInner<T> {
     fn eq(&self, other: &Self) -> bool {
         self.to_latex().unwrap() == other.to_latex().unwrap()
     }

@@ -13,53 +13,28 @@
 //! a separately unwrapped matrix type. Calling one on an expression that is not
 //! a matrix reports [`ExprError::NotAMatrix`] instead of panicking.
 //!
-//! Each answer is itself an `Expr` holding a matrix, so results can be fed
-//! straight back into another operation.
+//! A matrix token stores `Matrix<Expr<T>>` — its entries follow the tree's own
+//! leaf type — so every answer is an `Expr<T>` holding a matrix of the same
+//! coefficient, and results can be fed straight back into another operation.
 
 use crate::math::algebra::linear::{Matrix, MatrixMul, SquareMatrixFns, Vector};
-use crate::math::numeric::FloatType;
+use crate::math::numeric::SymbolicLeaf;
 use crate::math::parse::lexer::Token;
 use crate::math::structs::expr::node::{Node, NodeValue};
 use crate::math::structs::expr::{Expr, ExprError};
 use crate::math::structs::solution::Solution;
 
-use std::fmt::Display;
-
-/// Re-type an expression computed over the matrix entry type (`Expr<Real>`)
-/// into this expression's leaf type.
-///
-/// Only `Token::Float` leaves change; matrix and vector tokens pass through
-/// untouched because they are leaf-fixed (`Matrix<Expr>`), so the result stays
-/// consistent with how a matrix literal is stored in any tree.
-fn retype<T: FloatType + Display>(expr: &Expr) -> Expr<T> {
-    Expr::from_node(Node::from_real(expr.tree()))
-}
-
-/// Wrap a matrix back into an expression of leaf type `T`.
-///
-/// The matrix token is leaf-fixed (`Matrix<Expr>`), so the wrap is exact for
-/// every `T`.
-fn matrix_into_expr<T: FloatType + Display>(matrix: Matrix<Expr>) -> Expr<T> {
-    Expr::from_node(Node::matrix(matrix))
-}
-
-/// Wrap a vector back into an expression of leaf type `T`.
-fn vector_into_expr<T: FloatType + Display>(vector: Vector<Expr>) -> Expr<T> {
-    Expr::from_node(Node::vector(vector))
-}
-
-impl<T: FloatType + Display> Expr<T> {
+impl<T> Expr<T>
+where
+    T: SymbolicLeaf,
+{
     /// The matrix this expression holds, or `None` when it is not a matrix.
     ///
     /// A matrix literal such as `[[1, 2], [3, 4]]` parses to an expression
     /// whose value *is* the matrix; this pulls it back out. Anything else — a
     /// number, a variable, `x + 1`, ... — returns `None`.
-    ///
-    /// Matrix and vector tokens are leaf-fixed: they store `Matrix<Expr>`
-    /// regardless of this expression's own float type, so every tree shares the
-    /// same matrix representation (see `Token::Matrix`).
     #[must_use]
-    pub fn as_matrix(&self) -> Option<Matrix<Expr>> {
+    pub fn as_matrix(&self) -> Option<Matrix<Expr<T>>> {
         match &self.tree.inner.borrow().value {
             NodeValue::Operand(Token::Matrix(matrix)) => Some(matrix.clone()),
             _ => None,
@@ -74,7 +49,7 @@ impl<T: FloatType + Display> Expr<T> {
 
     /// The vector this expression holds, or `None` when it is not a vector.
     #[must_use]
-    pub fn as_vector(&self) -> Option<Vector<Expr>> {
+    pub fn as_vector(&self) -> Option<Vector<Expr<T>>> {
         match &self.tree.inner.borrow().value {
             NodeValue::Operand(Token::Vector(vector)) => Some(vector.clone()),
             _ => None,
@@ -88,13 +63,13 @@ impl<T: FloatType + Display> Expr<T> {
     }
 
     /// The matrix this expression holds, or [`ExprError::NotAMatrix`].
-    fn matrix_or_error(&self) -> Result<Matrix<Expr>, ExprError> {
+    fn matrix_or_error(&self) -> Result<Matrix<Expr<T>>, ExprError> {
         self.as_matrix().ok_or(ExprError::NotAMatrix)
     }
 
     /// The matrix this expression holds, or [`ExprError::NotSquare`] when it
     /// is not square.
-    fn square_or_error(&self) -> Result<Matrix<Expr>, ExprError> {
+    fn square_or_error(&self) -> Result<Matrix<Expr<T>>, ExprError> {
         let matrix = self.matrix_or_error()?;
         if matrix.rows() != matrix.columns() {
             return Err(ExprError::NotSquare {
@@ -111,7 +86,9 @@ impl<T: FloatType + Display> Expr<T> {
     ///
     /// [`ExprError::NotAMatrix`] when the expression is not a matrix.
     pub fn transpose(&self) -> Result<Self, ExprError> {
-        Ok(matrix_into_expr(self.matrix_or_error()?.transpose()))
+        Ok(Expr::from_node(Node::matrix(
+            self.matrix_or_error()?.transpose(),
+        )))
     }
 
     /// The row echelon form of this matrix.
@@ -120,7 +97,9 @@ impl<T: FloatType + Display> Expr<T> {
     ///
     /// [`ExprError::NotAMatrix`] when the expression is not a matrix.
     pub fn r#ref(&self) -> Result<Self, ExprError> {
-        Ok(matrix_into_expr(self.matrix_or_error()?.r#ref()))
+        Ok(Expr::from_node(Node::matrix(
+            self.matrix_or_error()?.r#ref(),
+        )))
     }
 
     /// The reduced row echelon form of this matrix.
@@ -129,7 +108,9 @@ impl<T: FloatType + Display> Expr<T> {
     ///
     /// [`ExprError::NotAMatrix`] when the expression is not a matrix.
     pub fn rref(&self) -> Result<Self, ExprError> {
-        Ok(matrix_into_expr(self.matrix_or_error()?.rref()))
+        Ok(Expr::from_node(Node::matrix(
+            self.matrix_or_error()?.rref(),
+        )))
     }
 
     /// The rank of this matrix, i.e. the dimension of its column space.
@@ -158,7 +139,7 @@ impl<T: FloatType + Display> Expr<T> {
     /// [`ExprError::NotSquare`] when it is not square.
     pub fn det(&self) -> Result<Self, ExprError> {
         let value = self.square_or_error()?.det();
-        Ok(retype(&value))
+        Ok(value)
     }
 
     /// The inverse of this matrix.
@@ -173,7 +154,7 @@ impl<T: FloatType + Display> Expr<T> {
             .square_or_error()?
             .inv()
             .ok_or(ExprError::Undefined("the matrix is singular, so it has no inverse"))?;
-        Ok(matrix_into_expr(inverse))
+        Ok(Expr::from_node(Node::matrix(inverse)))
     }
 
     /// The eigenvalues of this matrix, repeated with multiplicity.
@@ -188,7 +169,7 @@ impl<T: FloatType + Display> Expr<T> {
         let values = self.square_or_error()?.eigenvalues().ok_or(ExprError::Undefined(
             "the eigenvalues cannot be computed exactly",
         ))?;
-        Ok(values.iter().map(retype::<T>).collect())
+        Ok(values)
     }
 
     /// A linearly independent set of eigenvectors of this matrix.
@@ -207,7 +188,7 @@ impl<T: FloatType + Display> Expr<T> {
             .into_vec()
             .into_iter()
             .map(|vector| vector.to_matrix())
-            .map(matrix_into_expr)
+            .map(|matrix| Expr::from_node(Node::matrix(matrix)))
             .collect())
     }
 
@@ -223,7 +204,7 @@ impl<T: FloatType + Display> Expr<T> {
             .square_or_error()?
             .lu_factorisation()
             .ok_or(ExprError::Undefined("the matrix has a zero pivot, so it has no LU decomposition"))?;
-        Ok(matrix_into_expr(lower.mul_matrix(&upper)))
+        Ok(Expr::from_node(Node::matrix(lower.mul_matrix(&upper))))
     }
 
     /// The QR decomposition `Q * R` of this matrix, which multiplies back to it.
@@ -237,7 +218,9 @@ impl<T: FloatType + Display> Expr<T> {
         let (orthogonal, upper) = self.square_or_error()?.qr_factorisation().ok_or(
             ExprError::Undefined("the columns are linearly dependent, so there is no QR decomposition"),
         )?;
-        Ok(matrix_into_expr(orthogonal.mul_matrix(&upper)))
+        Ok(Expr::from_node(Node::matrix(
+            orthogonal.mul_matrix(&upper),
+        )))
     }
 
     /// The diagonalisation `P * D * P^-1` of this matrix, which multiplies back
@@ -258,9 +241,9 @@ impl<T: FloatType + Display> Expr<T> {
         let inverse = eigenvectors.inv().ok_or(ExprError::Undefined(
             "the eigenvectors do not form an invertible basis",
         ))?;
-        Ok(matrix_into_expr(
+        Ok(Expr::from_node(Node::matrix(
             eigenvectors.mul_matrix(&diagonal_matrix).mul_matrix(&inverse),
-        ))
+        )))
     }
 
     /// The singular value decomposition `U * S * V^T` of this matrix, which
@@ -278,11 +261,18 @@ impl<T: FloatType + Display> Expr<T> {
             .ok_or(ExprError::Undefined("no singular value decomposition is available"))?;
         let (left, singular_values, right) = decomposition.into_parts();
         let sigma = Matrix::from_diagonal(&singular_values);
-        Ok(matrix_into_expr(
+        Ok(Expr::from_node(Node::matrix(
             left.mul_matrix(&sigma).mul_matrix(&right.transpose()),
-        ))
+        )))
     }
+}
 
+/// The step-tracked operations. They record entries whose readability comes
+/// from the simplifier, so the leaf type must drive the symbolic engine too.
+impl<T> Expr<T>
+where
+    T: SymbolicLeaf,
+{
     /// Row echelon form, recording each elementary row operation.
     ///
     /// When `normalise` is set the pivot is also scaled to `1`.
@@ -290,7 +280,10 @@ impl<T: FloatType + Display> Expr<T> {
     /// # Errors
     ///
     /// [`ExprError::NotAMatrix`] when the expression is not a matrix.
-    pub fn row_reduce_solution(&self, normalise: bool) -> Result<Solution, ExprError> {
+    pub fn row_reduce_solution(
+        &self,
+        normalise: bool,
+    ) -> Result<Solution<Expr<T>, Expr<T>>, ExprError> {
         Ok(self.matrix_or_error()?.row_reduce_solution(normalise))
     }
 
@@ -300,7 +293,7 @@ impl<T: FloatType + Display> Expr<T> {
     ///
     /// [`ExprError::NotAMatrix`] when the expression is not a matrix, or
     /// [`ExprError::NotSquare`] when it is not square.
-    pub fn determinant_solution(&self) -> Result<Solution, ExprError> {
+    pub fn determinant_solution(&self) -> Result<Solution<Expr<T>, Expr<T>>, ExprError> {
         self.square_or_error()?
             .determinant_solution()
             .ok_or(ExprError::Undefined("the determinant has no answer"))
@@ -313,7 +306,7 @@ impl<T: FloatType + Display> Expr<T> {
     /// [`ExprError::NotAMatrix`] when the expression is not a matrix,
     /// [`ExprError::NotSquare`] when it is not square, or
     /// [`ExprError::Undefined`] when it is singular.
-    pub fn inverse_solution(&self) -> Result<Solution, ExprError> {
+    pub fn inverse_solution(&self) -> Result<Solution<Expr<T>, Expr<T>>, ExprError> {
         self.square_or_error()?
             .inverse_solution()
             .ok_or(ExprError::Undefined("the matrix is singular, so it has no inverse"))
@@ -326,7 +319,7 @@ impl<T: FloatType + Display> Expr<T> {
     /// [`ExprError::NotAMatrix`] when the expression is not a matrix, or
     /// [`ExprError::Undefined`] when a column is linearly dependent on the
     /// previous ones.
-    pub fn qr_solution(&self) -> Result<Solution, ExprError> {
+    pub fn qr_solution(&self) -> Result<Solution<Expr<T>, Expr<T>>, ExprError> {
         self.matrix_or_error()?.qr_solution().ok_or(ExprError::Undefined(
             "the columns are linearly dependent, so there is no QR decomposition",
         ))
@@ -338,7 +331,7 @@ impl<T: FloatType + Display> Expr<T> {
     ///
     /// [`ExprError::NotAMatrix`] when the expression is not a matrix, or
     /// [`ExprError::Undefined`] when no decomposition is available.
-    pub fn svd_solution(&self) -> Result<Solution, ExprError> {
+    pub fn svd_solution(&self) -> Result<Solution<Expr<T>, Expr<T>>, ExprError> {
         self.matrix_or_error()?
             .svd_solution()
             .ok_or(ExprError::Undefined("no singular value decomposition is available"))
@@ -351,7 +344,7 @@ impl<T: FloatType + Display> Expr<T> {
     /// [`ExprError::NotAMatrix`] when the expression is not a matrix,
     /// [`ExprError::NotSquare`] when it is not square, or
     /// [`ExprError::Undefined`] when the matrix is not diagonalisable.
-    pub fn eigen_solution(&self) -> Result<Solution, ExprError> {
+    pub fn eigen_solution(&self) -> Result<Solution<Expr<T>, Expr<T>>, ExprError> {
         self.square_or_error()?
             .eigen_solution()
             .ok_or(ExprError::Undefined("the matrix is not diagonalisable"))
@@ -369,9 +362,12 @@ impl<T: FloatType + Display> Expr<T> {
 /// let vector = create_expr!("[1, 2, 3]").unwrap();
 /// assert!(vector.is_vector());
 /// ```
-impl<T: FloatType + Display> Expr<T> {
+impl<T> Expr<T>
+where
+    T: SymbolicLeaf,
+{
     /// The vector this expression holds, or [`ExprError::NotAVector`].
-    fn vector_or_error(&self) -> Result<Vector<Expr>, ExprError> {
+    fn vector_or_error(&self) -> Result<Vector<Expr<T>>, ExprError> {
         self.as_vector().ok_or(ExprError::NotAVector)
     }
 
@@ -403,7 +399,7 @@ impl<T: FloatType + Display> Expr<T> {
             .vector_or_error()?
             .as_slice()
             .iter()
-            .map(retype::<T>)
+            .cloned()
             .collect())
     }
 
@@ -421,7 +417,7 @@ impl<T: FloatType + Display> Expr<T> {
                 "the vectors have different lengths, so their dot product is undefined",
             ));
         }
-        Ok(retype(&left.dot_product(&right)))
+        Ok(left.dot_product(&right))
     }
 
     /// The squared Euclidean norm of this vector.
@@ -430,7 +426,7 @@ impl<T: FloatType + Display> Expr<T> {
     ///
     /// [`ExprError::NotAVector`] when the expression is not a vector.
     pub fn norm_squared(&self) -> Result<Self, ExprError> {
-        Ok(retype(&self.vector_or_error()?.norm_squared()))
+        Ok(self.vector_or_error()?.norm_squared())
     }
 
     /// Whether this vector has unit length.
@@ -470,11 +466,8 @@ impl<T: FloatType + Display> Expr<T> {
     ///
     /// [`ExprError::NotAVector`] when the expression is not a vector.
     pub fn scale(&self, scalar: Self) -> Result<Self, ExprError> {
-        // `Vector::scale` works over the leaf-fixed entry type; carry the
-        // caller's scalar across the float bridge first.
-        let scalar = Expr::from_node(Node::<T>::from_typed(scalar.tree()));
         let scaled = self.vector_or_error()?.scale(scalar);
-        Ok(vector_into_expr(scaled))
+        Ok(Expr::from_node(Node::vector(scaled)))
     }
 
     /// This vector as a one-column matrix expression.
@@ -483,6 +476,8 @@ impl<T: FloatType + Display> Expr<T> {
     ///
     /// [`ExprError::NotAVector`] when the expression is not a vector.
     pub fn to_matrix(&self) -> Result<Self, ExprError> {
-        Ok(matrix_into_expr(self.vector_or_error()?.to_matrix()))
+        Ok(Expr::from_node(Node::matrix(
+            self.vector_or_error()?.to_matrix(),
+        )))
     }
 }

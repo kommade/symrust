@@ -11,6 +11,7 @@ use crate::{math::numeric::{FloatType, Real},
 };
 
 use super::{Node, NodeInner, NodeValue, OpNode};
+use super::convert::{matrix_from_real, vector_from_real};
 
 impl<T> Node<T> {
     fn new(inner: NodeInner<T>) -> Self {
@@ -90,19 +91,19 @@ impl<T: FloatType + Display> Node<T> {
             }
         }
     }
-    /// A matrix-literal leaf, e.g. `[[1, 2], [3, 4]]`.
+    /// A matrix-literal leaf, e.g. `[[1, 2], [3, 4]]`, over this leaf type.
     ///
     /// Matrices are stored as a single matrix token, which is what lets a
     /// matrix participate in an expression tree (and be a step result).
     #[must_use]
-    pub fn matrix(matrix: crate::math::algebra::linear::Matrix<crate::math::structs::expr::Expr>) -> Self {
+    pub fn matrix(matrix: crate::math::algebra::linear::Matrix<crate::math::structs::expr::Expr<T>>) -> Self {
         NodeInner::operand(Token::Matrix(matrix)).wrap()
     }
-    /// A vector-literal leaf, e.g. `[1, 2, 3]`.
+    /// A vector-literal leaf, e.g. `[1, 2, 3]`, over this leaf type.
     ///
     /// A vector is its own kind of value, distinct from a one-column matrix.
     #[must_use]
-    pub fn vector(vector: crate::math::algebra::linear::Vector<crate::math::structs::expr::Expr>) -> Self {
+    pub fn vector(vector: crate::math::algebra::linear::Vector<crate::math::structs::expr::Expr<T>>) -> Self {
         NodeInner::operand(Token::Vector(vector)).wrap()
     }
     /// A binary operation node, e.g. `left + right`.
@@ -167,8 +168,8 @@ impl<T: FloatType + Display> Node<T> {
                 Token::Indp(c) => Token::Indp(*c),
                 Token::Var(c) => Token::Var(*c),
                 Token::RootSum(data) => Token::RootSum(data.clone()),
-                Token::Matrix(matrix) => Token::Matrix(matrix.clone()),
-                Token::Vector(vector) => Token::Vector(vector.clone()),
+                Token::Matrix(matrix) => Token::Matrix(matrix_from_real(matrix)),
+                Token::Vector(vector) => Token::Vector(vector_from_real(vector)),
                 Token::LBracket => Token::LBracket,
                 Token::RBracket => Token::RBracket,
                 Token::Comma => Token::Comma,
@@ -288,6 +289,17 @@ impl<T: FloatType + Display> NodeInner<T> {
     }
 }
 impl<T: FloatType + Display> NodeInner<T> {
+    /// A rendering-free label for a token, for panic messages that must work
+    /// for every leaf type (some need no `Display` bound beyond the trait).
+    fn token_kind_label(token: &Token<T>) -> &'static str {
+        match token {
+            Token::Operator(_) => "operator",
+            Token::Function(_) => "function",
+            Token::LPar | Token::RPar => "bracket",
+            _ => "token",
+        }
+    }
+
     pub(crate) fn wrap(self) -> Node<T> {
         Node::new(self)
     }
@@ -307,7 +319,7 @@ impl<T: FloatType + Display> NodeInner<T> {
                 false,
             ),
             Token::Operator(_) | Token::Function(_) | Token::LPar | Token::RPar => {
-                panic!("Invalid token for operand: {token}")
+                panic!("Invalid token for operand: {}", Self::token_kind_label(&token))
             }
             _ => (false, false, false),
         };
@@ -329,7 +341,7 @@ impl<T: FloatType + Display> NodeInner<T> {
             || match token {
                 Token::Function(_) => true,
                 Token::Operator(_) => false,
-                _ => panic!("Invalid token for operator: {token}"),
+                _ => panic!("Invalid token for operator: {}", Self::token_kind_label(&token)),
             };
         drop(left_borrow);
         drop(right_borrow);
