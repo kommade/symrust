@@ -6,7 +6,7 @@ use std::{cell::RefCell, cmp::Ordering, error::Error, fmt::Display, ops::Neg, rc
 
 
 
-use crate::{math::numeric::{FloatType, Real},
+use crate::{math::numeric::FloatType,
     math::parse::lexer::{Const, Func, Op, Token},
     math::structs::expr::Expr,
     math::utils::fmt::unnecessary_brackets,
@@ -505,10 +505,20 @@ impl<T: FloatType + Display + Neg<Output = T> + std::fmt::Debug> NodeFunctions<T
     }
 }
 
-/// The `Real`-only simplifications, separate from [`NodeFunctions`] because
-/// they rewrite the tree using the `Real`-specific helpers in `simplify` and
-/// `inspect`.
-impl NodeSimplify for Node {
+/// The node simplifications, available for every leaf type.
+///
+/// These rewrite the tree rather than build it. Coefficients are read and
+/// re-written through the leaf's own float type, so the same rules run for
+/// `Real` (exactly) and for machine floats (to their precision). They lean on
+/// the helpers in `simplify` and `inspect`, which are generic over `T` too.
+///
+/// The `Neg` and `Debug` bounds are the ones [`NodeFunctions`] needs (the rules
+/// negate subexpressions), and `PartialOrd` orders terms by degree.
+impl<T> NodeSimplify for Node<T>
+where
+    T: FloatType + Display + PartialOrd + Neg<Output = T> + std::fmt::Debug,
+    NodeInner<T>: Display,
+{
     fn simplify(self, expand: bool, combine_fns: bool) -> Self {
         let node = self.inner.borrow();
         match node {
@@ -524,13 +534,13 @@ impl NodeSimplify for Node {
                 };
                 if let NodeValue::Operator(inner_op_node) = &arg.inner.borrow().value {
                     if matches!(inner_op_node.token, Token::Operator(Op::Pow)) {
-                        return inner_op_node.right.clone().mul(NodeInner::<Real>::from_function(
+                        return inner_op_node.right.clone().mul(NodeInner::<T>::from_function(
                             Func::Log(base),
                             inner_op_node.left.clone(),
                         ));
                     }
                 }
-                NodeInner::<Real>::from_function(Func::Log(base), arg)
+                NodeInner::<T>::from_function(Func::Log(base), arg)
             }
             // `sqrt(u^2)` is `|u|`, and `|u|` is `u` when `u` cannot be
             // negative. Without this a perfectly square radicand — such as the
@@ -551,7 +561,7 @@ impl NodeSimplify for Node {
                 if let Some(base) = square_root_of_rational_square(&simplified) {
                     return base;
                 }
-                NodeInner::<Real>::from_function(Func::Sqrt, simplified)
+                NodeInner::<T>::from_function(Func::Sqrt, simplified)
             }
             t if t.is_empty() || t.is_operand() || t.is_fn() => {
                 drop(t);
@@ -594,7 +604,7 @@ impl NodeSimplify for Node {
                             }
                             if op.is_mul() {
                                 if left_borrow.is_zero() || right_borrow.is_zero() {
-                                    return NodeInner::<Real>::zero();
+                                    return NodeInner::<T>::zero();
                                 }
                                 if left_borrow.is_one() {
                                     drop(right_borrow);
@@ -624,7 +634,7 @@ impl NodeSimplify for Node {
                                 }
                             } else if op == Op::Div {
                                 if left_borrow.is_zero() {
-                                    return NodeInner::<Real>::zero();
+                                    return NodeInner::<T>::zero();
                                 }
                                 if right_borrow.is_one() {
                                     drop(left_borrow);
@@ -634,7 +644,7 @@ impl NodeSimplify for Node {
                                     return left.negate();
                                 }
                                 let left_const_val = if !left_borrow.has_indp
-                                    && !NodeInner::<Real>::contains_named_constant(&left)
+                                    && !NodeInner::<T>::contains_named_constant(&left)
                                 {
                                     left_borrow.evaluate()
                                 } else {
@@ -656,7 +666,7 @@ impl NodeSimplify for Node {
                                 drop(right_borrow);
                                 if let Some(num_val) = left_const_val {
                                     if let Some((den_const, den_rest)) =
-                                        NodeInner::<Real>::extract_constant_factor(&right)
+                                        NodeInner::<T>::extract_constant_factor(&right)
                                     {
                                         if let Some(den_val) = den_const.inner.borrow().evaluate() {
                                             if !den_val.is_zero() {
@@ -666,16 +676,16 @@ impl NodeSimplify for Node {
                                                 // instead of a long decimal (`.333…`). Only
                                                 // an integer quotient is folded to a float.
                                                 if !result_val.is_integer() {
-                                                    return NodeInner::<Real>::from_operation(
+                                                    return NodeInner::<T>::from_operation(
                                                         Op::Div, left, right,
                                                     );
                                                 }
                                                 let new_numerator =
-                                                    NodeInner::<Real>::from_float(result_val).wrap();
+                                                    NodeInner::<T>::from_float(result_val).wrap();
                                                 if den_rest.inner.borrow().is_one() {
                                                     return new_numerator;
                                                 } else {
-                                                    return NodeInner::<Real>::from_operation(
+                                                    return NodeInner::<T>::from_operation(
                                                         Op::Div,
                                                         new_numerator,
                                                         den_rest,
@@ -686,10 +696,10 @@ impl NodeSimplify for Node {
                                         }
                                     }
                                 }
-                                return NodeInner::<Real>::from_operation(Op::Div, left, right);
+                                return NodeInner::<T>::from_operation(Op::Div, left, right);
                             } else if op == Op::Pow {
                                 if right_borrow.is_zero() {
-                                    return NodeInner::<Real>::one();
+                                    return NodeInner::<T>::one();
                                 } else if right_borrow.is_one() {
                                     drop(left_borrow);
                                     return left;
@@ -713,16 +723,16 @@ impl NodeSimplify for Node {
                                 if left_borrow.is_sqrt()
                                     && let Some(exponent) = right_borrow.evaluate()
                                     && exponent.is_integer()
-                                    && (exponent.clone() / Real::from_i64(2)).is_integer()
+                                    && (exponent.clone() / T::from_i64(2)).is_integer()
                                 {
                                     let radicand = op_node.left.inner.borrow().get_right().ok();
                                     if let Some(radicand) = radicand {
-                                        let halved = exponent / Real::from_i64(2);
+                                        let halved = exponent / T::from_i64(2);
                                         drop(left_borrow);
                                         drop(right_borrow);
                                         let half_node =
-                                            NodeInner::<Real>::from_float(halved).wrap();
-                                        return NodeInner::<Real>::from_operation(
+                                            NodeInner::<T>::from_float(halved).wrap();
+                                        return NodeInner::<T>::from_operation(
                                             Op::Pow,
                                             radicand,
                                             half_node,
@@ -769,11 +779,11 @@ impl NodeSimplify for Node {
                                     // subtraction would flip its sign.
                                     drop(left_borrow);
                                     drop(right_borrow);
-                                    return NodeInner::<Real>::from_operation(Op::Sub, left, right);
+                                    return NodeInner::<T>::from_operation(Op::Sub, left, right);
                                 }
                             }
                             if op.is_mul() || op == Op::Div {
-                                if let Some(result) = NodeInner::<Real>::try_combine_pow_terms(
+                                if let Some(result) = NodeInner::<T>::try_combine_pow_terms(
                                     &left,
                                     &right,
                                     &op,
@@ -782,19 +792,19 @@ impl NodeSimplify for Node {
                                     return result.simplify(expand, false);
                                 }
                             } else if op == Op::Add || op == Op::Sub {
-                                let current = NodeInner::<Real>::from_operation(
+                                let current = NodeInner::<T>::from_operation(
                                     op.clone(),
                                     left.clone(),
                                     right.clone(),
                                 );
-                                if let Some(result) = NodeInner::<Real>::combine_sum(&current, combine_fns)
+                                if let Some(result) = NodeInner::<T>::combine_sum(&current, combine_fns)
                                 {
                                     return result.simplify(expand, false);
                                 }
                             }
                             drop(left_borrow);
                             drop(right_borrow);
-                            NodeInner::<Real>::from_operation(op, left, right)
+                            NodeInner::<T>::from_operation(op, left, right)
                         } else {
                             unreachable!()
                         }
@@ -807,7 +817,7 @@ impl NodeSimplify for Node {
                         drop(left_borrow);
                         left
                     }
-                    (true, true) => NodeInner::<Real>::empty(),
+                    (true, true) => NodeInner::<T>::empty(),
                 }
             }
             _ => unreachable!(),
@@ -825,13 +835,16 @@ impl NodeSimplify for Node {
                         drop(node);
                         let left_factored = left.factorise();
                         let right_factored = right.factorise();
-                        return NodeInner::<Real>::from_operation(op_clone, left_factored, right_factored)
+                        return NodeInner::<T>::from_operation(op_clone, left_factored, right_factored)
                             .simplify(false, true);
                     }
                 }
             }
         }
-        fn collect_sum_terms(node: Node, sign: i8, acc: &mut Vec<(Node, i8)>) {
+        fn collect_sum_terms<T>(node: Node<T>, sign: i8, acc: &mut Vec<(Node<T>, i8)>)
+        where
+            T: FloatType + Display,
+        {
             let borrowed = node.inner.borrow();
             if let NodeValue::Operator(op_node) = &borrowed.value {
                 if let Token::Operator(op) = &op_node.token {
@@ -860,7 +873,10 @@ impl NodeSimplify for Node {
             acc.push((node, sign));
         }
 
-        fn collect_mul_terms(node: Node, acc: &mut Vec<Node>) {
+        fn collect_mul_terms<T>(node: Node<T>, acc: &mut Vec<Node<T>>)
+        where
+            T: FloatType + Display,
+        {
             let borrowed = node.inner.borrow();
             if let NodeValue::Operator(op_node) = &borrowed.value {
                 if let Token::Operator(op) = &op_node.token {
@@ -873,9 +889,9 @@ impl NodeSimplify for Node {
                         return;
                     } else if *op == Op::Div && !op_node.left.inner.borrow().is_one() {
                         let left = op_node.left.clone();
-                        let right = NodeInner::<Real>::from_operation(
+                        let right = NodeInner::<T>::from_operation(
                             Op::Div,
-                            NodeInner::<Real>::one(),
+                            NodeInner::<T>::one(),
                             op_node.right.clone(),
                         );
                         drop(borrowed);
@@ -889,35 +905,44 @@ impl NodeSimplify for Node {
             acc.push(node);
         }
 
-        fn rebuild_product(factors: Vec<Node>) -> Node {
+        fn rebuild_product<T>(factors: Vec<Node<T>>) -> Node<T>
+        where
+            T: FloatType + Display,
+        {
             if factors.is_empty() {
-                return NodeInner::<Real>::one();
+                return NodeInner::<T>::one();
             }
             let mut iter = factors.into_iter();
             let mut acc = iter.next().unwrap();
             for factor in iter {
-                acc = NodeInner::<Real>::from_operation(Op::ImplicitMul, acc, factor);
+                acc = NodeInner::<T>::from_operation(Op::ImplicitMul, acc, factor);
             }
             acc
         }
 
-        fn rebuild_sum(terms: Vec<Node>) -> Node {
+        fn rebuild_sum<T>(terms: Vec<Node<T>>) -> Node<T>
+        where
+            T: FloatType + Display,
+        {
             if terms.is_empty() {
-                return NodeInner::<Real>::zero();
+                return NodeInner::<T>::zero();
             }
             let mut iter = terms.into_iter();
             let mut acc = iter.next().unwrap();
             for term in iter {
-                acc = NodeInner::<Real>::from_operation(Op::Add, acc, term);
+                acc = NodeInner::<T>::from_operation(Op::Add, acc, term);
             }
             acc
         }
 
-        fn sort_terms(terms: &mut Vec<(usize, Node)>) {
+        fn sort_terms<T>(terms: &mut Vec<(usize, Node<T>)>)
+        where
+            T: FloatType + Display + PartialOrd + Neg<Output = T> + std::fmt::Debug,
+        {
             terms.sort_by(|(idx_a, node_a), (idx_b, node_b)| {
-                let degree_a = NodeInner::<Real>::extract_pow_components(node_a, true)
+                let degree_a = NodeInner::<T>::extract_pow_components(node_a, true)
                     .and_then(|comp| comp.exponent.inner.borrow().evaluate());
-                let degree_b = NodeInner::<Real>::extract_pow_components(node_b, true)
+                let degree_b = NodeInner::<T>::extract_pow_components(node_b, true)
                     .and_then(|comp| comp.exponent.inner.borrow().evaluate());
                 match (degree_a, degree_b) {
                     (Some(a), Some(b)) => b.partial_cmp(&a).unwrap_or(Ordering::Equal),
@@ -928,12 +953,15 @@ impl NodeSimplify for Node {
             });
         }
 
-        fn remove_common_factor(term: Node, factor: &Node) -> Option<Node> {
+        fn remove_common_factor<T>(term: Node<T>, factor: &Node<T>) -> Option<Node<T>>
+        where
+            T: FloatType + Display,
+        {
             let mut factors = Vec::new();
             collect_mul_terms(term, &mut factors);
             if let Some(index) = factors
                 .iter()
-                .position(|existing| NodeInner::<Real>::nodes_equal(existing, factor))
+                .position(|existing| NodeInner::<T>::nodes_equal(existing, factor))
             {
                 factors.remove(index);
                 return Some(rebuild_product(factors));
@@ -941,7 +969,10 @@ impl NodeSimplify for Node {
             None
         }
 
-        fn has_common_factor(term: Node, factor: &Node) -> bool {
+        fn has_common_factor<T>(term: Node<T>, factor: &Node<T>) -> bool
+        where
+            T: FloatType + Display,
+        {
             remove_common_factor(term, factor).is_some()
         }
 
@@ -985,8 +1016,8 @@ impl NodeSimplify for Node {
         }
 
         sort_terms(&mut new_terms);
-        let ordered_terms: Vec<Node> = new_terms.into_iter().map(|(_, term)| term).collect();
+        let ordered_terms: Vec<Node<T>> = new_terms.into_iter().map(|(_, term)| term).collect();
         let grouped = rebuild_sum(ordered_terms).simplify(false, true);
-        NodeInner::<Real>::from_operation(Op::ImplicitMul, factor, grouped).simplify(false, true)
+        NodeInner::<T>::from_operation(Op::ImplicitMul, factor, grouped).simplify(false, true)
     }
 }

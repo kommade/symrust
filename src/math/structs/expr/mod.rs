@@ -72,20 +72,28 @@ impl<T: FloatType + Display + Neg<Output = T> + std::fmt::Debug> Neg for Expr<T>
 
 /// An expression is a valid coefficient for the linear-algebra routines.
 ///
-/// This is what lets a matrix hold symbolic entries: `Matrix<Expr>` works with
-/// every generic algorithm in [`crate::math::algebra::linear`]. The conversions are
-/// deliberately lossy in the usual way for symbolic values — `as_f64` returns
-/// `NaN` when the expression cannot be folded to a number, the square roots
-/// build `sqrt` nodes rather than guessing a numeric root, and
+/// This is what lets a matrix hold symbolic entries: `Matrix<Expr<T>>` works
+/// with every generic algorithm in [`crate::math::algebra::linear`]. The
+/// conversions are deliberately lossy in the usual way for symbolic values —
+/// `as_f64` returns `NaN` when the expression cannot be folded to a number,
+/// the square roots build `sqrt` nodes rather than guessing a numeric root, and
 /// [`is_floating`](Self::is_floating) is `false` so the numeric-only SVD
 /// fallback is not applied to symbolic entries.
-impl ExactField for Expr<Real> {
+///
+/// The `NodeSimplify` bound keeps [`is_zero_value`](Self::is_zero_value)
+/// exact: it simplifies before deciding, so a pivot that merely *evaluates* to
+/// zero is still recognised as one.
+impl<T> ExactField for Expr<T>
+where
+    T: FloatType + Display + Neg<Output = T> + std::fmt::Debug,
+    Node<T>: NodeSimplify,
+{
     fn multiplicative_identity() -> Self {
-        Self::from_node(NodeInner::<Real>::one())
+        Self::from_node(NodeInner::<T>::one())
     }
 
     fn additive_identity() -> Self {
-        Self::from_node(NodeInner::<Real>::zero())
+        Self::from_node(NodeInner::<T>::zero())
     }
 
     fn as_f64(self) -> f64 {
@@ -113,18 +121,22 @@ impl ExactField for Expr<Real> {
     }
 
     fn from_f64(value: f64) -> Self {
-        Self::from_node(NodeInner::<Real>::from_float(Real::from_f64(value)).wrap())
+        use crate::math::numeric::FloatBridge;
+        Self::from_node(NodeInner::<T>::from_float(
+            T::from_float(Real::from_f64(value).as_inner().clone()),
+        )
+        .wrap())
     }
 
     fn sqrt(self) -> Self {
-        Self::from_node(NodeInner::<Real>::from_function(
+        Self::from_node(NodeInner::<T>::from_function(
             crate::math::parse::lexer::Func::Sqrt,
             self.tree,
         ))
     }
 
     fn try_sqrt(self) -> Option<Self> {
-        Some(Self::from_node(NodeInner::<Real>::from_function(
+        Some(Self::from_node(NodeInner::<T>::from_function(
             crate::math::parse::lexer::Func::Sqrt,
             self.tree,
         )))
@@ -149,22 +161,23 @@ impl<T: FloatType + Display> Default for Expr<T> {
     }
 }
 
-impl Display for Expr<Real> {
+impl<T: FloatType + Display> Display for Expr<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.tree.inner.borrow())
     }
 }
 
-impl Expr<Real> {
+impl<T: FloatType + Display> Expr<T> {
     /// Create a new expression from a string. Takes an optional second argument for independent variable.
     /// `None` can be passed as the second argument to use the default independent variable `x`.
     /// Prefer using the macro [`create_expr!`][crate::create_expr] for a more concise syntax.
+    ///
+    /// Numeric literals parse straight into this expression's leaf type `T`;
+    /// for the default `Real` this is the historical `Expr::new`. This is the
+    /// same path [`parse`](Self::parse) takes, kept under the shorter name for
+    /// the default type.
     pub fn new(str: String, indp_var: Option<char>) -> Result<Self, ExprError> {
-        let mut lexer = Lexer::new(str, indp_var);
-        let lexed = lexer.lex()?;
-        let mut parser = Parser::new(lexed);
-        let tree = parser.parse()?;
-        Ok(Self { tree })
+        Self::parse(str, indp_var)
     }
 }
 
@@ -228,7 +241,7 @@ impl<T: FloatType + Display> Expr<T> {
     }
 }
 
-impl Expr<Real> {
+impl<T: FloatType + Display> Expr<T> {
     /// Whether the expression contains a formal root sum (`Σ_{Z: p(Z)=0} …`).
     ///
     /// A root sum is the exact antiderivative form used when an irreducible
@@ -253,8 +266,10 @@ where
     /// Attempt to simplify the expression. May not always simplify the expression to the simplest form.
     /// Accepts a boolean argument `expand` which, if true, will attempt to expand products during simplification.
     ///
-    /// Symbolic simplification is defined for leaf types whose tree implements
-    /// [`NodeSimplify`]; today that is the default [`Real`].
+    /// Symbolic simplification is defined for every leaf type: the rewriting
+    /// rules work on the tree shape and read coefficients through the leaf's
+    /// own float type, so exact types stay exact and machine floats simplify
+    /// to their precision.
     /// # Examples
     /// ```
     /// use rust_calculus::{create_expr, math::structs::expr::Expr};

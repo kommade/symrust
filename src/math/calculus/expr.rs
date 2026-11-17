@@ -315,11 +315,13 @@ pub(crate) fn equal(left: &Node, right: &Node) -> bool {
 }
 
 /// The independent variable used by the expression, defaulting to `x`.
-pub(crate) fn independent_variable(node: &Node) -> char {
+///
+/// Only the token kinds are inspected, so this works for every leaf type.
+pub(crate) fn independent_variable<T: FloatType + Display>(node: &Node<T>) -> char {
     find_variable(node, 0).unwrap_or('x')
 }
 
-fn find_variable(node: &Node, depth: usize) -> Option<char> {
+fn find_variable<T: FloatType + Display>(node: &Node<T>, depth: usize) -> Option<char> {
     if depth > 256 {
         return None;
     }

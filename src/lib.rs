@@ -71,16 +71,25 @@ mod tests;
 /// let expr = create_expr!("2t^2", 't'; f32).unwrap();
 /// let _: rust_calculus::math::structs::expr::Expr<f32> = expr;
 /// ```
-
 #[macro_export]
 macro_rules! create_expr {
     // Default float type (Real), no independent variable.
+    //
+    // The leaf type is pinned explicitly: with a fully generic expression the
+    // default would be ambiguous as soon as the first call needs a bound
+    // `FloatType` does not carry (Neg, PartialOrd).
     ($e:expr) => {
-        $crate::math::structs::expr::Expr::new($e.to_string(), None)
+        $crate::math::structs::expr::Expr::<$crate::math::numeric::Real>::new(
+            $e.to_string(),
+            None,
+        )
     };
     // Default float type (Real), explicit independent variable.
     ($e:expr, $indp:expr) => {
-        $crate::math::structs::expr::Expr::new($e.to_string(), Some($indp))
+        $crate::math::structs::expr::Expr::<$crate::math::numeric::Real>::new(
+            $e.to_string(),
+            Some($indp),
+        )
     };
     // Caller-chosen float type `T`, no independent variable.
     ($e:expr; $ty:ty) => {

@@ -22,7 +22,7 @@ use super::functions::{NodeFunctions, NodeOperations};
 /// Negation is stored as a subtraction from zero, so without this a product
 /// such as `2 * -x` would render its left factor and then the raw `0 - x`.
 /// Returns `None` when the node is not a negation.
-fn negated_operand(node: &Node<Real>) -> Option<String> {
+fn negated_operand<T: FloatType + Display>(node: &Node<T>) -> Option<String> {
     let borrow = node.inner.borrow();
     let NodeValue::Operator(op_node) = &borrow.value else {
         return None;
@@ -186,7 +186,7 @@ pub(crate) fn vector_to_latex(vector: &crate::math::algebra::linear::Vector<Expr
     )
 }
 
-impl NodeInner {
+impl<T: FloatType + Display> NodeInner<T> {
     pub(crate) fn to_latex(&self) -> Result<String, NodeError> {
         match &self.value {
             NodeValue::Operand(token) => match token {
@@ -356,7 +356,7 @@ impl NodeInner {
     }
 }
 
-impl Display for NodeInner<Real> {
+impl<T: FloatType + Display> Display for NodeInner<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.value {
             NodeValue::Operand(Token::Matrix(ref matrix)) => {
@@ -378,7 +378,7 @@ impl Display for NodeInner<Real> {
                                 // which reads as an exact radical rather than a
                                 // fractional exponent.
                                 if let Some((base, index, power)) =
-                                    NodeInner::<Real>::root_power_parts(&op_node.left, &op_node.right)
+                                    NodeInner::<T>::root_power_parts(&op_node.left, &op_node.right)
                                 {
                                     let base_str = if base.inner.borrow().is_operator() {
                                         format!("({})", base.inner.borrow())
@@ -605,11 +605,10 @@ impl Display for NodeInner<Real> {
         }
     }
 }
-impl PartialEq for NodeInner<Real> {
+/// Two node inners are equal when their LaTeX renderings match. The renderer
+/// is leaf-generic, so the comparison is too.
+impl<T: FloatType + Display> PartialEq for NodeInner<T> {
     fn eq(&self, other: &Self) -> bool {
-        if self.to_latex().unwrap() == other.to_latex().unwrap() {
-            return true;
-        }
-        false
+        self.to_latex().unwrap() == other.to_latex().unwrap()
     }
 }

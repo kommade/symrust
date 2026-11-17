@@ -2,13 +2,16 @@
 //!
 //! These helpers implement the structural half of simplification. They are
 //! split off from [`inspect`] to keep the rewriting rules in one place.
-use std::{cell::RefCell, cmp::Ordering, error::Error, fmt::Display, ops::Neg, rc::Rc};
+//!
+//! Coefficients are accumulated in the tree's own leaf type `T`, so `f64`
+//! trees collect `f64` coefficients and `Real` trees collect exact ones. The
+//! bounds mirror the ones on [`NodeSimplify`], whose rules call into these
+//! helpers.
+use std::{cell::RefCell, cmp::Ordering, fmt::Display, ops::Neg, rc::Rc};
 
-
-
-use crate::{math::numeric::{FloatType, Real},
-    math::parse::lexer::{Const, Func, Op, Token},
-    math::structs::expr::Expr,
+use crate::{
+    math::numeric::FloatType,
+    math::parse::lexer::{Func, Op, Token},
     math::utils::fmt::unnecessary_brackets,
 };
 
@@ -16,8 +19,14 @@ use super::functions::{NodeFunctions, NodeSimplify};
 use super::{Node, NodeError, NodeInner, NodeValue, OpNode};
 use super::inspect::*;
 
-impl NodeInner {
-    pub(crate) fn extract_pow_components(node: &Node, extract_fns: bool) -> Option<PowComponents> {
+impl<T> NodeInner<T>
+where
+    T: FloatType + Display + PartialOrd + Neg<Output = T> + std::fmt::Debug,
+{
+    pub(crate) fn extract_pow_components(
+        node: &Node<T>,
+        extract_fns: bool,
+    ) -> Option<PowComponents<T>> {
         {
             let borrow = node.inner.borrow();
             match &borrow.value {
@@ -129,7 +138,7 @@ impl NodeInner {
         None
     }
 
-    fn combine_coefficients(left: Node, right: Node, op: &Op) -> Node {
+    fn combine_coefficients(left: Node<T>, right: Node<T>, op: &Op) -> Node<T> {
         if *op == Op::Div {
             Self::from_operation(Op::Div, left, right).simplify(false, true)
         } else {
@@ -137,7 +146,7 @@ impl NodeInner {
         }
     }
 
-    fn extract_division(node: &Node) -> Option<(Node, Node)> {
+    fn extract_division(node: &Node<T>) -> Option<(Node<T>, Node<T>)> {
         let borrow = node.inner.borrow();
         if let NodeValue::Operator(op_node) = &borrow.value {
             if let Token::Operator(token_op) = &op_node.token {
@@ -149,7 +158,7 @@ impl NodeInner {
         None
     }
 
-    pub(crate) fn extract_constant_factor(node: &Node) -> Option<(Node, Node)> {
+    pub(crate) fn extract_constant_factor(node: &Node<T>) -> Option<(Node<T>, Node<T>)> {
         let borrow = node.inner.borrow();
         if !borrow.has_indp {
             drop(borrow);
@@ -179,7 +188,7 @@ impl NodeInner {
         None
     }
 
-    fn collect_mul_factors(node: &Node, factors: &mut Vec<Node>) {
+    fn collect_mul_factors(node: &Node<T>, factors: &mut Vec<Node<T>>) {
         let borrow = node.inner.borrow();
         if let NodeValue::Operator(op_node) = &borrow.value {
             if let Token::Operator(op) = &op_node.token {
@@ -197,7 +206,7 @@ impl NodeInner {
         factors.push(node.clone());
     }
 
-    fn rebuild_product_from_factors(mut factors: Vec<Node>) -> Node {
+    fn rebuild_product_from_factors(mut factors: Vec<Node<T>>) -> Node<T> {
         if factors.is_empty() {
             return Self::one();
         }
@@ -210,10 +219,10 @@ impl NodeInner {
     }
 
     fn combine_components_for_mul(
-        left: &PowComponents,
-        right: &PowComponents,
+        left: &PowComponents<T>,
+        right: &PowComponents<T>,
         combine_fns: bool,
-    ) -> Option<Node> {
+    ) -> Option<Node<T>> {
         let mul_op = Op::ImplicitMul;
         if Self::nodes_equal(&left.base, &right.base) {
             let new_coeff = Self::combine_coefficients(
@@ -247,7 +256,7 @@ impl NodeInner {
         None
     }
 
-    fn try_combine_mul_chain(left: &Node, right: &Node, combine_fns: bool) -> Option<Node> {
+    fn try_combine_mul_chain(left: &Node<T>, right: &Node<T>, combine_fns: bool) -> Option<Node<T>> {
         let mut factors = Vec::new();
         Self::collect_mul_factors(left, &mut factors);
         Self::collect_mul_factors(right, &mut factors);
@@ -281,11 +290,11 @@ impl NodeInner {
     }
 
     pub(crate) fn try_combine_pow_terms(
-        left: &Node,
-        right: &Node,
+        left: &Node<T>,
+        right: &Node<T>,
         op: &Op,
         combine_fns: bool,
-    ) -> Option<Node> {
+    ) -> Option<Node<T>> {
         let left_components = Self::extract_pow_components(left, combine_fns);
         let right_components = Self::extract_pow_components(right, combine_fns);
         if let (Some(left_comp), Some(right_comp)) = (&left_components, &right_components) {
@@ -342,7 +351,7 @@ impl NodeInner {
             if let Some(result) = Self::try_combine_mul_chain(left, right, combine_fns) {
                 return Some(result);
             }
-            let combine_with_division = |division: &Node, other: &Node| -> Option<Node> {
+            let combine_with_division = |division: &Node<T>, other: &Node<T>| -> Option<Node<T>> {
                 let (numerator, denominator) = Self::extract_division(division)?;
                 if !Self::is_constant_node(&numerator) {
                     return None;
@@ -367,7 +376,7 @@ impl NodeInner {
         None
     }
 
-    fn collect_sum_terms(node: &Node, sign: i32, terms: &mut Vec<(Node, i32)>) {
+    fn collect_sum_terms(node: &Node<T>, sign: i32, terms: &mut Vec<(Node<T>, i32)>) {
         let borrow = node.inner.borrow();
         if let NodeValue::Operator(op_node) = &borrow.value {
             if let Token::Operator(op) = &op_node.token {
@@ -395,16 +404,16 @@ impl NodeInner {
         terms.push((node.clone(), sign));
     }
 
-    pub(crate) fn combine_sum(node: &Node, combine_fns: bool) -> Option<Node> {
+    pub(crate) fn combine_sum(node: &Node<T>, combine_fns: bool) -> Option<Node<T>> {
         let mut terms = Vec::new();
         Self::collect_sum_terms(node, 1, &mut terms);
         if terms.len() < 2 {
             return None;
         }
-        let mut pow_terms: Vec<(PowComponents, Real, usize)> = Vec::new();
+        let mut pow_terms: Vec<(PowComponents<T>, T, usize)> = Vec::new();
         let mut combined_like_terms = false;
-        let mut others: Vec<(usize, Node)> = Vec::new();
-        let mut constant_value = Real::zero();
+        let mut others: Vec<(usize, Node<T>)> = Vec::new();
+        let mut constant_value = T::zero();
         let mut has_constant = false;
         let mut constant_sum_changed = false;
         let mut constant_index: Option<usize> = None;
@@ -414,7 +423,8 @@ impl NodeInner {
                 if let Some(mut coeff_val) = comp.coefficient.inner.borrow().evaluate() {
                     if sign == -1 {
                         coeff_val = coeff_val.neg();
-                    }                    let mut found = false;
+                    }
+                    let mut found = false;
                     for (existing, sum, _) in pow_terms.iter_mut() {
                         if Self::nodes_equal(&existing.base, &comp.base)
                             && Self::nodes_equal(&existing.exponent, &comp.exponent)
@@ -462,13 +472,13 @@ impl NodeInner {
             others.push((idx, node));
         }
 
-        let mut ordered_terms: Vec<(usize, Node)> = Vec::new();
+        let mut ordered_terms: Vec<(usize, Node<T>)> = Vec::new();
         for (comp, coeff, order) in pow_terms {
             if coeff.is_zero() {
                 combined_like_terms = true;
                 continue;
             }
-            let coeff_node = Self::from_float(coeff.clone()).wrap();
+            let coeff_node = Self::from_float(coeff).wrap();
             let pow_node =
                 Self::from_operation(Op::Pow, comp.base.clone(), comp.exponent.clone())
                     .simplify(false, false);
@@ -485,7 +495,7 @@ impl NodeInner {
         if has_constant && !constant_value.is_zero() {
             ordered_terms.push((
                 constant_index.unwrap_or(ordered_terms.len()),
-                Self::from_float(constant_value.clone()).wrap(),
+                Self::from_float(constant_value).wrap(),
             ));
         }
 
@@ -528,13 +538,17 @@ impl NodeInner {
 
 /// A power broken into its coefficient, base and exponent parts.
 #[derive(Clone, Debug)]
-pub(crate) struct PowComponents {
-    pub(crate) coefficient: Node,
-    pub(crate) base: Node,
-    pub(crate) exponent: Node,
+pub(crate) struct PowComponents<T> {
+    pub(crate) coefficient: Node<T>,
+    pub(crate) base: Node<T>,
+    pub(crate) exponent: Node<T>,
 }
 
-impl Display for PowComponents {
+impl<T> Display for PowComponents<T>
+where
+    T: FloatType + Display,
+    NodeInner<T>: Display,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let coefficient = self.coefficient.inner.borrow();
         let base = self.base.inner.borrow();

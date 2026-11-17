@@ -18,10 +18,10 @@
 //! [`crate::math::calculus::antiderivative`] uses this to evaluate improper integrals.
 
 use std::collections::HashMap;
+use std::fmt::Display;
 
-use crate::math::calculus::derivative::Derivative;
 use crate::math::calculus::expr::{Shape, shape};
-use crate::math::numeric::{FloatBridge, Real};
+use crate::math::numeric::{FloatType, Real};
 use crate::math::parse::lexer::{Const, Func, Op, Token};
 use crate::math::structs::expr::node::{Node, NodeInner};
 
@@ -74,7 +74,7 @@ const MAX_LHOPITAL_DEPTH: usize = 10;
 /// How many points a numeric probe samples.
 const PROBE_STEPS: usize = 12;
 
-impl Expr<Real> {
+impl<T: FloatType + Display> Expr<T> {
     /// Evaluate `lim_{var -> toward} self`.
     ///
     /// `toward` may be any `Real`, including [`Real::infinity`] or
@@ -180,6 +180,17 @@ impl Expr<Real> {
         self.evaluate_with(&values).value()
     }
 
+    /// Differentiate through the crate's exact symbolic kernel.
+    ///
+    /// The differentiation rules live on `Expr<Real>`; the tree is re-typed
+    /// there and back, which is lossless for every leaf type. When the
+    /// differentiation engine itself becomes leaf-generic, this bridge goes.
+    fn differentiated(&self) -> Self {
+        use crate::math::calculus::derivative::Derivative;
+        let real = Expr::<Real>::from_node(Node::<T>::from_typed(&self.tree));
+        Expr::from_node(Node::<T>::from_real(&real.get_derivative().tree))
+    }
+
     /// Whether `self` is an indeterminate form at the target that IEEE
     /// arithmetic would mask (specifically the powers `0^0`, `∞^0`, `1^∞`).
     fn is_indeterminate_form(&self, var: char, toward: &Real) -> bool {
@@ -222,8 +233,8 @@ impl Expr<Real> {
         if !is_polynomial(&f.tree) || !is_exponential_growth(&g.tree) {
             return None;
         }
-        let f_prime = f.clone().get_derivative();
-        let g_prime = g.clone().get_derivative();
+        let f_prime = f.differentiated();
+        let g_prime = g.differentiated();
         // Nothing changes on either side: the rule makes no progress.
         if f_prime.tree.inner.borrow().eq(&f.tree.inner.borrow())
             && g_prime.tree.inner.borrow().eq(&g.tree.inner.borrow())
@@ -279,8 +290,8 @@ impl Expr<Real> {
             return None;
         }
 
-        let f_prime = f.get_derivative();
-        let g_prime = g.get_derivative();
+        let f_prime = f.differentiated();
+        let g_prime = g.differentiated();
         let quotient = Expr::from_node(NodeInner::from_operation(
             Op::Div,
             f_prime.tree,
@@ -294,8 +305,8 @@ impl Expr<Real> {
     ///
     /// * `0 · ∞` → `f / (1/g)`
     /// * `∞ − ∞` of two fractions → a single fraction over a common denominator
-    fn normalize(&self, var: char, toward: &Real) -> Option<Expr<Real>> {
-        use crate::math::calculus::expr::{div, mul, one, sub as sub_node};
+    fn normalize(&self, var: char, toward: &Real) -> Option<Self> {
+        use crate::math::structs::expr::node::Node as NodeBuilder;
         match shape(&self.tree) {
             Shape::Operator(Token::Operator(Op::Mul | Op::ImplicitMul), left, right) => {
                 // `0 · ∞` → `z / (1 / w)` where `z` is the zero factor.
@@ -306,8 +317,8 @@ impl Expr<Real> {
                     (Form::Infinite, Form::Zero) => (right, left),
                     _ => return None,
                 };
-                let reciprocal = div(one(), inf);
-                Some(Expr::from_node(div(zero, reciprocal)))
+                let reciprocal = NodeBuilder::div(NodeBuilder::one(), inf);
+                Some(Expr::from_node(NodeBuilder::div(zero, reciprocal)))
             }
             Shape::Operator(Token::Operator(Op::Sub), left, right) => {
                 // `∞ − ∞` of two fractions → `(p·s − r·q) / (q·s)`.
@@ -320,9 +331,9 @@ impl Expr<Real> {
                 }
                 let (p, q) = as_fraction(&a)?;
                 let (r, s) = as_fraction(&b)?;
-                let numerator = sub_node(mul(p, s.clone()), mul(r, q.clone()));
-                let denominator = mul(q, s);
-                Some(Expr::from_node(div(numerator, denominator)))
+                let numerator = NodeBuilder::sub(NodeBuilder::mul(p, s.clone()), NodeBuilder::mul(r, q.clone()));
+                let denominator = NodeBuilder::mul(q, s);
+                Some(Expr::from_node(NodeBuilder::div(numerator, denominator)))
             }
             _ => None,
         }
@@ -383,7 +394,6 @@ impl Expr<Real> {
     /// Handle an indeterminate power `f^g` (`0⁰`, `∞⁰`, `1^∞`) exactly by taking
     /// logarithms: `f^g = e^(g ln f)`, so `lim f^g = exp(lim g·ln f)`.
     fn pow_limit(&self, var: char, toward: &Real, depth: usize) -> Option<Limit<Real>> {
-        use crate::math::calculus::expr::{function, mul};
         let Shape::Operator(Token::Operator(Op::Pow), base, exponent) = shape(&self.tree) else {
             return None;
         };
@@ -396,8 +406,8 @@ impl Expr<Real> {
         if !indeterminate {
             return None;
         }
-        let logarithm = function(Func::Ln, base);
-        let product = mul(exponent, logarithm);
+        let logarithm = NodeInner::<T>::from_function(Func::Ln, base);
+        let product = NodeInner::<T>::from_operation(Op::ImplicitMul, exponent, logarithm);
         let exponent_limit = Expr::from_node(product).limit_inner(var, toward, depth + 1);
         Some(match exponent_limit {
             Limit::Finite(value) => Limit::Finite(value.exp()),
@@ -412,11 +422,11 @@ impl Expr<Real> {
 /// Whether `node` is a polynomial in the independent variable (sums, products
 /// and non-negative integer powers of the variable and constants; no division
 /// by a non-constant or functions).
-fn is_polynomial(node: &Node) -> bool {
+fn is_polynomial<T: FloatType + Display>(node: &Node<T>) -> bool {
     is_polynomial_inner(node, 0)
 }
 
-fn is_polynomial_inner(node: &Node, depth: usize) -> bool {
+fn is_polynomial_inner<T: FloatType + Display>(node: &Node<T>, depth: usize) -> bool {
     if depth > 128 {
         return false;
     }
@@ -440,7 +450,7 @@ fn is_polynomial_inner(node: &Node, depth: usize) -> bool {
 }
 
 /// Whether `node` is a non-negative integer constant.
-fn is_nonneg_integer_constant(node: &Node) -> bool {
+fn is_nonneg_integer_constant<T: FloatType + Display>(node: &Node<T>) -> bool {
     match shape(node) {
         Shape::Operand(Token::Number(n)) => n >= 0,
         Shape::Operand(Token::Float(v)) => v.is_integer() && !v.is_negative(),
@@ -450,14 +460,18 @@ fn is_nonneg_integer_constant(node: &Node) -> bool {
 
 /// Whether `node` is an exponential that grows without bound, e.g. `2^u` or
 /// `e^u` with `u -> ∞` (`base` a constant strictly greater than 1).
-fn is_exponential_growth(node: &Node) -> bool {
+fn is_exponential_growth<T: FloatType + Display>(node: &Node<T>) -> bool {
     let Shape::Operator(Token::Operator(Op::Pow), base, _exponent) = shape(node) else {
         return false;
     };
     match shape(&base) {
         Shape::Operand(Token::Number(n)) => n > 1,
         Shape::Operand(Token::Constant(_)) => true,
-        Shape::Operand(Token::Float(v)) => v > Real::from_i64(1),
+        Shape::Operand(Token::Float(v)) => {
+            use crate::math::numeric::FloatBridge;
+            // Compare against 1 through the arbitrary-precision engine.
+            Real::from_float(v.to_float()) > Real::from_i64(1)
+        }
         _ => false,
     }
 }
@@ -477,7 +491,7 @@ enum Form {
 }
 
 /// Classify the direct limit of `expr` at `var -> toward`.
-fn form(expr: &Expr<Real>, var: char, toward: &Real) -> Form {
+fn form<T: FloatType + Display>(expr: &Expr<T>, var: char, toward: &Real) -> Form {
     match expr.substitute_evaluate(var, toward) {
         Some(value) if value.is_zero() => Form::Zero,
         Some(value) if value.is_one() => Form::One,
@@ -488,7 +502,7 @@ fn form(expr: &Expr<Real>, var: char, toward: &Real) -> Form {
 
 /// Split an expression of the shape `p / q` into its numerator and denominator
 /// nodes; returns `None` when it is not a top-level quotient.
-fn as_fraction(expr: &Expr<Real>) -> Option<(Node, Node)> {
+fn as_fraction<T: FloatType + Display>(expr: &Expr<T>) -> Option<(Node<T>, Node<T>)> {
     match shape(&expr.tree) {
         Shape::Operator(Token::Operator(Op::Div), numerator, denominator) => {
             Some((numerator, denominator))

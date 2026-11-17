@@ -35,16 +35,19 @@ pub use crate::math::numeric::Evaluable;
 ///   after substitution, only the chosen variable(s) appeared.
 /// * [`Evaluated::Expression`] — some variables were left untouched, so the
 ///   fully-evaluated parts were folded and the rest is returned symbolically.
+///
+/// `L` is the tree's own leaf type (defaulting to [`Real`]); a value evaluation
+/// target `T` may differ from it.
 #[derive(Debug, Clone)]
-pub enum Evaluated<T> {
+pub enum Evaluated<T, L = Real> {
     /// A fully evaluated value.
     Value(T),
     /// A symbolic expression in terms of the variables that were not
     /// substituted.
-    Expression(Expr),
+    Expression(Expr<L>),
 }
 
-impl<T> Evaluated<T> {
+impl<T, L> Evaluated<T, L> {
     /// The value, if the expression collapsed completely.
     #[must_use]
     pub fn value(self) -> Option<T> {
@@ -56,7 +59,7 @@ impl<T> Evaluated<T> {
 
     /// The symbolic expression, if any variables remain.
     #[must_use]
-    pub fn expression(self) -> Option<Expr> {
+    pub fn expression(self) -> Option<Expr<L>> {
         match self {
             Self::Value(_) => None,
             Self::Expression(expr) => Some(expr),
@@ -247,7 +250,7 @@ where
     }
 }
 
-impl Expr {
+impl<T: FloatType + Display> Expr<T> {
     /// Substitute the independent variable with `value` and evaluate.
     ///
     /// If the expression only depends on the independent variable, the result
@@ -266,7 +269,7 @@ impl Expr {
     /// assert_eq!(result.value(), Some(35.0));
     /// ```
     #[must_use]
-    pub fn evaluate<T: Evaluable>(&self, value: T) -> Evaluated<T> {
+    pub fn evaluate<E: Evaluable>(&self, value: E) -> Evaluated<E, T> {
         let indp = independent_variable(&self.tree);
         let lookup = move |letter: char| {
             if letter == indp {
@@ -297,13 +300,17 @@ impl Expr {
     /// assert_eq!(expr.evaluate_with(&values).value(), Some(25.0));
     /// ```
     #[must_use]
-    pub fn evaluate_with<T: Evaluable>(&self, values: &HashMap<char, T>) -> Evaluated<T> {
+    pub fn evaluate_with<E: Evaluable>(&self, values: &HashMap<char, E>) -> Evaluated<E, T> {
         let lookup = move |letter: char| values.get(&letter).cloned();
         finish(evaluate_node(&self.tree, &lookup))
     }
 }
 
-fn finish<T: Evaluable>(step: Step<Real, T>) -> Evaluated<T> {
+fn finish<L, T>(step: Step<L, T>) -> Evaluated<T, L>
+where
+    L: FloatType + Display,
+    T: Evaluable,
+{
     match step.value {
         Some(value) => Evaluated::Value(value),
         None => Evaluated::Expression(Expr::from_node(step.node)),
@@ -312,7 +319,7 @@ fn finish<T: Evaluable>(step: Step<Real, T>) -> Evaluated<T> {
 
 /// The one-letter variable that the expression treats as independent (the
 /// default is `x`).
-fn independent_variable(node: &Node) -> char {
+fn independent_variable<T: FloatType + Display>(node: &Node<T>) -> char {
     crate::math::calculus::expr::independent_variable(node)
 }
 

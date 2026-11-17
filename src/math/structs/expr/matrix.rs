@@ -17,7 +17,7 @@
 //! straight back into another operation.
 
 use crate::math::algebra::linear::{Matrix, MatrixMul, SquareMatrixFns, Vector};
-use crate::math::numeric::{FloatType, Real};
+use crate::math::numeric::FloatType;
 use crate::math::parse::lexer::Token;
 use crate::math::structs::expr::node::{Node, NodeValue};
 use crate::math::structs::expr::{Expr, ExprError};
@@ -25,12 +25,39 @@ use crate::math::structs::solution::Solution;
 
 use std::fmt::Display;
 
+/// Re-type an expression computed over the matrix entry type (`Expr<Real>`)
+/// into this expression's leaf type.
+///
+/// Only `Token::Float` leaves change; matrix and vector tokens pass through
+/// untouched because they are leaf-fixed (`Matrix<Expr>`), so the result stays
+/// consistent with how a matrix literal is stored in any tree.
+fn retype<T: FloatType + Display>(expr: &Expr) -> Expr<T> {
+    Expr::from_node(Node::from_real(expr.tree()))
+}
+
+/// Wrap a matrix back into an expression of leaf type `T`.
+///
+/// The matrix token is leaf-fixed (`Matrix<Expr>`), so the wrap is exact for
+/// every `T`.
+fn matrix_into_expr<T: FloatType + Display>(matrix: Matrix<Expr>) -> Expr<T> {
+    Expr::from_node(Node::matrix(matrix))
+}
+
+/// Wrap a vector back into an expression of leaf type `T`.
+fn vector_into_expr<T: FloatType + Display>(vector: Vector<Expr>) -> Expr<T> {
+    Expr::from_node(Node::vector(vector))
+}
+
 impl<T: FloatType + Display> Expr<T> {
     /// The matrix this expression holds, or `None` when it is not a matrix.
     ///
     /// A matrix literal such as `[[1, 2], [3, 4]]` parses to an expression
     /// whose value *is* the matrix; this pulls it back out. Anything else — a
     /// number, a variable, `x + 1`, ... — returns `None`.
+    ///
+    /// Matrix and vector tokens are leaf-fixed: they store `Matrix<Expr>`
+    /// regardless of this expression's own float type, so every tree shares the
+    /// same matrix representation (see `Token::Matrix`).
     #[must_use]
     pub fn as_matrix(&self) -> Option<Matrix<Expr>> {
         match &self.tree.inner.borrow().value {
@@ -59,9 +86,7 @@ impl<T: FloatType + Display> Expr<T> {
     pub fn is_vector(&self) -> bool {
         self.as_vector().is_some()
     }
-}
 
-impl Expr<Real> {
     /// The matrix this expression holds, or [`ExprError::NotAMatrix`].
     fn matrix_or_error(&self) -> Result<Matrix<Expr>, ExprError> {
         self.as_matrix().ok_or(ExprError::NotAMatrix)
@@ -79,19 +104,7 @@ impl Expr<Real> {
         }
         Ok(matrix)
     }
-}
 
-/// Wrap a matrix back into an expression.
-fn matrix_into_expr(matrix: Matrix<Expr>) -> Expr {
-    Expr::from_node(Node::matrix(matrix))
-}
-
-/// Wrap a vector back into an expression.
-fn vector_into_expr(vector: Vector<Expr>) -> Expr {
-    Expr::from_node(Node::vector(vector))
-}
-
-impl Expr<Real> {
     /// The transpose of this matrix.
     ///
     /// # Errors
@@ -145,7 +158,7 @@ impl Expr<Real> {
     /// [`ExprError::NotSquare`] when it is not square.
     pub fn det(&self) -> Result<Self, ExprError> {
         let value = self.square_or_error()?.det();
-        Ok(value)
+        Ok(retype(&value))
     }
 
     /// The inverse of this matrix.
@@ -172,9 +185,10 @@ impl Expr<Real> {
     /// [`ExprError::Undefined`] when they cannot be found over the coefficient
     /// type (for example a 3x3 matrix with symbolic entries).
     pub fn eigenvalues(&self) -> Result<Vec<Self>, ExprError> {
-        self.square_or_error()?
-            .eigenvalues()
-            .ok_or(ExprError::Undefined("the eigenvalues cannot be computed exactly"))
+        let values = self.square_or_error()?.eigenvalues().ok_or(ExprError::Undefined(
+            "the eigenvalues cannot be computed exactly",
+        ))?;
+        Ok(values.iter().map(retype::<T>).collect())
     }
 
     /// A linearly independent set of eigenvectors of this matrix.
@@ -216,8 +230,7 @@ impl Expr<Real> {
     ///
     /// # Errors
     ///
-    /// [`ExprError::NotAMatrix`] when the expression is not a matrix,
-    /// [`ExprError::NotSquare`] when it is not square, or
+    /// [`ExprError::NotAMatrix`] when the expression is not a matrix, or
     /// [`ExprError::Undefined`] when a column is linearly dependent on the
     /// previous ones.
     pub fn qr_factorisation(&self) -> Result<Self, ExprError> {
@@ -269,9 +282,7 @@ impl Expr<Real> {
             left.mul_matrix(&sigma).mul_matrix(&right.transpose()),
         ))
     }
-}
 
-impl Expr<Real> {
     /// Row echelon form, recording each elementary row operation.
     ///
     /// When `normalise` is set the pivot is also scaled to `1`.
@@ -358,7 +369,7 @@ impl Expr<Real> {
 /// let vector = create_expr!("[1, 2, 3]").unwrap();
 /// assert!(vector.is_vector());
 /// ```
-impl Expr<Real> {
+impl<T: FloatType + Display> Expr<T> {
     /// The vector this expression holds, or [`ExprError::NotAVector`].
     fn vector_or_error(&self) -> Result<Vector<Expr>, ExprError> {
         self.as_vector().ok_or(ExprError::NotAVector)
@@ -388,7 +399,12 @@ impl Expr<Real> {
     ///
     /// [`ExprError::NotAVector`] when the expression is not a vector.
     pub fn entries(&self) -> Result<Vec<Self>, ExprError> {
-        Ok(self.vector_or_error()?.iter().collect())
+        Ok(self
+            .vector_or_error()?
+            .as_slice()
+            .iter()
+            .map(retype::<T>)
+            .collect())
     }
 
     /// The dot product of this vector with `other`.
@@ -405,7 +421,7 @@ impl Expr<Real> {
                 "the vectors have different lengths, so their dot product is undefined",
             ));
         }
-        Ok(left.dot_product(&right))
+        Ok(retype(&left.dot_product(&right)))
     }
 
     /// The squared Euclidean norm of this vector.
@@ -414,7 +430,7 @@ impl Expr<Real> {
     ///
     /// [`ExprError::NotAVector`] when the expression is not a vector.
     pub fn norm_squared(&self) -> Result<Self, ExprError> {
-        Ok(self.vector_or_error()?.norm_squared())
+        Ok(retype(&self.vector_or_error()?.norm_squared()))
     }
 
     /// Whether this vector has unit length.
@@ -454,6 +470,9 @@ impl Expr<Real> {
     ///
     /// [`ExprError::NotAVector`] when the expression is not a vector.
     pub fn scale(&self, scalar: Self) -> Result<Self, ExprError> {
+        // `Vector::scale` works over the leaf-fixed entry type; carry the
+        // caller's scalar across the float bridge first.
+        let scalar = Expr::from_node(Node::<T>::from_typed(scalar.tree()));
         let scaled = self.vector_or_error()?.scale(scalar);
         Ok(vector_into_expr(scaled))
     }

@@ -1,14 +1,23 @@
 //! Read-only queries on a [`NodeInner`]: shape predicates, evaluation of
 //! constant subtrees and named-constant detection.
-use std::{cell::RefCell, cmp::Ordering, error::Error, fmt::Display, ops::Neg, rc::Rc};
+use std::{cell::RefCell, cmp::Ordering, error::Error, fmt::Display, rc::Rc};
 
-use crate::{math::numeric::{FloatType, Real},
+use crate::{
+    math::numeric::{FloatBridge, FloatType},
     math::parse::lexer::{Const, Func, Op, Token},
     math::structs::expr::Expr,
     math::utils::fmt::unnecessary_brackets,
 };
 
 use super::{Node, NodeError, NodeInner, NodeValue, OpNode};
+
+/// Whether an evaluated leaf value is exactly the integer `2`, the check the
+/// `sqrt(u^2)` collapse needs. Integer-valued leaves such as `f64::MAX` that
+/// do not fit an `f64` comparison are out of reach here, but an exponent of
+/// two is always representable.
+fn is_exactly_two<T: FloatType + Display>(value: &T) -> bool {
+    value.is_integer() && value.to_float().as_f64() == 2.0
+}
 
 /// If the expression is a perfect-square polynomial, return `u` with
 /// `u^2 = expression` — for example `x^2 - 2x + 1` yields `x - 1`.
@@ -17,7 +26,10 @@ use super::{Node, NodeError, NodeInner, NodeValue, OpNode};
 /// factorisation whose leading coefficient is a perfect square and whose
 /// factors all have even multiplicity gives the root. Anything else returns
 /// `None`.
-pub(crate) fn square_root_of_rational_square(node: &Node<Real>) -> Option<Node<Real>> {
+pub(crate) fn square_root_of_rational_square<T>(node: &Node<T>) -> Option<Node<T>>
+where
+    T: FloatType + Display,
+{
     use crate::math::algebra::factorization::factorise;
     use crate::math::algebra::polynomial::Poly;
     use crate::math::numeric::ExactField;
@@ -39,11 +51,21 @@ pub(crate) fn square_root_of_rational_square(node: &Node<Real>) -> Option<Node<R
 /// Convert an expression tree to a polynomial with rational coefficients, or
 /// `None` when it is not a polynomial (fractional powers, functions, several
 /// variables, …).
-fn rational_polynomial(node: &Node<Real>) -> Option<crate::math::algebra::polynomial::Poly> {
+///
+/// Leaf values are read through [`Rat::from_leaf`], which recovers the exact
+/// rational an *exact* leaf (such as `Real`) holds; leaves that do not round
+/// to a small rational leave the conversion unsuccessful.
+fn rational_polynomial<T>(node: &Node<T>) -> Option<crate::math::algebra::polynomial::Poly>
+where
+    T: FloatType + Display,
+{
     use crate::math::algebra::polynomial::Poly;
     use crate::math::algebra::rational::Rat;
 
-    fn convert(node: &Node<Real>, depth: usize) -> Option<Poly> {
+    fn convert<T>(node: &Node<T>, depth: usize) -> Option<Poly>
+    where
+        T: FloatType + Display,
+    {
         if depth > 64 {
             return None;
         }
@@ -51,7 +73,7 @@ fn rational_polynomial(node: &Node<Real>) -> Option<crate::math::algebra::polyno
         match &borrow.value {
             NodeValue::Operand(Token::Indp(_)) => Some(Poly::variable()),
             NodeValue::Operand(Token::Number(value)) => Some(Poly::constant(Rat::from_i64(*value))),
-            NodeValue::Operand(Token::Float(value)) => Some(Poly::constant(Rat::from_real(value)?)),
+            NodeValue::Operand(Token::Float(value)) => Some(Poly::constant(Rat::from_leaf(value)?)),
             NodeValue::Operand(_) => None,
             NodeValue::Operator(op_node) => match &op_node.token {
                 Token::Operator(Op::Add) => {
@@ -83,7 +105,7 @@ fn rational_polynomial(node: &Node<Real>) -> Option<crate::math::algebra::polyno
                     if !exponent.is_integer() || exponent.is_negative() {
                         return None;
                     }
-                    let power = exponent.to_f64();
+                    let power = exponent.to_float().as_f64();
                     if !(0.0..=32.0).contains(&power) {
                         return None;
                     }
@@ -99,13 +121,16 @@ fn rational_polynomial(node: &Node<Real>) -> Option<crate::math::algebra::polyno
 }
 
 /// Render a rational polynomial as an expression in `variable`.
-fn poly_to_variable_node(
+fn poly_to_variable_node<T>(
     polynomial: &crate::math::algebra::polynomial::Poly,
     variable: char,
-) -> Node<Real> {
+) -> Node<T>
+where
+    T: FloatType + Display,
+{
     use crate::math::structs::expr::node::Node as _;
 
-    let symbol = NodeInner::<Real>::operand(Token::Indp(variable)).wrap();
+    let symbol = NodeInner::<T>::operand(Token::Indp(variable)).wrap();
     let mut terms = Vec::new();
     for degree in 0..=polynomial.degree().unwrap_or(0) {
         let coefficient = polynomial.coeff(degree);
@@ -126,7 +151,7 @@ fn poly_to_variable_node(
     Node::sum(terms)
 }
 
-impl NodeInner {
+impl<T: FloatType + Display> NodeInner<T> {
     /// Whether this node is a `sqrt(...)` application.
     pub(crate) fn is_sqrt(&self) -> bool {
         matches!(
@@ -140,7 +165,7 @@ impl NodeInner {
     ///
     /// This is what lets the quadratic formula's discriminant `x^2 - 2x + 1`
     /// collapse: it factors to `(x - 1)^2`, whose square root is `x - 1`.
-    pub(crate) fn square_root_of_square(&self) -> Option<Node<Real>> {
+    pub(crate) fn square_root_of_square(&self) -> Option<Node<T>> {
         let op_node = match &self.value {
             NodeValue::Operator(op_node) => op_node,
             _ => return None,
@@ -149,7 +174,7 @@ impl NodeInner {
             return None;
         }
         let exponent = op_node.right.inner.borrow().evaluate()?;
-        if !exponent.float_equal(&Real::from_i64(2)) {
+        if !is_exactly_two(&exponent) {
             return None;
         }
         let base = op_node.left.clone();
@@ -166,7 +191,7 @@ impl NodeInner {
     /// Deliberately conservative: it accepts only literals, the named constants,
     /// the independent variable, even powers and square roots. Returning `false`
     /// merely keeps a `sqrt` in place, never yields a wrong sign.
-    fn never_negative(node: &Node<Real>) -> bool {
+    fn never_negative(node: &Node<T>) -> bool {
         let borrow = node.inner.borrow();
         match &borrow.value {
             NodeValue::Operand(Token::Number(value)) => *value >= 0,
@@ -179,7 +204,8 @@ impl NodeInner {
                     .borrow()
                     .evaluate()
                     .is_some_and(|exponent| {
-                        exponent.is_integer() && exponent.to_f64().rem_euclid(2.0) == 0.0
+                        exponent.is_integer()
+                            && exponent.to_float().as_f64().rem_euclid(2.0) == 0.0
                     }),
                 Token::Function(Func::Sqrt) => true,
                 _ => false,
@@ -189,15 +215,18 @@ impl NodeInner {
     }
 }
 
-impl NodeInner {
-    pub(crate) fn is_constant_node(node: &Node) -> bool {
+impl<T: FloatType + Display> NodeInner<T> {
+    pub(crate) fn is_constant_node(node: &Node<T>) -> bool {
         !node.inner.borrow().has_indp
     }
 
     /// If `exponent` is a fraction `b / c` with `c` a positive integer, return
     /// `(base, "c", Some(b))` (or `None` for `b` when `b == 1`) so that
     /// `base ^ (b/c)` can be displayed as the root `rt_c(base ^ b)`.
-    pub(crate) fn root_power_parts(base: &Node, exponent: &Node) -> Option<(Node, String, Option<Node>)> {
+    pub(crate) fn root_power_parts(
+        base: &Node<T>,
+        exponent: &Node<T>,
+    ) -> Option<(Node<T>, String, Option<Node<T>>)> {
         let borrow = exponent.inner.borrow();
         let NodeValue::Operator(op_node) = &borrow.value else {
             return None;
@@ -236,11 +265,11 @@ impl NodeInner {
     /// The simplifier uses this to avoid folding expressions like `π / 8` down
     /// to a decimal: keeping `π` symbolic is what lets generated antiderivatives
     /// display exact angles (`cos(π/8)`) instead of long floats.
-    pub(crate) fn contains_named_constant(node: &Node) -> bool {
+    pub(crate) fn contains_named_constant(node: &Node<T>) -> bool {
         Self::contains_named_constant_inner(node, 0)
     }
 
-    pub(crate) fn contains_named_constant_inner(node: &Node, depth: usize) -> bool {
+    pub(crate) fn contains_named_constant_inner(node: &Node<T>, depth: usize) -> bool {
         if depth > 256 {
             return false;
         }
@@ -256,7 +285,7 @@ impl NodeInner {
         }
     }
 
-    pub(crate) fn nodes_equal(left: &Node, right: &Node) -> bool {
+    pub(crate) fn nodes_equal(left: &Node<T>, right: &Node<T>) -> bool {
         let left_borrow = left.inner.borrow();
         let right_borrow = right.inner.borrow();
         left_borrow.eq(&right_borrow)
@@ -309,7 +338,7 @@ impl NodeInner {
         match &self.value {
             NodeValue::Operand(token) => match token {
                 Token::Number(num) => *num < 0,
-                Token::Float(num) => num.get_sign(),
+                Token::Float(num) => num.is_negative(),
                 _ => false,
             },
             NodeValue::Operator(op_node) => {
