@@ -10,18 +10,18 @@
 use std::{cell::RefCell, cmp::Ordering, fmt::Display, ops::Neg, rc::Rc};
 
 use crate::{
-    math::numeric::FloatType,
+    math::numeric::{FloatType, SymbolicLeaf},
     math::parse::lexer::{Func, Op, Token},
     math::utils::fmt::unnecessary_brackets,
 };
 
-use super::functions::{NodeFunctions, NodeSimplify};
+use super::functions::NodeFunctions;
 use super::{Node, NodeError, NodeInner, NodeValue, OpNode};
 use super::inspect::*;
 
 impl<T> NodeInner<T>
 where
-    T: FloatType + Display + PartialOrd + Neg<Output = T> + std::fmt::Debug,
+    T: SymbolicLeaf,
 {
     pub(crate) fn extract_pow_components(
         node: &Node<T>,

@@ -12,7 +12,7 @@ use std::ops::Neg;
 
 use crate::{math::numeric::Real,
     math::parse::lexer::{Func, Op, Token},
-    math::structs::expr::node::{Node, NodeFunctions, NodeInner, NodeSimplify},
+    math::structs::expr::node::{Node, NodeFunctions, NodeInner},
     math::utils::float_math::FloatMath,
 };
 

@@ -6,7 +6,7 @@ use std::{cell::RefCell, cmp::Ordering, error::Error, fmt::Display, ops::Neg, rc
 
 
 
-use crate::{math::numeric::FloatType,
+use crate::{math::numeric::{FloatType, SymbolicLeaf},
     math::parse::lexer::{Const, Func, Op, Token},
     math::structs::expr::Expr,
     math::utils::fmt::unnecessary_brackets,
@@ -30,18 +30,21 @@ pub trait NodeOperations<T> {
     fn pow(self, other: T) -> Self;
 }
 
-/// Node operations that are meaningful for every leaf float type.
+/// Node operations that consume a node and return a new node: the arithmetic
+/// builders plus the symbolic rewrite rules.
 ///
-/// These build a node from an existing one, or read a numeric value out of it.
-/// They are generic over `T` because none of them needs more from the leaf than
-/// [`FloatType`] already provides.
+/// These build a node from an existing one, re-read its coefficients through
+/// the leaf's own float type and rewrite the tree (simplifying, combining like
+/// terms, factoring). Every one of them is available for any
+/// [`SymbolicLeaf`]: coefficients are read and re-written through `T`, so the
+/// same rules run for `Real` (exactly) and for machine floats (to their
+/// precision).
 ///
-/// `simplify` and `factorise` are *not* here: they depend on the
-/// `Real`-specific tree rewriting in the private `simplify` module, so they
-/// live on [`NodeSimplify`] instead.
+/// The rules lean on the helpers in the private `simplify` and `inspect`
+/// modules, which are leaf-generic too.
 pub trait NodeFunctions<T>
 where
-    T: FloatType + Display,
+    T: SymbolicLeaf,
 {
     /// `-self`, pushed down one level where that reads better.
     fn negate(self) -> Self;
@@ -57,14 +60,6 @@ where
     /// coefficient `-1` rather than `1`. That convention is what lets callers
     /// treat "no coefficient" and "coefficient one" alike.
     fn remove_constants(self) -> T;
-}
-
-/// The `Real`-only node simplifications.
-///
-/// These rewrite the tree rather than build it, and lean on the `Real`-specific
-/// helpers in the private `simplify` and `inspect` modules, so they are not
-/// available for every coefficient type.
-pub trait NodeSimplify {
     /// Simplify the tree, optionally expanding products.
     fn simplify(self, expand: bool, combine_fns: bool) -> Self;
     /// Pull out a product form where one reads better.
@@ -149,7 +144,7 @@ impl<T: FloatType + Display> NodeOperations<i64> for Node<T> {
     }
 }
 
-impl<T: FloatType + Display + Neg<Output = T> + std::fmt::Debug> NodeFunctions<T> for Node<T> {
+impl<T: SymbolicLeaf> NodeFunctions<T> for Node<T> {
     fn negate(self) -> Self {
         match &self.inner.borrow().value {
             NodeValue::Operand(token) => match token {
@@ -503,23 +498,23 @@ impl<T: FloatType + Display + Neg<Output = T> + std::fmt::Debug> NodeFunctions<T
             NodeValue::Empty => T::zero(),
         }
     }
+    /// The bodies of the rewriting rules live in the inherent impl below (kept
+    /// as one contiguous block); the trait delegates to them.
+    fn simplify(self, expand: bool, combine_fns: bool) -> Self {
+        self.rewrite_simplify(expand, combine_fns)
+    }
+    fn factorise(self) -> Self {
+        self.rewrite_factorise()
+    }
 }
 
-/// The node simplifications, available for every leaf type.
+/// The symbolic rewrite rules, as inherent methods of [`Node`].
 ///
-/// These rewrite the tree rather than build it. Coefficients are read and
-/// re-written through the leaf's own float type, so the same rules run for
-/// `Real` (exactly) and for machine floats (to their precision). They lean on
-/// the helpers in `simplify` and `inspect`, which are generic over `T` too.
-///
-/// The `Neg` and `Debug` bounds are the ones [`NodeFunctions`] needs (the rules
-/// negate subexpressions), and `PartialOrd` orders terms by degree.
-impl<T> NodeSimplify for Node<T>
-where
-    T: FloatType + Display + PartialOrd + Neg<Output = T> + std::fmt::Debug,
-    NodeInner<T>: Display,
-{
-    fn simplify(self, expand: bool, combine_fns: bool) -> Self {
+/// These are the bodies behind
+/// [`NodeFunctions::simplify`] and [`NodeFunctions::factorise`]. They lean on
+/// the helpers in `simplify` and `inspect`, which are leaf-generic too.
+impl<T: SymbolicLeaf> Node<T> {
+    fn rewrite_simplify(self, expand: bool, combine_fns: bool) -> Self {
         let node = self.inner.borrow();
         match node {
             t if t.is_log() => {
@@ -823,7 +818,7 @@ where
             _ => unreachable!(),
         }
     }
-    fn factorise(self) -> Self {
+    fn rewrite_factorise(self) -> Self {
         {
             let node = self.inner.borrow();
             if let NodeValue::Operator(op_node) = &node.value {

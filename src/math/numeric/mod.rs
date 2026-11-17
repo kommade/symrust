@@ -234,6 +234,28 @@ pub trait Matrixable: ExactField {}
 
 impl<T: ExactField> Matrixable for T {}
 
+/// The arithmetic the symbolic rewrite engine needs from the tree's leaf type.
+///
+/// [`FloatType`] alone covers constructing and evaluating a leaf; the
+/// simplifier additionally negates coefficients (a negation is the tree
+/// `0 - x`), orders terms by degree ([`PartialOrd`]) and renders them
+/// ([`Display`]). The blanket implementation keeps every call site down to a
+/// single bound — `T: SymbolicLeaf` — instead of the four separate traits it
+/// used to spell out.
+///
+/// This is also what makes [`crate::math::structs::expr::Expr`] a linear-algebra
+/// coefficient: `Expr<T>: ExactField` holds for every `T: SymbolicLeaf`, so
+/// `Matrix<Expr<T>>` needs no per-site justification.
+pub trait SymbolicLeaf:
+    FloatType + std::fmt::Display + PartialOrd + Neg<Output = Self> + std::fmt::Debug
+{
+}
+
+impl<T> SymbolicLeaf for T where
+    T: FloatType + std::fmt::Display + PartialOrd + Neg<Output = T> + std::fmt::Debug
+{
+}
+
 /// A numeric type an [`Expr`][crate::math::structs::expr::Expr] can be evaluated into.
 /// This is a thin bundle over [`ExpressionScalar`] (plus the float bridge it
 /// already requires), kept as the public name the evaluator API is written

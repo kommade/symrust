@@ -3,7 +3,7 @@ use std::fmt::Display;
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
 use crate::math::algebra::rational::Rat;
-use crate::math::numeric::{ExactField, FloatType, Real};
+use crate::math::numeric::{ExactField, FloatType, Real, SymbolicLeaf};
 use crate::math::parse::{lexer::Lexer, parser::Parser};
 
 pub mod error;
@@ -12,7 +12,7 @@ pub mod evaluate;
 pub mod limit;
 mod matrix;
 
-use node::{MulType, Node, NodeInner, NodeError, NodeFunctions, NodeOperations, NodeSimplify, NodeValue, OpNode};
+use node::{MulType, Node, NodeInner, NodeError, NodeFunctions, NodeOperations, NodeValue, OpNode};
 pub use error::ExprError;
 pub use evaluate::{Evaluable, Evaluated};
 pub use limit::Limit;
@@ -62,7 +62,7 @@ impl<T: FloatType + Display> PartialEq for Expr<T> {
 /// equal the comparison is reflexive, symmetric and transitive.
 impl<T: FloatType + Display> Eq for Expr<T> {}
 
-impl<T: FloatType + Display + Neg<Output = T> + std::fmt::Debug> Neg for Expr<T> {
+impl<T: SymbolicLeaf> Neg for Expr<T> {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
@@ -80,13 +80,13 @@ impl<T: FloatType + Display + Neg<Output = T> + std::fmt::Debug> Neg for Expr<T>
 /// [`is_floating`](Self::is_floating) is `false` so the numeric-only SVD
 /// fallback is not applied to symbolic entries.
 ///
-/// The `NodeSimplify` bound keeps [`is_zero_value`](Self::is_zero_value)
-/// exact: it simplifies before deciding, so a pivot that merely *evaluates* to
-/// zero is still recognised as one.
+/// The [`SymbolicLeaf`] bound is the whole story: it is exactly what makes
+/// `Expr<T>: ExactField` hold, without any per-site justification. The
+/// simplification inside [`is_zero_value`](Self::is_zero_value) runs the
+/// rewrite engine for the leaf's own type, and stays exact for exact leaves.
 impl<T> ExactField for Expr<T>
 where
-    T: FloatType + Display + Neg<Output = T> + std::fmt::Debug,
-    Node<T>: NodeSimplify,
+    T: SymbolicLeaf,
 {
     fn multiplicative_identity() -> Self {
         Self::from_node(NodeInner::<T>::one())
@@ -260,8 +260,7 @@ impl<T: FloatType + Display> Expr<T> {
 
 impl<T> Expr<T>
 where
-    T: FloatType + Display,
-    Node<T>: NodeSimplify,
+    T: SymbolicLeaf,
 {
     /// Attempt to simplify the expression. May not always simplify the expression to the simplest form.
     /// Accepts a boolean argument `expand` which, if true, will attempt to expand products during simplification.
@@ -357,7 +356,7 @@ impl<T: FloatType + Display> Mul for Expr<T> {
     }
 }
 
-impl<T: FloatType + Display + std::ops::Neg<Output = T> + std::fmt::Debug> Mul<i64> for Expr<T> {
+impl<T: SymbolicLeaf> Mul<i64> for Expr<T> {
     type Output = Self;
 
     fn mul(self, other: i64) -> Self {
@@ -376,7 +375,7 @@ impl<T: FloatType + Display> Div for Expr<T> {
         Self { tree }
     }
 }
-impl<T: FloatType + Display + std::ops::Neg<Output = T> + std::fmt::Debug> Div<i64> for Expr<T> {
+impl<T: SymbolicLeaf> Div<i64> for Expr<T> {
     type Output = Self;
 
     fn div(self, other: i64) -> Self {
