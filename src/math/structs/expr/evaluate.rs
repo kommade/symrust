@@ -13,9 +13,11 @@
 
 use std::collections::HashMap;
 
+use std::fmt::Display;
+
 use arpfloat::{FP128, Float};
 
-use crate::math::numeric::{ExpressionScalar, FloatBridge, Real};
+use crate::math::numeric::{ExpressionScalar, FloatBridge, FloatType, Real};
 use crate::math::parse::lexer::{Const, Func, Op, Token};
 use crate::math::structs::expr::{Expr, Node, NodeInner, node::NodeValue};
 use crate::math::utils::float_math::FloatMath;
@@ -71,37 +73,47 @@ impl<T> Evaluated<T> {
 /// A single step of the traversal: either the collapsed value together with the
 /// (variable-substituted) node it corresponds to, or `None` for the value when
 /// an unsubstituted variable remains.
-struct Step<T> {
+///
+/// `L` is the tree's own leaf type and `T` is the type the values are evaluated
+/// into. They are usually the same, but not necessarily: `Expr<Real>` may be
+/// evaluated into `f64`, and `Expr<T>` into `f64` for `as_f64`.
+struct Step<L, T> {
     value: Option<T>,
-    node: Node,
+    node: Node<L>,
 }
 
 /// Evaluate the tree `node`, substituting variables through `lookup`.
 ///
 /// `lookup` returns the concrete value for a one-letter variable, or `None`
 /// when that variable should be left symbolic.
-fn evaluate_node<T: Evaluable>(node: &Node, lookup: &dyn Fn(char) -> Option<T>) -> Step<T> {
-    let shape = crate::math::calculus::expr::shape(node);
-    match shape {
-        crate::math::calculus::expr::Shape::Empty => Step {
+fn evaluate_node<L, T>(node: &Node<L>, lookup: &dyn Fn(char) -> Option<T>) -> Step<L, T>
+where
+    L: FloatType + Display,
+    T: Evaluable,
+{
+    use crate::math::calculus::expr::{Shape, shape};
+    match shape(node) {
+        Shape::Empty => Step {
             value: None,
             node: node.clone(),
         },
-        crate::math::calculus::expr::Shape::Operand(token) => evaluate_operand(&token, lookup),
-        crate::math::calculus::expr::Shape::Operator(token, left, right) => {
-            evaluate_operator(&token, &left, &right, lookup)
-        }
+        Shape::Operand(token) => evaluate_operand(&token, lookup),
+        Shape::Operator(token, left, right) => evaluate_operator(&token, &left, &right, lookup),
     }
 }
 
-fn evaluate_operand<T: Evaluable>(token: &Token, lookup: &dyn Fn(char) -> Option<T>) -> Step<T> {
+fn evaluate_operand<L, T>(token: &Token<L>, lookup: &dyn Fn(char) -> Option<T>) -> Step<L, T>
+where
+    L: FloatType + Display,
+    T: Evaluable,
+{
     match token {
         Token::Number(number) => Step {
             value: Some(T::from_i64(*number)),
             node: NodeInner::from_number(*number).wrap(),
         },
         Token::Float(float) => Step {
-            value: Some(T::from_float(float.clone().into())),
+            value: Some(T::from_float(float.to_float())),
             node: NodeInner::from_float(float.clone()).wrap(),
         },
         Token::Constant(constant) => Step {
@@ -112,10 +124,9 @@ fn evaluate_operand<T: Evaluable>(token: &Token, lookup: &dyn Fn(char) -> Option
             Some(value) => {
                 // Embed the concrete value as a float leaf in the substituted
                 // node so a partial result stays a valid expression.
-                let float = value.to_float();
                 Step {
-                    value: Some(value),
-                    node: NodeInner::from_float(float.into()).wrap(),
+                    value: Some(value.clone()),
+                    node: NodeInner::from_float(L::from_float(value.to_float())).wrap(),
                 }
             }
             None => Step {
@@ -137,16 +148,20 @@ fn constant_value<T: Evaluable>(constant: &Const) -> T {
     }
 }
 
-fn node_for_token(token: &Token) -> Node {
+fn node_for_token<T: FloatType + Display>(token: &Token<T>) -> Node<T> {
     NodeInner::operand(token.clone()).wrap()
 }
 
-fn evaluate_operator<T: Evaluable>(
-    token: &Token,
-    left: &Node,
-    right: &Node,
+fn evaluate_operator<L, T>(
+    token: &Token<L>,
+    left: &Node<L>,
+    right: &Node<L>,
     lookup: &dyn Fn(char) -> Option<T>,
-) -> Step<T> {
+) -> Step<L, T>
+where
+    L: FloatType + Display,
+    T: Evaluable,
+{
     let left_step = evaluate_node(left, lookup);
     let right_step = evaluate_node(right, lookup);
 
@@ -180,7 +195,11 @@ fn evaluate_operator<T: Evaluable>(
     Step { value, node }
 }
 
-fn apply_operator<T: Evaluable>(op: &Op, left: T, right_step: &Step<T>, right: T) -> T {
+fn apply_operator<L, T>(op: &Op, left: T, right_step: &Step<L, T>, right: T) -> T
+where
+    L: FloatType + Display,
+    T: Evaluable,
+{
     match op {
         Op::Add => left + right,
         Op::Sub => left - right,
@@ -193,14 +212,18 @@ fn apply_operator<T: Evaluable>(op: &Op, left: T, right_step: &Step<T>, right: T
                 left.pow_i64(*exponent)
             }
             NodeValue::Operand(Token::Float(exponent)) => {
-                left.pow_float(exponent.clone().into())
+                left.pow_float(exponent.to_float())
             }
             _ => left.pow(right),
         },
     }
 }
 
-fn apply_function<T: Evaluable>(func: &Func, argument: T) -> T {
+fn apply_function<L, T>(func: &Func<L>, argument: T) -> T
+where
+    L: FloatType + Display,
+    T: Evaluable,
+{
     match func {
         Func::Sin => argument.sin(),
         Func::Cos => argument.cos(),
@@ -212,9 +235,15 @@ fn apply_function<T: Evaluable>(func: &Func, argument: T) -> T {
         Func::Acos => argument.acos(),
         Func::Atan => argument.atan(),
         Func::Sqrt => argument.sqrt(),
-        Func::Root(index) => argument.pow(T::from_float((Real::one() / index.clone()).into())),
+        Func::Root(index) => {
+            // `root_n(x)` is `x^(1/n)`; compute the reciprocal in `T` so exact
+            // value types keep their precision.
+            let one: T = T::from_i64(1);
+            let index_value = T::from_float(index.to_float());
+            argument.pow(one / index_value)
+        }
         Func::Ln => argument.ln(),
-        Func::Log(base) => argument.log(base.clone().into()),
+        Func::Log(base) => argument.log(base.to_float()),
     }
 }
 
@@ -274,7 +303,7 @@ impl Expr {
     }
 }
 
-fn finish<T: Evaluable>(step: Step<T>) -> Evaluated<T> {
+fn finish<T: Evaluable>(step: Step<Real, T>) -> Evaluated<T> {
     match step.value {
         Some(value) => Evaluated::Value(value),
         None => Evaluated::Expression(Expr::from_node(step.node)),
