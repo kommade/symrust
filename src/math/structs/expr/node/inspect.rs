@@ -327,54 +327,57 @@ impl NodeInner {
             _ => false,
         }
     }
-    pub(crate) fn evaluate(&self) -> Option<Real> {
+}
+
+impl<T: FloatType + std::fmt::Display> NodeInner<T> {
+    /// Evaluate a closed (variable-free) node to its numeric value.
+    ///
+    /// This is the exact-arithmetic reading used by [`Expr::tidy`], so a value
+    /// that has an exact rational form keeps it. Function values are
+    /// deliberately not folded — the simplifier keeps `ln(2)` symbolic — and a
+    /// fractional power of a constant base stays symbolic too, so `2^(1/3)`
+    /// displays as a radical rather than a decimal.
+    pub(crate) fn evaluate(&self) -> Option<T> {
         if self.has_indp {
-            None
-        } else {
-            match &self.value {
-                NodeValue::Operand(token) => match token {
-                    Token::Number(0) => Some(Real::zero()),
-                    Token::Number(1) => Some(Real::one()),
-                    Token::Number(-1) => Some(Real::neg_one()),
-                    Token::Number(num) => Some(Real::from_i64(*num)),
-                    Token::Float(num) => Some(num.clone()),
-                    Token::Constant(k) => Some(k.get_value()),
-                    _ => unreachable!(),
-                },
-                NodeValue::Operator(op_node) => {
-                    match &op_node.token {
-                        Token::Operator(op) => {
-                            let left = op_node.left.inner.borrow().evaluate()?;
-                            let right = op_node.right.inner.borrow().evaluate()?;
-                            match op {
-                                Op::Add => Some(left + right),
-                                Op::Sub => Some(left - right),
-                                Op::Mul | Op::ImplicitMul => Some(left * right),
-                                Op::Div => Some(left / right),
-                                Op::Pow => {
-                                    // Keep fractional powers of a constant base
-                                    // symbolic, e.g. `2^(1/3)` (a cube root) and
-                                    // `2^(2/3)`, instead of folding them to a
-                                    // decimal. Integer powers still fold. This is
-                                    // what lets the display show exact radicals;
-                                    // the numeric evaluator (`evaluate_operator`)
-                                    // still computes a decimal value on demand.
-                                    if !right.is_integer() {
-                                        None
-                                    } else {
-                                        Some(left.pow(&right))
-                                    }
-                                }
+            return None;
+        }
+        match &self.value {
+            NodeValue::Operand(token) => match token {
+                Token::Number(0) => Some(T::zero()),
+                Token::Number(1) => Some(T::one()),
+                Token::Number(-1) => Some(T::neg_one()),
+                Token::Number(num) => Some(T::from_i64(*num)),
+                Token::Float(num) => Some(num.clone()),
+                Token::Constant(k) => Some(k.get_value()),
+                _ => unreachable!(),
+            },
+            NodeValue::Operator(op_node) => match &op_node.token {
+                Token::Operator(op) => {
+                    let left = op_node.left.inner.borrow().evaluate()?;
+                    let right = op_node.right.inner.borrow().evaluate()?;
+                    match op {
+                        Op::Add => Some(left + right),
+                        Op::Sub => Some(left - right),
+                        Op::Mul | Op::ImplicitMul => Some(left * right),
+                        Op::Div => Some(left / right),
+                        Op::Pow => {
+                            // Keep fractional powers of a constant base
+                            // symbolic: `2^(1/3)` stays a cube root. Integer
+                            // powers still fold.
+                            if right.is_integer() {
+                                Some(left.pow(right))
+                            } else {
+                                None
                             }
                         }
-                        // Function values are not folded back into floats: the
-                        // simplifier keeps them symbolic (for example `ln(2)`).
-                        Token::Function(_) => None,
-                        _ => unreachable!(),
                     }
                 }
-                _ => None,
-            }
+                // Function values are not folded back into floats: the
+                // simplifier keeps them symbolic (for example `ln(2)`).
+                Token::Function(_) => None,
+                _ => unreachable!(),
+            },
+            _ => None,
         }
     }
 }

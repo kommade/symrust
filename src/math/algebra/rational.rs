@@ -226,6 +226,18 @@ impl Rat {
         Self::from_float(value.as_inner())
     }
 
+    /// Recover a rational from any float leaf type.
+    ///
+    /// The value goes through the crate's `Real` engine, so a `f64` and a
+    /// `Real` holding the same number give the same rational.
+    pub fn from_leaf<T>(value: &T) -> Option<Self>
+    where
+        T: crate::math::numeric::FloatType + std::fmt::Display,
+    {
+        use crate::math::numeric::FloatBridge;
+        Self::from_float(&value.to_float())
+    }
+
     /// Recover a *simple* rational (small denominator) from a float.
     ///
     /// Used for display purposes: `1/3` is nicer than `0.3333333333333333`.

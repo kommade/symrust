@@ -198,8 +198,13 @@ impl<T: FloatType + Display> Expr<T> {
     }
 }
 
-impl Expr<Real> {
-    /// Returns true if the expression is zero, false otherwise.
+impl<T: FloatType + Display> Expr<T> {
+    /// Whether the expression is the literal number zero.
+    ///
+    /// This is a structural test, not an evaluation: `0 / 1` is not the zero
+    /// node even though it evaluates to zero. Callers that need the numeric
+    /// reading should evaluate instead.
+    ///
     /// # Examples
     /// ```
     /// use rust_calculus::{create_expr, math::structs::expr::Expr};
@@ -210,7 +215,7 @@ impl Expr<Real> {
     /// ```
     #[must_use]
     pub fn is_zero(&self) -> bool {
-        self.tree.inner.borrow().is_zero()
+        self.tree.is_number_zero()
     }
 
     /// Whether the expression contains the independent variable.
@@ -221,7 +226,9 @@ impl Expr<Real> {
     pub fn has_independent(&self) -> bool {
         self.tree.inner.borrow().has_indp
     }
+}
 
+impl Expr<Real> {
     /// Whether the expression contains a formal root sum (`Σ_{Z: p(Z)=0} …`).
     ///
     /// A root sum is the exact antiderivative form used when an irreducible
@@ -238,11 +245,16 @@ impl Expr<Real> {
     }
 }
 
-impl Expr<Real> {
+impl<T> Expr<T>
+where
+    T: FloatType + Display,
+    Node<T>: NodeSimplify,
+{
     /// Attempt to simplify the expression. May not always simplify the expression to the simplest form.
     /// Accepts a boolean argument `expand` which, if true, will attempt to expand products during simplification.
     ///
-    /// Symbolic simplification is defined for the default [`Real`] leaf type.
+    /// Symbolic simplification is defined for leaf types whose tree implements
+    /// [`NodeSimplify`]; today that is the default [`Real`].
     /// # Examples
     /// ```
     /// use rust_calculus::{create_expr, math::structs::expr::Expr};
@@ -293,12 +305,12 @@ impl Expr<Real> {
             return simplified;
         }
         // Prefer an exact rational rendering so fractions stay fractions.
-        match Rat::from_real(&value) {
+        match Rat::from_leaf(&value) {
             Some(rational) => Self::from_node(rational.to_node()),
             // No exact rational form but the value is still finite: this
             // happens for a float leaf that was already decimal, so keep the
             // decimal.
-            None => Self::from_f64(value.to_f64()),
+            None => Self::from_node(Node::float(value)),
         }
     }
 }
