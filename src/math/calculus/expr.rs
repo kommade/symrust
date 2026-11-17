@@ -6,9 +6,10 @@
 //! [`Node`] constructors. No technique decides what to do with that structure
 //! here.
 
+use std::fmt::Display;
 use std::ops::Neg;
 
-use crate::math::numeric::Real;
+use crate::math::numeric::{FloatType, Real};
 use crate::{math::parse::lexer::{Func, Op, Token},
     math::structs::expr::node::{Node, NodeFunctions, NodeInner, NodeSimplify, NodeValue},
     math::utils::float_math::FloatMath,
@@ -199,17 +200,22 @@ pub(crate) fn scale(node: Node, factor: Real) -> Node {
     multiply_by(node, factor)
 }
 
+/// The coarse shape of a node: which token it holds and, for an operator, the
+/// two children.
+///
+/// Generic over the leaf type so the evaluator can work on any `Node<T>`; the
+/// default is [`Real`], which is what the calculus techniques use.
 #[derive(Clone, Debug)]
-pub(crate) enum Shape {
+pub(crate) enum Shape<T = Real> {
     /// An operand, including the empty operand.
-    Operand(Token),
+    Operand(Token<T>),
     /// An operator or function applied to children.
-    Operator(Token, Node, Node),
+    Operator(Token<T>, Node<T>, Node<T>),
     /// The empty node.
     Empty,
 }
 
-pub(crate) fn shape(node: &Node) -> Shape {
+pub(crate) fn shape<T: FloatType + Display>(node: &Node<T>) -> Shape<T> {
     let borrowed = node.inner.borrow();
     match &borrowed.value {
         NodeValue::Operand(token) => Shape::Operand(token.clone()),
