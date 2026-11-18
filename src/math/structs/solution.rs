@@ -56,11 +56,8 @@ pub struct ElementaryStep<T = Expr, S = T> {
 
 impl<T, S> ElementaryStep<T, S> {
     /// Build a step, recording the value it produced (if any).
-    ///
-    /// Prefer this over a struct literal: the marker field is not part of the
-    /// public surface.
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         step_name: impl Into<String>,
         description: impl Into<String>,
         step_result: Option<S>,
@@ -143,21 +140,6 @@ pub struct Solution<T = Expr, S = T> {
 }
 
 impl<T, S> Solution<T, S> {
-    /// Start collecting the steps of `problem_type` applied to `start`.
-    #[must_use]
-    pub fn new(start: T, problem_type: impl Into<String>) -> Self
-    where
-        S: Default,
-    {
-        Self {
-            start,
-            problem_type: problem_type.into(),
-            steps: Vec::new(),
-            result: S::default(),
-            result_comment: String::new(),
-        }
-    }
-
     /// The value the computation started from.
     #[must_use]
     pub fn start(&self) -> &T {
@@ -188,8 +170,44 @@ impl<T, S> Solution<T, S> {
         &self.result_comment
     }
 
+    /// How many steps were recorded (nested solutions count as one each).
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.steps.len()
+    }
+
+    /// Whether no steps were recorded.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.steps.is_empty()
+    }
+}
+
+/// Construction and mutation, for the crate's own computations.
+///
+/// A `Solution` is a *finished record* once a computation hands it back: the
+/// reader surface above is all an external caller sees. The builder half lives
+/// here so that steps can only be forged inside the crate, where the
+/// [`Recorder`] machinery — not a raw `Solution` — is the supported way to
+/// write a computation.
+impl<T, S> Solution<T, S> {
+    /// Start collecting the steps of `problem_type` applied to `start`.
+    #[must_use]
+    pub(crate) fn new(start: T, problem_type: impl Into<String>) -> Self
+    where
+        S: Default,
+    {
+        Self {
+            start,
+            problem_type: problem_type.into(),
+            steps: Vec::new(),
+            result: S::default(),
+            result_comment: String::new(),
+        }
+    }
+
     /// Record an elementary step and the value it produced.
-    pub fn push_step(
+    pub(crate) fn push_step(
         &mut self,
         step_name: impl Into<String>,
         description: impl Into<String>,
@@ -202,7 +220,7 @@ impl<T, S> Solution<T, S> {
     ///
     /// Pass `None` for a step that only makes a decision, such as factoring the
     /// denominator, so the rendered output does not show a placeholder result.
-    pub fn push_step_without_result(
+    pub(crate) fn push_step_without_result(
         &mut self,
         step_name: impl Into<String>,
         description: impl Into<String>,
@@ -214,23 +232,18 @@ impl<T, S> Solution<T, S> {
     }
 
     /// Record a nested solution.
-    pub fn push_sub_solution(&mut self, solution: Solution<T, S>) {
+    pub(crate) fn push_sub_solution(&mut self, solution: Solution<T, S>) {
         self.steps.push(SolutionStep::SubSolution(solution));
     }
 
-    /// Set the final answer.
-    pub fn set_result(&mut self, result: S) {
-        self.result = result;
-    }
-
     /// Set a comment describing the result.
-    pub fn set_result_comment(&mut self, comment: impl Into<String>) {
+    pub(crate) fn set_result_comment(&mut self, comment: impl Into<String>) {
         self.result_comment = comment.into();
     }
 
     /// Finish the solution by storing the answer and returning it.
     #[must_use]
-    pub fn finish(mut self, result: S) -> Self {
+    pub(crate) fn finish(mut self, result: S) -> Self {
         self.result = result;
         self
     }
@@ -242,7 +255,7 @@ impl<T, S> Solution<T, S> {
     /// unwrapped. Each step's displayed value is converted the same way, so the
     /// steps and the answer stay consistent.
     #[must_use]
-    pub fn map_result<S2>(self, f: impl Fn(S) -> S2) -> Solution<T, S2> {
+    pub(crate) fn map_result<S2>(self, f: impl Fn(S) -> S2) -> Solution<T, S2> {
         Solution {
             start: self.start,
             problem_type: self.problem_type,
@@ -254,18 +267,6 @@ impl<T, S> Solution<T, S> {
             result: f(self.result),
             result_comment: self.result_comment,
         }
-    }
-
-    /// How many steps were recorded (nested solutions count as one each).
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.steps.len()
-    }
-
-    /// Whether no steps were recorded.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.steps.is_empty()
     }
 }
 
