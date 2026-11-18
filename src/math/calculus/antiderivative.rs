@@ -330,8 +330,8 @@ where
         let antiderivative = solution.result().clone();
         let antiderivative_text = antiderivative.to_string();
         solution.push_step(
-            "the antiderivative",
-            "the bounds of integration are substituted into this",
+            "calculation complete",
+            "the antiderivative; the bounds of integration are substituted into this",
             antiderivative.clone(),
         );
 
@@ -611,6 +611,55 @@ where
     ) {
         let recorder = &mut *self.recorder;
         recorder.record_without_result(step_name, description, Expr::default);
+    }
+
+    /// Integrate `node` on a nested recorder, handing the recorded steps to
+    /// the parent as an indented sub-solution.
+    ///
+    /// A technique that spawns a sub-problem — integration by parts, above all
+    /// — produces steps that belong *under* the step which asked for them;
+    /// flattening them into the parent list makes it impossible to see which
+    /// integral each step belongs to. When nothing is recording (`NoSteps`)
+    /// the run happens in place, just without the capture. A failed attempt is
+    /// dropped silently: the parent will try the next candidate, and a dead
+    /// branch in the narrative would only confuse. The deadline and the
+    /// remaining step budget are shared with the parent, so the total work
+    /// stays bounded.
+    fn integrate_nested(
+        &mut self,
+        node: &Node<T>,
+        problem_type: impl FnOnce() -> String,
+    ) -> Result<Node<T>, IntegrationError> {
+        if !self.recorder.is_recording() {
+            return self.integrate(node);
+        }
+        let mut nested_recorder = StepRecorder::new(Expr::from_node(node.clone()), problem_type());
+        let outcome = {
+            let mut nested = Integrator::from_context(
+                IntegratorContext::new(self.deadline, self.steps, self.depth, self.parts_depth),
+                &mut nested_recorder,
+            );
+            nested.variable = self.variable;
+            // The active set is shared so the nested run inherits the cycle
+            // detection: re-entering an integral already on the stack must
+            // bail exactly as it would in a flat recursion.
+            nested.active = self.active.clone();
+            let result = nested.integrate(node);
+            // Hand the remaining budget back; the deadline is absolute and
+            // already shared.
+            self.steps = nested.steps;
+            match result {
+                Ok(value) => {
+                    let solution = nested_recorder.finish(Expr::from_node(value.clone()));
+                    (Ok(value), Some(solution))
+                }
+                Err(error) => (Err(error), None),
+            }
+        };
+        if let Some(solution) = outcome.1 {
+            self.recorder.record_sub_solution(|| solution);
+        }
+        outcome.0
     }
 
     pub(super) fn variable_node(&self) -> Node<T> {
@@ -1366,42 +1415,72 @@ where
                 .map(|(_, factor)| factor.clone())
                 .collect();
             let rest = helpers::product_of(&rest);
-            // Record the choice of `u` and `dv` first: that decision is what
-            // drives the two sub-integrals below, so it must come before them.
+            // `du` first: the decomposition step below quotes it, and it is
+            // only the derivative of `u` — cheaper than the `v` integral and
+            // worth naming before either sub-problem starts.
+            let Some(du) = helpers::differentiate(&candidate) else {
+                continue;
+            };
+            let du = helpers::simplify_deep(&du);
             let candidate_text = describe_signed(&candidate);
             let rest_text = describe_signed(&rest);
+            let du_text = describe_signed(&du);
+            // Record the decomposition first: the choice of `u` and `dv` is
+            // what drives the two sub-integrals below, so it comes before
+            // them.
             self.step_without_result("integration by parts", || {
-                format!("u = {candidate_text}, dv = {rest_text} dx")
+                format!(
+                    "∫ u dv with u = {candidate_text} (du = {du_text} dx) and dv = {rest_text} dx"
+                )
             });
-            let v = match self.integrate(&rest) {
+            // v = ∫ dv, solved on a nested recorder so its working is
+            // indented under the step that asked for it.
+            let v_heading = rest_text.clone();
+            let v = match self.integrate_nested(&rest, || {
+                format!("find v: ∫ {v_heading} dx")
+            }) {
                 Ok(value) => value,
                 Err(IntegrationError::Timeout) => return Err(IntegrationError::Timeout),
                 Err(_) => {
                     continue;
                 }
             };
-            let Some(du) = helpers::differentiate(&candidate) else {
-                continue;
-            };
-            let du = helpers::simplify_deep(&du);
             let uv = helpers::mul(candidate.clone(), v.clone());
+            let uv_text = describe_signed(&uv);
             let inner_integrand = helpers::mul(v.clone(), du.clone());
-            // The assembled `uv` term, before the remaining integral is solved.
-            self.step("assemble", || format!("u v = {candidate_text} v"), || {
-                uv.clone()
-            });
-            self.parts_depth += 1;
-            let inner_result = self.integrate(&inner_integrand);
-            self.parts_depth -= 1;
-            match inner_result {
-                Ok(inner) => {
-                    return Ok(Some(helpers::subtract(helpers::mul(candidate, v), inner)));
-                }
+            let inner_text = describe_signed(&inner_integrand);
+            // By parts, ∫ u dv = u v − ∫ v du: the assembled `u v` term is
+            // what the technique has produced so far, and the description
+            // names exactly what still has to be integrated.
+            self.step(
+                "assemble u v",
+                || {
+                    format!(
+                        "∫ u dv = u v − ∫ v du, so u v = {uv_text} and ∫ v du = ∫ {inner_text} dx"
+                    )
+                },
+                || uv.clone(),
+            );
+            // The remaining integral, again as indented working, followed by
+            // the combination its result feeds: u v − ∫ v du.
+            let remaining_heading = inner_text.clone();
+            let inner = match self.integrate_nested(&inner_integrand, || {
+                format!("the remaining integral: ∫ {remaining_heading} dx")
+            }) {
+                Ok(value) => value,
                 Err(IntegrationError::Timeout) => return Err(IntegrationError::Timeout),
                 Err(_) => {
                     continue;
                 }
-            }
+            };
+            let inner_text = describe_signed(&inner);
+            let term = helpers::subtract(helpers::mul(candidate, v), inner);
+            self.step(
+                "combine",
+                || format!("u v − ∫ v du = {uv_text} − ({inner_text})"),
+                || term.clone(),
+            );
+            return Ok(Some(term));
         }
         Ok(None)
     }

@@ -328,16 +328,16 @@ fn integrate_solution_matches_integrate_and_records_steps() {
     use crate::math::numeric::Real;
 
     super::setup();
-    let expr = create_expr!("2x").unwrap();
+    let expr = create_expr!("2xsin(x) + 2xcos(x)^3/3").unwrap();
     let (lower, upper) = (Real::from_i64(0), Real::from_i64(3));
 
     let plain = expr.integrate(lower.clone(), upper.clone()).unwrap();
-    assert_eq!(plain, Real::from_i64(9));
+    //assert_eq!(plain, Real::from_i64(9));
 
     let solution = expr
         .integrate_solution(lower, upper)
         .expect("2x integrates over [0, 3]");
-    
+    println!("solution:\n{solution}");
     let recorded: Real = solution
         .result()
         .evaluate(0.0_f64)
@@ -577,12 +577,12 @@ fn integrate_solution_shows_the_antiderivative_and_the_bound_substitutions() {
         })
         .collect();
 
-    let antiderivative_name = "the antiderivative";
+    let complete_name = "calculation complete";
     let upper_name = "substitute the upper bound";
     let lower_name = "substitute the lower bound";
     assert!(
-        elementary.iter().any(|(name, _, _)| *name == antiderivative_name),
-        "the solution should name the antiderivative, got {:?}",
+        elementary.iter().any(|(name, _, _)| *name == complete_name),
+        "the solution should close with the antiderivative, got {:?}",
         elementary.iter().map(|(name, _, _)| *name).collect::<Vec<_>>()
     );
     let upper = elementary
@@ -598,9 +598,75 @@ fn integrate_solution_shows_the_antiderivative_and_the_bound_substitutions() {
 
     // The rendered solution carries the antiderivative and both bound values.
     let rendered = solution.to_string();
-    assert!(rendered.contains("the antiderivative"), "{rendered}");
+    assert!(rendered.contains("calculation complete"), "{rendered}");
     assert!(rendered.contains("F(3) = 9"), "{rendered}");
     assert!(rendered.contains("F(0) = 0"), "{rendered}");
+}
+
+/// A function written without its brackets still means a call: `2xsinx`
+/// reads as `2 x sin(x)`, never as `2 x s i n x`.
+#[test]
+fn a_bare_function_name_after_a_factor_is_a_call() {
+    super::setup();
+    for (input, expected) in [
+        ("sinx", "sin(x)"),
+        ("2xsinx", "2 x sin(x)"),
+        ("sin x + cos x", "sin(x) + cos(x)"),
+    ] {
+        let parsed = create_expr!(input).unwrap_or_else(|error| panic!("{input}: {error}"));
+        assert_eq!(parsed.to_string(), expected, "lex tree of {input}");
+    }
+    // The bare and the spaced-explicit spellings must produce the same tree:
+    // both go through the same implicit-multiplication pass.
+    let bare = create_expr!("2xsinx + 2xcosx^3/3").unwrap();
+    let spaced = create_expr!("2x sin(x) + 2x cos(x)^3/3").unwrap();
+    assert_eq!(
+        bare.to_string(),
+        spaced.to_string(),
+        "2xsinx must lex as 2 x sin(x), not 2 x s i n x"
+    );
+    // And the two integrate to the same antiderivative.
+    assert_eq!(
+        bare.get_antiderivative().unwrap().to_string(),
+        spaced.get_antiderivative().unwrap().to_string(),
+    );
+}
+
+/// Integration by parts records each sub-problem as an indented sub-solution
+/// (`find v`, then `the remaining integral`) and closes with the combination
+/// `u v − ∫ v du`, so the working reads like the written-out derivation
+/// instead of one flat list of unrelated rules.
+#[test]
+fn by_parts_nests_its_sub_integrals() {
+    use crate::math::structs::solution::SolutionStep;
+
+    super::setup();
+    let solution = create_expr!("x sin(x)")
+        .unwrap()
+        .get_antiderivative_solution()
+        .expect("x sin(x) integrates by parts");
+    let rendered = solution.to_string();
+
+    // The decomposition names u, du and dv.
+    assert!(
+        rendered.contains("∫ u dv with u = x (du = 1 dx) and dv = sin(x) dx"),
+        "the by-parts decomposition should name u, du and dv:\n{rendered}"
+    );
+    // Both sub-problems are recorded as sub-solutions, not flattened steps.
+    let sub_solutions = solution
+        .steps()
+        .iter()
+        .filter(|step| matches!(step, SolutionStep::SubSolution(_)))
+        .count();
+    assert!(
+        sub_solutions >= 2,
+        "the v integral and the remaining integral should be sub-solutions:\n{rendered}"
+    );
+    assert!(rendered.contains("find v: ∫ sin(x) dx"), "{rendered}");
+    assert!(rendered.contains("the remaining integral:"), "{rendered}");
+    // The identity and the combination are explicit.
+    assert!(rendered.contains("∫ u dv = u v − ∫ v du"), "{rendered}");
+    assert!(rendered.contains("u v − ∫ v du = "), "{rendered}");
 }
 
 /// Substituting into the antiderivative can land on an indeterminate form

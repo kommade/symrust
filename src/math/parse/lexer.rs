@@ -449,109 +449,122 @@ impl<T: FloatType + Display> Lexer<T> {
                         _ => unreachable!(),
                     }));
                 };
+                // Collect the full run of letters: a keyword may sit anywhere
+                // inside it (`xsinx` is `x` times `sin(x)`), so the run as a
+                // whole cannot be matched against the keyword list.
+                let run_start = self.pos - 1;
                 let mut value = c.to_string();
                 while let Ok(c) = self.unwrap_next() {
                     if c.is_ascii_alphabetic() {
                         value.push(c);
-                        if value == "pi" {
-                            return Ok(Token::from_const(Const::Pi));
-                        }
                     } else {
                         self.pos -= 1;
                         break;
                     }
                 }
-                match value.as_str() {
-                    "sin" => Ok(Token::from_func(Func::Sin)),
-                    "cos" => Ok(Token::from_func(Func::Cos)),
-                    "tan" => Ok(Token::from_func(Func::Tan)),
-                    "sec" => Ok(Token::from_func(Func::Sec)),
-                    "csc" => Ok(Token::from_func(Func::Csc)),
-                    "cot" => Ok(Token::from_func(Func::Cot)),
-                    "asin" | "arcsin" => Ok(Token::from_func(Func::Asin)),
-                    "acos" | "arccos" => Ok(Token::from_func(Func::Acos)),
-                    "atan" | "arctan" => Ok(Token::from_func(Func::Atan)),
-                    "sqrt" => Ok(Token::from_func(Func::Sqrt)),
-                    "log" => {
-                        let mut base = T::parse_decimal("10")
-                            .map_err(LexError::ParseError)?;
-                        if let Ok(c) = self.unwrap_next()
-                            && c == '_' {
-                                let mut base_str = String::new();
-                                while let Ok(c) = self.unwrap_next() {
-                                    if c.is_ascii_digit() {
-                                        base_str.push(c);
+                match Self::keyword_prefix(&value) {
+                    None => {
+                        // No keyword starts here; only one token at a time can
+                        // be returned, so emit the first letter as a variable
+                        // and rescan the rest of the run from the next letter.
+                        self.pos = run_start + 1;
+                        Ok(Token::from_var(c))
+                    }
+                    Some(keyword_len) => {
+                        // Consume exactly the keyword; the unread tail of the
+                        // run (a bare argument, or more letters) is rescanned
+                        // by the following calls.
+                        self.pos = run_start + keyword_len;
+                        if &value[..keyword_len] == "pi" {
+                            return Ok(Token::from_const(Const::Pi));
+                        }
+                        let func = match &value[..keyword_len] {
+                            "sin" => Func::Sin,
+                            "cos" => Func::Cos,
+                            "tan" => Func::Tan,
+                            "sec" => Func::Sec,
+                            "csc" => Func::Csc,
+                            "cot" => Func::Cot,
+                            "asin" => Func::Asin,
+                            "acos" => Func::Acos,
+                            "atan" => Func::Atan,
+                            "sqrt" => Func::Sqrt,
+                            "log" => {
+                                let mut base = T::parse_decimal("10")
+                                    .map_err(LexError::ParseError)?;
+                                if let Ok(c) = self.unwrap_next()
+                                    && c == '_' {
+                                        let mut base_str = String::new();
+                                        while let Ok(c) = self.unwrap_next() {
+                                            if c.is_ascii_digit() {
+                                                base_str.push(c);
+                                            } else {
+                                                self.pos -= 1;
+                                                break;
+                                            }
+                                        }
+                                        match T::parse_decimal(&base_str) {
+                                            Ok(n) if !n.is_zero() && !n.is_one() => base = n,
+                                            Ok(_) => {
+                                                return Err(LexError::ParseError(format!(
+                                                    "Invalid log base {} at pos {}",
+                                                    base_str, self.pos
+                                                )));
+                                            }
+                                            Err(e) => {
+                                                return Err(LexError::ParseError(format!(
+                                                    "Error parsing log base {} at pos {}: {}",
+                                                    base_str, self.pos, e
+                                                )));
+                                            }
+                                        };
+                                    }
+                                Func::Log(base)
+                            }
+                            "ln" => Func::Ln,
+                            "root" => {
+                                // `root_n(x)`; a bare `root(...)` defaults to the square root.
+                                let mut index = T::parse_decimal("2")
+                                    .map_err(LexError::ParseError)?;
+                                if let Ok(c) = self.unwrap_next() {
+                                    if c == '_' {
+                                        let mut index_str = String::new();
+                                        while let Ok(c) = self.unwrap_next() {
+                                            if c.is_ascii_digit() {
+                                                index_str.push(c);
+                                            } else {
+                                                self.pos -= 1;
+                                                break;
+                                            }
+                                        }
+                                        match T::parse_decimal(&index_str) {
+                                            Ok(n) if !n.is_zero() => index = n,
+                                            Ok(_) => {
+                                                return Err(LexError::ParseError(format!(
+                                                    "Invalid root index {} at pos {}",
+                                                    index_str, self.pos
+                                                )));
+                                            }
+                                            Err(e) => {
+                                                return Err(LexError::ParseError(format!(
+                                                    "Error parsing root index {} at pos {}: {}",
+                                                    index_str, self.pos, e
+                                                )));
+                                            }
+                                        }
                                     } else {
                                         self.pos -= 1;
-                                        break;
                                     }
                                 }
-                                match T::parse_decimal(&base_str) {
-                                    Ok(n) if !n.is_zero() && !n.is_one() => base = n,
-                                    Ok(_) => {
-                                        return Err(LexError::ParseError(format!(
-                                            "Invalid log base {} at pos {}",
-                                            base_str, self.pos
-                                        )));
-                                    }
-                                    Err(e) => {
-                                        return Err(LexError::ParseError(format!(
-                                            "Error parsing log base {} at pos {}: {}",
-                                            base_str, self.pos, e
-                                        )));
-                                    }
-                                };
+                                Func::Root(index)
                             }
-                        Ok(Token::from_func(Func::Log(base)))
-                    }
-                    "ln" => Ok(Token::from_func(Func::Ln)),
-                    "root" => {
-                        // `root_n(x)`; a bare `root(...)` defaults to the square root.
-                        let mut index = T::parse_decimal("2")
-                            .map_err(LexError::ParseError)?;
-                        if let Ok(c) = self.unwrap_next() {
-                            if c == '_' {
-                                let mut index_str = String::new();
-                                while let Ok(c) = self.unwrap_next() {
-                                    if c.is_ascii_digit() {
-                                        index_str.push(c);
-                                    } else {
-                                        self.pos -= 1;
-                                        break;
-                                    }
-                                }
-                                match T::parse_decimal(&index_str) {
-                                    Ok(n) if !n.is_zero() => index = n,
-                                    Ok(_) => {
-                                        return Err(LexError::ParseError(format!(
-                                            "Invalid root index {} at pos {}",
-                                            index_str, self.pos
-                                        )));
-                                    }
-                                    Err(e) => {
-                                        return Err(LexError::ParseError(format!(
-                                            "Error parsing root index {} at pos {}: {}",
-                                            index_str, self.pos, e
-                                        )));
-                                    }
-                                }
-                            } else {
-                                self.pos -= 1;
-                            }
-                        }
-                        Ok(Token::from_func(Func::Root(index)))
-                    }
-                    _ => {
-                        // we can only return tokens one at a time so
-                        // we need to backtrack to the first char
-                        let char = value.chars().nth(0);
-                        match char {
-                            Some(c) => {
-                                self.pos -= value.len() - 1;
-                                Ok(Token::from_var(c))
-                            }
-                            None => unreachable!(),
-                        }
+                            other => unreachable!("keyword_prefix returned {other}"),
+                        };
+                        // A function written without brackets around its
+                        // argument (`sinx`) still means `sin(x)`; the brackets
+                        // are spliced in so the parser sees a normal call.
+                        self.parenthesize_bare_argument();
+                        Ok(Token::from_func(func))
                     }
                 }
             }
@@ -561,6 +574,57 @@ impl<T: FloatType + Display> Lexer<T> {
                 c, self.pos
             ))),
         }
+    }
+
+    /// The length of the longest keyword (`sin`, `asin`, `pi`, …) that
+    /// prefixes `run`, or `None`. Longer names are tried first so a never
+    /// keyword is mistaken for a shorter one (`arcsin` before `asin`).
+    fn keyword_prefix(run: &str) -> Option<usize> {
+        const KEYWORDS: [&str; 17] = [
+            "arcsin", "arccos", "arctan", "asin", "acos", "atan", "sqrt", "root",
+            "sin", "cos", "tan", "sec", "csc", "cot", "log", "ln", "pi",
+        ];
+        KEYWORDS
+            .iter()
+            .find(|keyword| run.starts_with(**keyword))
+            .map(|keyword| keyword.len())
+    }
+
+    /// Wrap the bare argument of a function in explicit parentheses, so the
+    /// scanner turns `2xsinx` into `2 x sin(x)` and the parser sees a normal
+    /// call rather than a function token it cannot bind.
+    ///
+    /// A paren-less argument is a single letter (`sinx`, `sin x`); a number
+    /// would be ambiguous (`log2(x)` spells base 2, not `log(x)·2`), and a
+    /// following `(` already brackets the argument. The splices rewrite
+    /// `self.input`, so every later position shifts with the inserted text.
+    fn parenthesize_bare_argument(&mut self) {
+        // Skip whitespace: `sin x` means the same as `sinx` here.
+        let mut argument_start = self.pos;
+        while argument_start < self.size
+            && (self.input.as_bytes()[argument_start] as char).is_whitespace()
+        {
+            argument_start += 1;
+        }
+        if argument_start >= self.size {
+            return;
+        }
+        let first = self.input.as_bytes()[argument_start] as char;
+        if !(first.is_ascii_alphabetic() || first == 'π') {
+            return;
+        }
+        self.input.insert(argument_start, '(');
+        self.size += 1;
+        // Leave `pos` on the freshly inserted `(`: the next call tokenises it,
+        // then the bare argument, then the inserted `)`.
+        self.pos = argument_start;
+        // A bare factor is one single-character letter or constant.
+        let argument_end = argument_start + 1 + match first {
+            'π' => 2, // a multibyte character
+            _ => 1,
+        };
+        self.input.insert(argument_end, ')');
+        self.size += 1;
     }
 
     pub fn lex(&mut self) -> Result<Vec<Token<T>>, LexError> {

@@ -13,7 +13,7 @@ use super::{Node, NodeInner, NodeValue};
 /// `sqrt(u^2)` collapse needs. Integer-valued leaves such as `f64::MAX` that
 /// do not fit an `f64` comparison are out of reach here, but an exponent of
 /// two is always representable.
-fn is_exactly_two<T: FloatType + Display>(value: &T) -> bool {
+fn is_exactly_two<T: SymbolicLeaf>(value: &T) -> bool {
     value.is_integer() && value.to_real().as_f64() == 2.0
 }
 
@@ -55,14 +55,14 @@ where
 /// to a small rational leave the conversion unsuccessful.
 fn rational_polynomial<T>(node: &Node<T>) -> Option<crate::math::algebra::polynomial::Poly>
 where
-    T: FloatType + Display,
+    T: SymbolicLeaf,
 {
     use crate::math::algebra::polynomial::Poly;
     use crate::math::algebra::rational::Rat;
 
     fn convert<T>(node: &Node<T>, depth: usize) -> Option<Poly>
     where
-        T: FloatType + Display,
+        T: SymbolicLeaf,
     {
         if depth > 64 {
             return None;
@@ -149,7 +149,7 @@ where
     Node::sum(terms)
 }
 
-impl<T: FloatType + Display> NodeInner<T> {
+impl<T: SymbolicLeaf> NodeInner<T> {
     /// Whether this node is a `sqrt(...)` application.
     pub(crate) fn is_sqrt(&self) -> bool {
         matches!(
@@ -362,7 +362,7 @@ impl<T: FloatType + Display> NodeInner<T> {
     }
 }
 
-impl<T: FloatType + std::fmt::Display> NodeInner<T> {
+impl<T: SymbolicLeaf> NodeInner<T> {
     /// Evaluate a closed (variable-free) node to its numeric value.
     ///
     /// This is the exact-arithmetic reading used by [`Expr::tidy`], so a value
@@ -382,7 +382,7 @@ impl<T: FloatType + std::fmt::Display> NodeInner<T> {
                 Token::Number(num) => Some(T::from_i64(*num)),
                 Token::Float(num) => Some(num.clone()),
                 Token::Constant(k) => Some(k.get_value()),
-                _ => unreachable!(),
+                _ => unreachable!("NodeInner::evaluate: unexpected token {token:?}"),
             },
             NodeValue::Operator(op_node) => match &op_node.token {
                 Token::Operator(op) => {
@@ -408,7 +408,7 @@ impl<T: FloatType + std::fmt::Display> NodeInner<T> {
                 // Function values are not folded back into floats: the
                 // simplifier keeps them symbolic (for example `ln(2)`).
                 Token::Function(_) => None,
-                _ => unreachable!(),
+                _ => unreachable!("NodeInner::evaluate: unexpected operator token {op_node:?}"),
             },
             _ => None,
         }

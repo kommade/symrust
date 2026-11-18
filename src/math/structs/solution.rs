@@ -272,10 +272,22 @@ impl<T, S> Solution<T, S> {
 impl<T: Display, S: Display> Display for Solution<T, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "{}: {}", self.problem_type, self.start)?;
-        for (index, step) in self.steps.iter().enumerate() {
+        // Only elementary steps carry numbers; a nested sub-solution renders
+        // as its own indented block between them, so the numbering of the
+        // parent's rules stays contiguous.
+        let mut step_number = 0;
+        for step in self.steps.iter() {
             match step {
                 SolutionStep::Elementary(step) => {
-                    write!(f, "  {}. {}: {}", index + 1, step.step_name, step.description)?;
+                    step_number += 1;
+                    let index = step_number;
+                    // An empty description (a pure marker such as
+                    // `calculation complete`) renders without the colon.
+                    if step.description.is_empty() {
+                        write!(f, "  {index}. {}", step.step_name)?;
+                    } else {
+                        write!(f, "  {index}. {}: {}", step.step_name, step.description)?;
+                    }
                     // A step that only records a decision: show what it
                     // concluded without inventing an expression for it.
                     match &step.step_result {
@@ -337,11 +349,16 @@ fn writeln_step_result(f: &mut fmt::Formatter<'_>, rendered: &str, indent: &str)
 }
 
 impl<T: Display, S: Display> Display for ElementaryStep<T, S> {
-    /// A standalone step: `name: description => result`. A multi-line result
-    /// starts after `=>` on its own line; a single-line result keeps the
-    /// historic no-trailing-newline form so `to_string` assertions stay exact.
+    /// A standalone step: `name: description => result`. An empty description
+    /// is dropped; a multi-line result starts after `=>` on its own line; a
+    /// single-line result keeps the historic no-trailing-newline form so
+    /// `to_string` assertions stay exact.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.step_name, self.description)?;
+        if self.description.is_empty() {
+            write!(f, "{}", self.step_name)?;
+        } else {
+            write!(f, "{}: {}", self.step_name, self.description)?;
+        }
         match &self.step_result {
             Some(result) => {
                 let rendered = result.to_string();
