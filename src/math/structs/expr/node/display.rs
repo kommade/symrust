@@ -259,8 +259,18 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                     Ok(format!(r"\int {inner_latex} \,d{variable}"))
                 }
                 Token::DerivativeOf(inner, variable) => {
+                    // Operator-first form: `\frac{d}{dx} f`. The subject is
+                    // bracketed whenever it is more than a single atom, so
+                    // `\frac{d}{dx} x` stays clean while a compound subject
+                    // keeps its own brackets.
                     let inner_latex = inner.inner.borrow().to_latex()?;
-                    Ok(format!(r"\frac{{d}}{{d{variable}}}\left({inner_latex}\right)"))
+                    if inner_latex.chars().all(|c| c.is_ascii_alphanumeric())
+                        && !inner_latex.is_empty()
+                    {
+                        Ok(format!(r"\frac{{d}}{{d{variable}}} {inner_latex}"))
+                    } else {
+                        Ok(format!(r"\frac{{d}}{{d{variable}}}\left({inner_latex}\right)"))
+                    }
                 }
                 _ => Err(NodeError::WrongToken("operand".to_string())),
             },

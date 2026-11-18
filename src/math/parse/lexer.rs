@@ -220,9 +220,14 @@ pub enum Token<T = Real> {
     /// displayed, so a recorded value can show work still to be done next to
     /// the parts already found.
     Integral(Box<Node<T>>, char),
-    /// A narrative derivative `d(inner)/d(variable)`, the `d/dx` companion of
-    /// [`Token::Integral`]: same opaque-atom rules, same usage — the step
-    /// narratives of substitutions can quote a rate of change symbolically.
+    /// A narrative derivative `d/d(inner) inner`, displayed `d/dx f`.
+    ///
+    /// The rendering orders the operator first (`d/dx f`), reading as the
+    /// operator applied to its subject rather than as a fraction denominator
+    /// (`d(f)/dx`), so it composes naturally in step values: `d/dx u = 2 x`.
+    /// Same opaque-atom rules as [`Token::Integral`] — the lexer and parser
+    /// never produce one; the tree inside is rendered but never evaluated,
+    /// simplified or traversed.
     DerivativeOf(Box<Node<T>>, char),
     /// A matrix literal, `[[a, b], [c, d]]`.
     ///
@@ -258,7 +263,17 @@ impl<T: SymbolicLeaf> Display for Token<T> {
             Self::Indp(c) | Self::Var(c) => write!(f, "{c}"),
             Self::RootSum(data) => write!(f, "{data}"),
             Self::Integral(inner, variable) => write!(f, "∫ {inner} d{variable}"),
-            Self::DerivativeOf(inner, variable) => write!(f, "d({inner})/d{variable}"),
+            // `d/dx f`: operator first. The subject is bracketed whenever it
+            // is more than a single atom, so `d/dx x` stays braceless while
+            // `d/dx (x cos(x))` cannot be misread as `dx` acting on nothing.
+            Self::DerivativeOf(inner, variable) => {
+                let subject = inner.to_string();
+                if is_narrative_atom(&subject) {
+                    write!(f, "d/d{variable} {subject}")
+                } else {
+                    write!(f, "d/d{variable} ({subject})")
+                }
+            }
             Self::Matrix(matrix) => write!(f, "{matrix}"),
             Self::Vector(vector) => write!(f, "{vector}"),
             Self::LBracket => write!(f, "["),
@@ -268,6 +283,17 @@ impl<T: SymbolicLeaf> Display for Token<T> {
             Self::RPar => write!(f, ")"),
         }
     }
+}
+
+/// Whether a rendered narrative subject is safe to write without brackets:
+/// a single atom (letter, number, keyword) that could not be split apart.
+///
+/// Used by the `d/dx f` rendering so `d/dx x` stays unbracketed while anything
+/// with a space (`x cos(x)`, `sin(u)`) — or a leading operator (`-x`) — is
+/// bracketed first: `d/dx (x cos(x))`.
+fn is_narrative_atom(rendered: &str) -> bool {
+    !rendered.is_empty()
+        && rendered.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
 }
 
 /// A handful of rules (tree-equality shortcuts) compare tokens. Equality is

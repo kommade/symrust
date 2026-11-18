@@ -696,9 +696,22 @@ fn a_pending_integral_token_is_display_only() {
     assert!(!carrying.is_zero());
     assert!(carrying.evaluate(1.0_f64).expression().is_some());
 
-    // The `d/dx` companion renders the same way.
+    // The `d/dx` companion renders operator-first, bracketing compound
+    // subjects: `d/dx (f)` for a sum/product, `d/dx u` bare for an atom.
     let rate = Node::<Real>::derivative_of(integrand.tree().clone(), 'x');
-    assert_eq!(rate.to_string(), "d(-cos(x))/dx");
+    assert_eq!(rate.to_string(), "d/dx (-cos(x))");
+    let simple = Node::<Real>::derivative_of(
+        create_expr!("u").unwrap().tree().clone(),
+        'x',
+    );
+    assert_eq!(simple.to_string(), "d/dx u");
+
+    // The LaTeX form is the operator-first \frac: the subject bracketed.
+    let wrapped = Expr::<Real>::from_node(rate);
+    assert_eq!(
+        wrapped.to_latex().unwrap(),
+        r"\frac{d}{dx}\left(-\cos(x)\right)"
+    );
 }
 
 /// Linearity is recorded as a single step showing the whole split, with every
