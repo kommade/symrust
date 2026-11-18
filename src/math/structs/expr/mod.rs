@@ -1,4 +1,3 @@
-use std::error::Error;
 use std::fmt::Display;
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
@@ -12,7 +11,7 @@ pub mod evaluate;
 pub mod limit;
 mod matrix;
 
-use node::{MulType, Node, NodeInner, NodeError, NodeFunctions, NodeOperations, NodeValue, OpNode};
+use node::{MulType, Node, NodeInner, NodeFunctions, NodeOperations};
 pub use error::ExprError;
 pub use evaluate::{Evaluable, Evaluated};
 pub use limit::Limit;

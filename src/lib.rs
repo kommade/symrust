@@ -1,6 +1,6 @@
 #![cfg_attr(feature = "generic_const", feature(generic_const_exprs))]
 #![cfg_attr(feature = "generic_const", allow(incomplete_features))]
-#![allow(unused)]
+#![allow(dead_code)]
 
 //! A symbolic math library.
 //!

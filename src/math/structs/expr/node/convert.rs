@@ -4,17 +4,16 @@
 //! caller-typed tree to `Node<Real>`, the other re-types a parsed `Node<Real>`
 //! to the caller's leaf type. Only numeric leaves change type; the symbolic
 //! structure is preserved exactly.
-use std::{cell::RefCell, cmp::Ordering, error::Error, fmt::Display, ops::Neg, rc::Rc};
+use std::fmt::Display ;
 
 
 
 use crate::{math::numeric::{FloatType, Real},
-    math::parse::lexer::{Const, Func, Op, Token},
+    math::parse::lexer::{Func, Token},
     math::structs::expr::Expr,
-    math::utils::fmt::unnecessary_brackets,
 };
 
-use super::{Node, NodeError, NodeInner, NodeValue, OpNode};
+use super::{Node, NodeInner, NodeValue};
 impl<T: FloatType + Display> Node<T> {
     /// Convert a `Node<T>` of any leaf type into a `Node<Real>`.
     ///
@@ -26,7 +25,6 @@ impl<T: FloatType + Display> Node<T> {
     #[must_use]
     pub fn from_typed(source: &Node<T>) -> Node<Real> {
         fn convert_token<T: FloatType + Display>(token: &Token<T>) -> Token<Real> {
-            use crate::math::numeric::FloatBridge;
             match token {
                 Token::Function(func) => Token::Function(match func {
                     Func::Sin => Func::Sin,

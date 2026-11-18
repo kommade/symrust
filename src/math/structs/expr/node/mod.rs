@@ -58,5 +58,3 @@ pub struct Node<T = Real> {
 pub use functions::{NodeFunctions, NodeOperations};
 
 pub(crate) use construct::NodeError;
-pub(crate) use display::{matrix_to_latex, vector_to_latex};
-pub(crate) use simplify::PowComponents;

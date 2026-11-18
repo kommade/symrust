@@ -32,7 +32,6 @@
 use std::fmt::Display;
 
 use crate::math::algebra::linear::{Matrix, SquareMatrixFns};
-use crate::math::algebra::rational::Rat;
 use crate::math::numeric::{ExactField, Matrixable, SymbolicLeaf};
 use crate::math::structs::expr::Expr;
 use crate::math::structs::expr::node::Node;

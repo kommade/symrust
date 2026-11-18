@@ -34,10 +34,6 @@
 
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
-// The engine's own leaf implementation below is the one place outside `real.rs`
-// that still names `arpfloat` — the trait *definitions* above never do.
-use arpfloat::{FP128, Float};
-
 #[cfg(feature = "complex")]
 pub mod complex;
 pub mod real;
@@ -441,56 +437,6 @@ impl FloatType for crate::math::numeric::Real {
     }
     fn trunc(&self) -> Self {
         Real::trunc(self)
-    }
-}
-
-/// The engine's own type as a leaf. Only this concrete impl (and the wrappers
-/// inside `real.rs`) touch `arpfloat` — the trait layer above carries `Real`.
-impl FloatType for Float {
-    fn zero() -> Self {
-        Float::zero(FP128, false)
-    }
-    fn one() -> Self {
-        Float::one(FP128, false)
-    }
-    fn neg_one() -> Self {
-        Float::one(FP128, true)
-    }
-    fn nan() -> Self {
-        Float::nan(FP128, false)
-    }
-    fn is_negative(&self) -> bool {
-        self.get_sign()
-    }
-    fn is_zero(&self) -> bool {
-        Float::is_zero(self)
-    }
-    fn is_nan(&self) -> bool {
-        Float::is_nan(self)
-    }
-    fn is_normal(&self) -> bool {
-        Float::is_normal(self)
-    }
-    fn is_infinite(&self) -> bool {
-        self.is_inf()
-    }
-    fn is_integer(&self) -> bool {
-        crate::math::utils::float_math::FloatMath::is_integer(self)
-    }
-    fn is_one(&self) -> bool {
-        crate::math::utils::float_math::FloatMath::is_one(self)
-    }
-    fn is_neg_one(&self) -> bool {
-        crate::math::utils::float_math::FloatMath::is_neg_one(self)
-    }
-    fn powi(self, exponent: u64) -> Self {
-        Float::powi(&self, exponent)
-    }
-    fn abs(&self) -> Self {
-        Float::abs(self)
-    }
-    fn trunc(&self) -> Self {
-        Float::trunc(self)
     }
 }
 

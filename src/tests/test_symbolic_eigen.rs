@@ -2,7 +2,6 @@
 //! radical roots.
 
 use crate::math::algebra::linear::Matrix;
-use crate::math::algebra::symbolic_eigen::ExprPoly;
 use crate::create_expr;
 use crate::math::structs::expr::Expr;
 

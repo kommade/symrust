@@ -2,19 +2,16 @@
 //!
 //! Unlike the constructors, these methods consume a node and return the node
 //! that results from an operation on it.
-use std::{cell::RefCell, cmp::Ordering, error::Error, fmt::Display, ops::Neg, rc::Rc};
+use std::{cmp::Ordering, fmt::Display};
 
 
 
 use crate::{math::numeric::{FloatType, SymbolicLeaf},
-    math::parse::lexer::{Const, Func, Op, Token},
-    math::structs::expr::Expr,
-    math::utils::fmt::unnecessary_brackets,
+    math::parse::lexer::{Func, Op, Token},
 };
 
-use super::{MulType, Node, NodeError, NodeInner, NodeValue, OpNode};
+use super::{MulType, Node, NodeInner, NodeValue};
 use super::inspect::square_root_of_rational_square;
-use super::{inspect::*, simplify::*};
 
 /// Operations that consume a node and return a new node.
 ///

@@ -18,7 +18,7 @@
 
 use super::{Node, NodeInner, NodeValue};
 use crate::math::algebra::rational::Rat;
-use crate::math::numeric::{FloatBridge, FloatType, SymbolicLeaf};
+use crate::math::numeric::{FloatType, SymbolicLeaf};
 use crate::math::parse::lexer::{Func, Op, Token};
 
 // `add`/`sub`/`mul`/`div` are *constructors*: they take the operands and build

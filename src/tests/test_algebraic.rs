@@ -107,7 +107,6 @@ fn multiquadratic_exact_square_roots() {
 
 #[test]
 fn multiquadratic_diagonalizes_a_rational_symmetric_matrix() {
-    use crate::math::algebra::linear::SquareMatrixFns;
     let q = |value| Multiquadratic::<3>::from_rat(Rat::from_i64(value));
     // A^T A from the 4x3 sqrt(2) example: eigenvalues 0, 3, 6.
     let matrix = Matrix::<Multiquadratic<3>>::from_vec(

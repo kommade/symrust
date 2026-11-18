@@ -10,8 +10,6 @@ mod test_generic_tree;
 mod test_limit;
 #[cfg(feature = "algebraic")]
 mod test_algebraic;
-mod test_float_gcd;
-mod test_float_math;
 mod test_linear;
 mod test_matrixable_sqrt;
 mod test_symbolic_matrix;
@@ -22,6 +20,7 @@ mod test_expr_vector;
 mod test_symbolic_eigen;
 mod test_eigen;
 mod test_vector;
+mod test_real;
 
 static INIT: std::sync::Once = std::sync::Once::new();
 

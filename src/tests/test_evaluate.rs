@@ -1,10 +1,7 @@
 use std::collections::HashMap;
 
-use arpfloat::{FP128, Float};
-
 use crate::create_expr;
 use crate::math::structs::expr::evaluate::Evaluated;
-use crate::math::structs::expr::Expr;
 
 #[test]
 fn evaluate_polynomial_f64() {
@@ -44,15 +41,6 @@ fn evaluate_integer_type() {
     super::setup();
     let expr = create_expr!("x^2 + 1").unwrap();
     assert_eq!(expr.evaluate(5_i64).value(), Some(26));
-}
-
-#[test]
-fn evaluate_arpfloat() {
-    super::setup();
-    let expr = create_expr!("x^2").unwrap();
-    let three = Float::from_i64(FP128, 3);
-    let result = expr.evaluate(three).value().unwrap();
-    assert_eq!(result.to_i64(), 9);
 }
 
 #[test]

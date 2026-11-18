@@ -1,15 +1,13 @@
 //! Read-only queries on a [`NodeInner`]: shape predicates, evaluation of
 //! constant subtrees and named-constant detection.
-use std::{cell::RefCell, cmp::Ordering, error::Error, fmt::Display, rc::Rc};
+use std::fmt::Display;
 
 use crate::{
-    math::numeric::{FloatBridge, FloatType, SymbolicLeaf},
-    math::parse::lexer::{Const, Func, Op, Token},
-    math::structs::expr::Expr,
-    math::utils::fmt::unnecessary_brackets,
+    math::numeric::{FloatType, SymbolicLeaf},
+    math::parse::lexer::{Func, Op, Token},
 };
 
-use super::{Node, NodeError, NodeInner, NodeValue, OpNode};
+use super::{Node, NodeInner, NodeValue};
 
 /// Whether an evaluated leaf value is exactly the integer `2`, the check the
 /// `sqrt(u^2)` collapse needs. Integer-valued leaves such as `f64::MAX` that
@@ -128,7 +126,7 @@ fn poly_to_variable_node<T>(
 where
     T: SymbolicLeaf,
 {
-    use crate::math::structs::expr::node::Node as _;
+    
 
     let symbol = NodeInner::<T>::operand(Token::Indp(variable)).wrap();
     let mut terms = Vec::new();

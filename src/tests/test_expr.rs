@@ -1,6 +1,5 @@
 use super::EXAMPLE_FUNCTIONS;
 use crate::create_expr;
-use crate::math::structs::expr::{Expr, node::NodeFunctions};
 
 #[test]
 fn create_expr() {

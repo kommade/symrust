@@ -14,10 +14,7 @@
 //! neither is a second implementation of the linear algebra.
 
 #[cfg(feature = "generic_const")]
-#[cfg(feature = "generic_const")]
 pub(crate) mod static_api;
-#[cfg(feature = "generic_const")]
-pub use static_api::{StaticMatrixMul, StaticSquareMatrixFns};
 
 use super::algorithms::{
     adjugate_of, cofactor_of, det_of, diagonalization_of, eliminate,

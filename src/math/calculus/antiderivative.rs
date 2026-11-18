@@ -45,12 +45,11 @@ mod trig;
 use std::{
     error::Error,
     fmt::Display,
-    ops::Neg,
     panic::AssertUnwindSafe,
     time::{Duration, Instant},
 };
 
-use crate::math::numeric::{FloatBridge, Real, SymbolicLeaf};
+use crate::math::numeric::{Real, SymbolicLeaf};
 use crate::{
     math::parse::lexer::{Func, Op, Token},
     math::structs::{
@@ -60,11 +59,10 @@ use crate::{
         },
         solution::{NoSteps, Recorder, Solution, StepRecorder},
     },
-    math::utils::float_math::FloatMath,
 };
 
 use self::{
-    helpers::{Shape, float, float_from, number, one, zero},
+    helpers::{Shape, float_from, number, one, zero},
     rational::RationalFunction,
 };
 
@@ -690,7 +688,7 @@ where
             return Ok(result);
         }
         // `P(x)·(a x + b)^p` by the u-substitution `u = a x + b` (avoids by parts).
-        if let Some(result) = rational::linear_power_substitution(node, &self.variable_node()) {
+        if let Some(result) = rational::linear_power_substitution(node) {
             self.step(
                 "u-substitution",
                 || format!("u-substitution with the linear base for {}", describe(node)),

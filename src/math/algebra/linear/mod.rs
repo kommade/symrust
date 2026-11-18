@@ -29,6 +29,7 @@ pub use matrix::Matrix;
 #[cfg(feature = "generic_const")]
 pub use static_matrix::{StaticMatrix, StaticVector};
 #[cfg(feature = "generic_const")]
+#[allow(unused)]
 pub(crate) use static_matrix::{RatMatrix, RatVector, SurdMatrix, SurdVector};
 pub use crate::math::numeric::Matrixable;
 pub use vector::Vector;

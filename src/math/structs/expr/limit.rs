@@ -18,11 +18,10 @@
 //! [`crate::math::calculus::antiderivative`] uses this to evaluate improper integrals.
 
 use std::collections::HashMap;
-use std::fmt::Display;
 
 use crate::math::calculus::expr::{Shape, shape};
 use crate::math::numeric::{Real, SymbolicLeaf};
-use crate::math::parse::lexer::{Const, Func, Op, Token};
+use crate::math::parse::lexer::{Func, Op, Token};
 use crate::math::structs::expr::node::{Node, NodeInner};
 
 use super::Expr;
@@ -385,7 +384,7 @@ impl<T: SymbolicLeaf> Expr<T> {
     fn probe_left(
         &self,
         toward: &Real,
-        mut sample: impl FnMut(Real) -> Option<Real>,
+        sample: impl FnMut(Real) -> Option<Real>,
     ) -> Option<Limit<Real>> {
         let points = approach_points_left(toward);
         classify(points.into_iter().filter_map(sample))

@@ -10,16 +10,13 @@ use crate::{math::algebra::{
         linear::{Matrix, Vector},
         polynomial::Poly,
         rational::Rat,
-        surd::Surd,
     },
-    math::calculus::expr::float_from,
     math::numeric::SymbolicLeaf,
-    math::parse::lexer::{Func, Op, Token},
+    math::parse::lexer::{Op, Token},
     math::structs::expr::{Expr, node::Node},
     math::structs::solution::Recorder,
 };
 
-use super::super::Integrator;
 use super::super::helpers::{self, Shape};
 use super::terms::{general_term, linear_term, quadratic_term};
 

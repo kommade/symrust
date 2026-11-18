@@ -1,5 +1,5 @@
 use crate::{math::calculus::expr::{
-        Shape, add, call, div, float, float_from, function, is_constant, mul, negate, number, one, pow, shape,
+        Shape, add, call, div, float, function, is_constant, mul, negate, number, one, pow, shape,
         split_constant, sqrt_arg, sub, zero,
     },
     math::numeric::SymbolicLeaf,

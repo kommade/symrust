@@ -6,20 +6,16 @@
 //! sets the "algebraic needed" flag so the caller can report a helpful error.
 
 use crate::{math::algebra::{
-        factorization::{Factor, Factorization, factorise},
-        linear::{Matrix, Vector},
-        polynomial::{Poly},
+        polynomial::Poly,
         rational::Rat,
-        surd::Surd,
     },
     math::calculus::expr::float_from,
     math::numeric::SymbolicLeaf,
-    math::parse::lexer::{Func, Op, Token},
+    math::parse::lexer::Func ,
     math::structs::expr::node::Node,
-    math::structs::solution::Recorder,
 };
 
-use super::super::helpers::{self, Shape};
+use super::super::helpers;
 
 use super::rational_function::RationalFunction;
 use super::terms::{binomial, linear_power_parts};
@@ -1076,10 +1072,7 @@ fn poly_exact_div(factors: &[Vec<f64>], skip: usize) -> Option<Vec<f64>> {
 /// carried in the `u`-variable, multiplied by `u^p`, and integrated termwise with
 /// the power rule, then substituted back. Returns `None` unless the integrand has
 /// exactly one non-polynomial factor `(linear)^p` and the rest is a polynomial.
-pub(crate) fn linear_power_substitution<T>(
-    node: &Node<T>,
-    variable: &Node<T>,
-) -> Option<Node<T>>
+pub(crate) fn linear_power_substitution<T>(node: &Node<T>) -> Option<Node<T>>
 where
     T: SymbolicLeaf,
 {
@@ -1089,24 +1082,20 @@ where
     }
     // Locate the single factor that is a power of a linear expression.
     let mut radical_index = None;
-    let mut base_linear = None;
     for (index, factor) in product.numer.iter().enumerate() {
-        if let Some((base, _exponent)) = linear_power_parts(factor) {
+        if linear_power_parts(factor).is_some() {
             if radical_index.is_some() {
                 // More than one non-trivial factor: not this simple case.
                 return None;
             }
             radical_index = Some(index);
-            base_linear = Some(base);
         }
     }
     let radical_index = radical_index?;
     let (linear_base, exponent) = linear_power_parts(&product.numer[radical_index])?;
-    // The linear `a x + b` must use the integration variable.
+    // The linear `a x + b` must use the integration variable; extracting the
+    // coefficients also rejects a constant base (zero slope).
     let (slope_real, intercept_real) = helpers::linear_coefficients(&linear_base)?;
-    if slope_real.is_zero() {
-        return None;
-    }
     let slope = Rat::from_leaf(&slope_real)?;
     let intercept = Rat::from_leaf(&intercept_real)?;
     // The remaining factors (over any numeric denominators) form `P(x)`.
@@ -1122,7 +1111,6 @@ where
         return None;
     }
     let coefficients = polynomial.numer.coefficients();
-    let exponent_value = exponent;
 
     // Substituting `x = (u − b)/a` in `P` gives a polynomial in `u`; multiply by
     // `u^exponent` and integrate termwise. `dx = du / a`.
@@ -1161,7 +1149,7 @@ where
         if coef_k.is_zero() {
             continue;
         }
-        let total = k as f64 + exponent_value.to_real().as_f64();
+        let total = k as f64 + exponent.to_real().as_f64();
         let new_exponent = total + 1.0;
         if new_exponent.abs() < 1e-12 {
             // ∫ u^{-1} du = ln|u|

@@ -8,8 +8,6 @@
 //! live in [`crate::math::calculus::expr`]; they are re-exported here so that the
 //! integration modules can keep talking to `helpers::*`.
 
-use std::ops::Neg;
-
 use crate::{math::numeric::SymbolicLeaf,
     math::parse::lexer::{Func, Op, Token},
     math::structs::expr::node::{Node, NodeFunctions, NodeInner},

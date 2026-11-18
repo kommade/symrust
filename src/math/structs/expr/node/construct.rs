@@ -1,13 +1,11 @@
 //! Construction of nodes: the public [`Node`] constructors and the internal
 //! [`NodeInner`] builders they delegate to.
-use std::{cell::RefCell, cmp::Ordering, error::Error, fmt::Display, ops::Neg, rc::Rc};
+use std::{cell::RefCell, error::Error, fmt::Display, rc::Rc};
 
 
 
 use crate::{math::numeric::{FloatType, Real},
     math::parse::lexer::{Const, Func, Op, Token},
-    math::structs::expr::Expr,
-    math::utils::fmt::unnecessary_brackets,
 };
 
 use super::{Node, NodeInner, NodeValue, OpNode};
@@ -144,7 +142,6 @@ impl<T: FloatType + Display> Node<T> {
     pub fn from_real(node: &Node<Real>) -> Self {
         /// Re-type a Real-valued token into this tree's leaf type `T`.
         fn convert_token<T: FloatType + Display>(token: &Token<Real>) -> Token<T> {
-            use crate::math::numeric::FloatBridge;
             match token {
                 Token::Function(func) => Token::Function(match func {
                     Func::Sin => Func::Sin,

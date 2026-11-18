@@ -7,17 +7,15 @@
 //! trees collect `f64` coefficients and `Real` trees collect exact ones. The
 //! bounds mirror the ones on [`NodeSimplify`], whose rules call into these
 //! helpers.
-use std::{cell::RefCell, cmp::Ordering, fmt::Display, ops::Neg, rc::Rc};
+use std::{cmp::Ordering, fmt::Display};
 
 use crate::{
     math::numeric::{FloatType, SymbolicLeaf},
-    math::parse::lexer::{Func, Op, Token},
-    math::utils::fmt::unnecessary_brackets,
+    math::parse::lexer::{Op, Token},
 };
 
 use super::functions::NodeFunctions;
-use super::{Node, NodeError, NodeInner, NodeValue, OpNode};
-use super::inspect::*;
+use super::{Node, NodeInner, NodeValue};
 
 impl<T> NodeInner<T>
 where

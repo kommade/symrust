@@ -5,7 +5,6 @@
 //! for a linear factor, an `arctan`/`ln` pair for a quadratic one, and a
 //! reduction formula for higher powers.
 use crate::{math::algebra::{
-        factorization::{Factor, Factorization, factorise},
         linear::{Matrix, Vector},
         polynomial::Poly,
         rational::Rat,
@@ -15,14 +14,10 @@ use crate::{math::algebra::{
     math::numeric::SymbolicLeaf,
     math::parse::lexer::{Func, Op, Token},
     math::structs::expr::node::Node,
-    math::structs::solution::Recorder,
 };
 
 use super::super::helpers::{self, Shape};
 
-use super::ALGEBRAIC_NEEDED;
-use super::algebraic::*;
-use super::rational_function::{RationalFunction, solve_partial_fractions};
 use crate::math::algebra::factorization::{surd_poly, surd_shift, surd_zero, split_quartic};
 use crate::math::algebra::rational::square_root_of;
 use crate::math::algebra::surd::{surd_quadratic_node, surd_sqrt_node};
@@ -156,6 +151,7 @@ where
     }
     #[cfg(not(feature = "algebraic"))]
     {
+        use crate::math::calculus::antiderivative::rational::ALGEBRAIC_NEEDED;
         let _ = (coefficients, variable);
         // An irreducible factor left over after the exact paths have run is one
         // the general algebraic method ("B") could handle. Flag it so the

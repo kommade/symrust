@@ -13,7 +13,6 @@
 
 use std::fmt::{self, Display};
 use std::ops::{Add, Div, Mul, Neg, Sub};
-use arpfloat::{FP128, Float};
 
 use super::real::Real;
 use super::{ExpressionScalar, FloatBridge, FloatType};

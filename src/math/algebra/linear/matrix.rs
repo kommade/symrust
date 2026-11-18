@@ -3,8 +3,7 @@
 use std::fmt::Display;
 use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign};
 
-use super::algorithms::{assert_same_shape, map_entries, map_scalar, write_matrix};
-use super::storage::vec_solve_system;
+use super::algorithms::{assert_same_shape, map_entries, map_scalar};
 use super::traits::{MatrixIndex, MatrixOps, Matrixable};
 use super::vector::Vector;
 use super::vector_set::VectorSet;

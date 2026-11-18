@@ -15,12 +15,10 @@ use std::collections::HashMap;
 
 use std::fmt::Display;
 
-use arpfloat::{FP128, Float};
 
 use crate::math::numeric::{ExpressionScalar, FloatBridge, FloatType, Real};
 use crate::math::parse::lexer::{Const, Func, Op, Token};
 use crate::math::structs::expr::{Expr, Node, NodeInner, node::NodeValue};
-use crate::math::utils::float_math::FloatMath;
 
 /// The scalar bound the evaluator works over.
 ///
@@ -326,71 +324,6 @@ fn independent_variable<T: FloatType + Display>(node: &Node<T>) -> char {
 // ---------------------------------------------------------------------------
 // Concrete implementations
 // ---------------------------------------------------------------------------
-
-impl ExpressionScalar for Float {
-    fn from_i64(value: i64) -> Self {
-        Float::from_i64(FP128, value)
-    }
-
-    fn pow(self, exponent: Self) -> Self {
-        Float::pow(&self, &exponent)
-    }
-    fn pow_i64(self, exponent: i64) -> Self {
-        if exponent < 0 {
-            Float::one(FP128, false) / Float::powi(&self, exponent.unsigned_abs())
-        } else {
-            Float::powi(&self, exponent.unsigned_abs())
-        }
-    }
-    fn pow_float(self, exponent: Real) -> Self {
-        Float::pow(&self, exponent.as_inner())
-    }
-
-    fn sin(self) -> Self {
-        Float::sin(&self)
-    }
-    fn cos(self) -> Self {
-        Float::cos(&self)
-    }
-    fn tan(self) -> Self {
-        Float::tan(&self)
-    }
-    fn asin(self) -> Self {
-        FloatMath::asin(&self)
-    }
-    fn acos(self) -> Self {
-        FloatMath::acos(&self)
-    }
-    fn atan(self) -> Self {
-        FloatMath::atan(&self)
-    }
-    fn sqrt(self) -> Self {
-        Float::sqrt(&self)
-    }
-    fn ln(self) -> Self {
-        Float::log(&self)
-    }
-    fn log(self, base: Real) -> Self {
-        Float::log(&self) / Float::log(base.as_inner())
-    }
-    fn pi() -> Self {
-        Float::pi(FP128)
-    }
-    fn e() -> Self {
-        Float::e(FP128)
-    }
-}
-
-impl FloatBridge for Float {
-    fn from_real(value: Real) -> Self {
-        value.as_inner().clone()
-    }
-
-    fn to_real(&self) -> Real {
-        Real::from(self.clone())
-    }
-}
-
 macro_rules! impl_evaluable_float {
     ($($float:ty),* $(,)?) => {
         $(

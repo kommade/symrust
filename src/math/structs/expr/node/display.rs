@@ -1,5 +1,5 @@
 //! Rendering: LaTeX output and the plain-text [`Display`] implementation.
-use std::{cell::RefCell, cmp::Ordering, error::Error, fmt::Display, ops::Neg, rc::Rc};
+use std::fmt::Display;
 
 
 
@@ -12,10 +12,8 @@ use crate::{
     math::utils::fmt::unnecessary_brackets,
 };
 
-use super::{Node, NodeError, NodeInner, NodeValue, OpNode};
-use super::inspect::*;
-use super::simplify::*;
-use super::functions::{NodeFunctions, NodeOperations};
+use super::{Node, NodeError, NodeInner, NodeValue};
+use super::functions::NodeOperations;
 
 /// Render `node` as `-x` when it is a negation, that is `0 - x`.
 ///
