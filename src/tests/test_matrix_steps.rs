@@ -367,10 +367,11 @@ fn eigen_composes_shift_and_null_space_steps() {
 /// computation over another coefficient type can keep its steps.
 #[test]
 fn solution_is_generic_over_its_value() {
-    let mut solution = crate::math::structs::solution::Solution::<i32>::new(2, "sum");
-    solution.push_step("add", "added one", 3);
-    solution.push_step_without_result("decide", "chose to stop", None);
-    let solution = solution.finish(7);
+    use crate::math::structs::solution::StepRecorder;
+    let mut recorder = StepRecorder::<i32>::new(2, "sum");
+    recorder.push_step("add", "added one", 3);
+    recorder.push_step_without_result("decide", "chose to stop", None);
+    let solution = recorder.finish(7);
 
     assert_eq!(solution.result(), &7);
     assert_eq!(solution.steps().len(), 2);
@@ -393,7 +394,7 @@ fn solution_is_generic_over_its_value() {
 fn solution_steps_and_result_may_differ() {
     use crate::math::algebra::linear::Matrix;
     use crate::math::algebra::rational::Rat;
-    use crate::math::structs::solution::Solution;
+    use crate::math::structs::solution::StepRecorder;
 
     let matrix = Matrix::<Rat>::from_vec(
         2,
@@ -406,15 +407,15 @@ fn solution_steps_and_result_may_differ() {
         ],
     )
     .unwrap();
-    let mut solution = Solution::<Matrix<Rat>, Rat>::new(matrix.clone(), "determinant");
+    let mut recorder = StepRecorder::<Matrix<Rat>, Rat>::new(matrix.clone(), "determinant");
     // The step that does the work reports the scalar it produced, while the
     // computation as a whole started from a matrix.
-    solution.push_step(
+    recorder.push_step(
         "multiply the diagonal",
         "product of the diagonal",
         Rat::from_i64(-2),
     );
-    let solution = solution.finish(Rat::from_i64(-2));
+    let solution = recorder.finish(Rat::from_i64(-2));
 
     assert_eq!(solution.result(), &Rat::from_i64(-2));
     assert_eq!(solution.steps().len(), 1);
@@ -431,7 +432,7 @@ fn solution_steps_and_result_may_differ() {
 fn elementary_step_carries_the_step_type() {
     use crate::math::algebra::linear::Matrix;
     use crate::math::algebra::rational::Rat;
-    use crate::math::structs::solution::{ElementaryStep, Solution};
+    use crate::math::structs::solution::ElementaryStep;
 
     // Applied to a matrix, producing a scalar.
     let step: ElementaryStep<Matrix<Rat>, Rat> = ElementaryStep::new(
@@ -452,7 +453,7 @@ fn elementary_step_carries_the_step_type() {
     assert_eq!(decision.to_string(), "factor: factored the denominator");
 
     // With the default, both parameters are the same.
-    let mut solution = Solution::<i32>::new(0, "sum");
-    solution.push_step("add", "added two", 2);
-    assert_eq!(solution.finish(2).result(), &2);
+    let mut recorder = crate::math::structs::solution::StepRecorder::<i32>::new(0, "sum");
+    recorder.push_step("add", "added two", 2);
+    assert_eq!(recorder.finish(2).result(), &2);
 }

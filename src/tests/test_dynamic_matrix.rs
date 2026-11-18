@@ -203,7 +203,7 @@ fn a_vector_set_renders_with_aligned_columns() {
 /// description while the second sits at column zero.
 #[test]
 fn a_multiline_step_result_starts_on_a_new_line() {
-    use crate::math::structs::solution::{ElementaryStep, Solution};
+    use crate::math::structs::solution::ElementaryStep;
 
     let matrix = dynamic(2, 2, &[1, 255, 10, 3]);
     let matrix_text = matrix.to_string();
@@ -217,9 +217,13 @@ fn a_multiline_step_result_starts_on_a_new_line() {
     );
 
     // The numbered solution indents the block under the step.
-    let mut solution = Solution::<Matrix<Rat>, Matrix<Rat>>::new(matrix.clone(), "test");
-    solution.push_step("rule", "described", matrix);
-    let rendered = solution.to_string();
+    let mut recorder = crate::math::structs::solution::StepRecorder::<
+        Matrix<Rat>,
+        Matrix<Rat>,
+    >::new(matrix.clone(), "test");
+    let result = matrix.clone();
+    recorder.push_step("rule", "described", matrix);
+    let rendered = recorder.finish(result).to_string();
     assert!(
         rendered.contains("  1. rule: described =>\n    ["),
         "the matrix block should start on its own line, indented under the step:\n{rendered}"

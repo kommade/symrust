@@ -116,6 +116,17 @@ impl<T, S> SolutionStep<T, S> {
 /// [`get_derivative_solution`][crate::math::calculus::derivative::Derivative::get_derivative_solution].
 /// The plain entry points return only the answer and record no steps.
 ///
+/// The type is a *finished record*: construction happens exclusively through
+/// [`StepRecorder`][crate::math::structs::solution::StepRecorder], which owns
+/// the fields while a computation runs and hands back a frozen `Solution` on
+/// `finish`. Nothing in the crate can mutate a `Solution` — not even through
+/// the crate's own code — so a caller can never observe steps appearing after
+/// the fact or an answer changing under a shared reference. A computation that
+/// wants to *continue* an existing narrative calls
+/// [`StepRecorder::reopen`], which takes ownership of the fields and moves
+/// them back into a recorder; that is an explicit, visible ownership move,
+/// never a mutation behind someone's back.
+///
 /// The two type parameters are deliberately separate. `S` is what the steps
 /// record; it defaults to `T` so the common case needs one parameter. They come
 /// apart when a computation works with one kind of value but answers with
@@ -183,79 +194,17 @@ impl<T, S> Solution<T, S> {
     }
 }
 
-/// Construction and mutation, for the crate's own computations.
-///
-/// A `Solution` is a *finished record* once a computation hands it back: the
-/// reader surface above is all an external caller sees. The builder half lives
-/// here so that steps can only be forged inside the crate, where the
-/// [`Recorder`] machinery — not a raw `Solution` — is the supported way to
-/// write a computation.
+/// Consumption-only operations on the frozen record.
 impl<T, S> Solution<T, S> {
-    /// Start collecting the steps of `problem_type` applied to `start`.
-    #[must_use]
-    pub(crate) fn new(start: T, problem_type: impl Into<String>) -> Self
-    where
-        S: Default,
-    {
-        Self {
-            start,
-            problem_type: problem_type.into(),
-            steps: Vec::new(),
-            result: S::default(),
-            result_comment: String::new(),
-        }
-    }
-
-    /// Record an elementary step and the value it produced.
-    pub(crate) fn push_step(
-        &mut self,
-        step_name: impl Into<String>,
-        description: impl Into<String>,
-        step_result: S,
-    ) {
-        self.push_step_without_result(step_name, description, Some(step_result));
-    }
-
-    /// Record an elementary step, optionally carrying the value it produced.
-    ///
-    /// Pass `None` for a step that only makes a decision, such as factoring the
-    /// denominator, so the rendered output does not show a placeholder result.
-    pub(crate) fn push_step_without_result(
-        &mut self,
-        step_name: impl Into<String>,
-        description: impl Into<String>,
-        step_result: Option<S>,
-    ) {
-        self.steps.push(SolutionStep::Elementary(
-            ElementaryStep::<T, S>::new(step_name, description, step_result),
-        ));
-    }
-
-    /// Record a nested solution.
-    pub(crate) fn push_sub_solution(&mut self, solution: Solution<T, S>) {
-        self.steps.push(SolutionStep::SubSolution(solution));
-    }
-
-    /// Set a comment describing the result.
-    pub(crate) fn set_result_comment(&mut self, comment: impl Into<String>) {
-        self.result_comment = comment.into();
-    }
-
-    /// Finish the solution by storing the answer and returning it.
-    #[must_use]
-    pub(crate) fn finish(mut self, result: S) -> Self {
-        self.result = result;
-        self
-    }
-
     /// Convert the answer to a different type, keeping every step.
     ///
     /// This is how a computation whose steps are matrices can answer with a
     /// scalar: the steps stay as they are, and only the final value is
     /// unwrapped. Each step's displayed value is converted the same way, so the
-    /// steps and the answer stay consistent.
+    /// steps and the answer stay consistent. It *consumes* the solution — a
+    /// transform of the record, not a mutation of it.
     #[must_use]
-    pub(crate) fn map_result<S2>(self, f: impl Fn(S) -> S2) -> Solution<T, S2> {
+    pub fn map_result<S2>(self, f: impl Fn(S) -> S2) -> Solution<T, S2> {
         Solution {
             start: self.start,
             problem_type: self.problem_type,
@@ -507,6 +456,12 @@ impl<T> Recorder<T> for NoSteps {
 /// `T` is the type each step records, `S` the type the final answer has. They
 /// are the same for most computations; a determinant, for instance, records
 /// matrices and answers with a scalar.
+///
+/// The recorder owns the solution's fields while the computation runs; it is
+/// the only thing in the crate that can append to them. `finish` consumes the
+/// recorder and hands back a frozen [`Solution`], and [`reopen`][Self::reopen]
+/// reverses that move explicitly when a computation must continue an existing
+/// narrative.
 #[derive(Debug, Clone)]
 pub(crate) struct StepRecorder<T = Expr, S = T> {
     solution: Solution<T, S>,
@@ -515,27 +470,115 @@ pub(crate) struct StepRecorder<T = Expr, S = T> {
 impl<T, S: Default> StepRecorder<T, S> {
     /// Start recording the steps of `problem_type` applied to `start`.
     #[must_use]
-    pub fn new(start: T, problem_type: impl Into<String>) -> Self {
+    pub(crate) fn new(start: T, problem_type: impl Into<String>) -> Self {
         Self {
-            solution: Solution::new(start, problem_type),
+            solution: Solution {
+                start,
+                problem_type: problem_type.into(),
+                steps: Vec::new(),
+                result: S::default(),
+                result_comment: String::new(),
+            },
         }
+    }
+
+    /// Take ownership of a finished solution's fields, continuing its
+    /// narrative.
+    ///
+    /// This is the only way to record into a [`Solution`] after `finish`, and
+    /// it is deliberately not an in-place mutation: the solution is consumed,
+    /// its fields move into the recorder, and a new frozen record comes back
+    /// from [`finish`][Self::finish]. The explicit round-trip makes "this
+    /// narrative is being extended" visible at the call site — the definite
+    /// integral, for instance, reopens the antiderivative's solution to add
+    /// the bound substitutions beneath its story.
+    #[must_use]
+    pub(crate) fn reopen(solution: Solution<T, S>) -> Self {
+        Self { solution }
     }
 
     /// Finish recording, storing `result` as the answer.
     #[must_use]
-    pub fn finish(self, result: S) -> Solution<T, S> {
-        self.solution.finish(result)
+    pub(crate) fn finish(self, result: S) -> Solution<T, S> {
+        let mut solution = self.solution;
+        solution.result = result;
+        solution
     }
 
     /// The steps recorded so far.
     #[must_use]
-    pub fn solution(&self) -> &Solution<T, S> {
+    pub(crate) fn solution(&self) -> &Solution<T, S> {
         &self.solution
     }
+}
 
-    /// A mutable reference to the solution being built.
-    pub fn solution_mut(&mut self) -> &mut Solution<T, S> {
-        &mut self.solution
+// Mutators available to any StepRecorder, with or without `S: Default`.
+impl<T, S> StepRecorder<T, S> {
+    /// Record an elementary step and the value it produced.
+    pub(crate) fn push_step(
+        &mut self,
+        step_name: impl Into<String>,
+        description: impl Into<String>,
+        step_result: S,
+    ) {
+        self.solution.steps.push(SolutionStep::Elementary(
+            ElementaryStep::<T, S>::new(step_name, description, Some(step_result)),
+        ));
+    }
+
+    /// Record an elementary step, optionally carrying the value it produced.
+    ///
+    /// Pass `None` for a step that only makes a decision, such as factoring the
+    /// denominator, so the rendered output does not show a placeholder result.
+    pub(crate) fn push_step_without_result(
+        &mut self,
+        step_name: impl Into<String>,
+        description: impl Into<String>,
+        step_result: Option<S>,
+    ) {
+        self.solution.steps.push(SolutionStep::Elementary(
+            ElementaryStep::<T, S>::new(step_name, description, step_result),
+        ));
+    }
+
+    /// Record a nested solution.
+    ///
+    /// A nested solution must have the same step and answer type as the parent;
+    /// a computation over a different pair records its steps directly instead.
+    pub(crate) fn push_sub_solution(&mut self, solution: Solution<T, S>) {
+        self.solution.steps.push(SolutionStep::SubSolution(solution));
+    }
+
+    /// Set a comment describing the result.
+    pub(crate) fn set_result_comment(&mut self, comment: impl Into<String>) {
+        self.solution.result_comment = comment.into();
+    }
+
+    /// Record an elementary step whose result has the step type `S`.
+    ///
+    /// This is the [`Recorder`] form taking closures, generalized to the
+    /// recorder's own step type `S`; the matrix code uses it to record
+    /// `Matrix<T>` steps into a `StepRecorder<Matrix<T>, T>`.
+    /// Record an elementary step whose result has the step type `S`.
+    ///
+    /// This is the [`Recorder`] form taking closures, generalized to the
+    /// recorder's own step type `S`; the matrix code uses it to record
+    /// `Matrix<T>` steps into a `StepRecorder<Matrix<T>, T>`.
+    pub(crate) fn record_step(
+        &mut self,
+        step_name: &str,
+        description: impl FnOnce() -> String,
+        result: impl FnOnce() -> S,
+    ) {
+        let description = description();
+        let step_result = result();
+        self.push_step(step_name, description, step_result);
+    }
+
+    /// Record a step that reports a decision but produces no step result.
+    pub(crate) fn record_decision(&mut self, step_name: &str, description: impl FnOnce() -> String) {
+        let description = description();
+        self.push_step_without_result(step_name, description, None);
     }
 }
 
@@ -548,7 +591,7 @@ impl<T> Recorder<T> for StepRecorder<T> {
     ) {
         let description = description();
         let step_result = result();
-        self.solution.push_step(step_name, description, step_result);
+        self.push_step(step_name, description, step_result);
     }
 
     fn record_without_result(
@@ -558,42 +601,11 @@ impl<T> Recorder<T> for StepRecorder<T> {
         _result: impl FnOnce() -> T,
     ) {
         let description = description();
-        self.solution
-            .push_step_without_result(step_name, description, None);
+        self.push_step_without_result(step_name, description, None);
     }
 
     fn record_sub_solution(&mut self, solution: impl FnOnce() -> Solution<T, T>) {
-        self.solution.push_sub_solution(solution());
-    }
-}
-
-/// A recorder whose step and answer types may differ.
-///
-/// The matrix step code uses this: a determinant steps through `Matrix<T>`
-/// values but answers with a `T`.
-///
-/// [`record_sub_solution`](Recorder::record_sub_solution) is not available here,
-/// because a nested solution must have the same step and answer type as its
-/// parent. A computation that needs nested solutions should call
-/// [`solution_mut`](StepRecorder::solution_mut) and push them directly.
-impl<T, S> StepRecorder<T, S> {
-    /// Record an elementary step whose result has the step type `S`.
-    pub fn record_step(
-        &mut self,
-        step_name: &str,
-        description: impl FnOnce() -> String,
-        result: impl FnOnce() -> S,
-    ) {
-        let description = description();
-        let step_result = result();
-        self.solution.push_step(step_name, description, step_result);
-    }
-
-    /// Record a step that reports a decision but produces no step result.
-    pub fn record_decision(&mut self, step_name: &str, description: impl FnOnce() -> String) {
-        let description = description();
-        self.solution
-            .push_step_without_result(step_name, description, None);
+        self.push_sub_solution(solution());
     }
 }
 

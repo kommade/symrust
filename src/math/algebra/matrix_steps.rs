@@ -267,7 +267,7 @@ where
 
     // 2. Its eigen-decomposition, with all of its own steps.
     if let Some(eigen) = eigen_generic(&gram) {
-        recorder.solution_mut().push_sub_solution(eigen);
+        recorder.push_sub_solution(eigen);
     }
 
     // 3. The singular values are the square roots of the eigenvalues.
@@ -371,7 +371,7 @@ where
 
         // Its null space is a row reduction; record it as a nested solution.
         let reduction = row_reduce_generic(&shifted, true);
-        recorder.solution_mut().push_sub_solution(reduction);
+        recorder.push_sub_solution(reduction);
     }
 
     Some(recorder.finish(matrix.clone()))
@@ -1317,7 +1317,7 @@ where
 
     // 2. Its eigen-decomposition, with all of its own steps.
     if let Some(eigen) = eigen_tracked(&gram) {
-        recorder.solution_mut().push_sub_solution(eigen);
+        recorder.push_sub_solution(eigen);
     }
 
     // 3. The singular values are the square roots of the eigenvalues.
@@ -1439,7 +1439,7 @@ where
 
         // Its null space is a row reduction; record it as a nested solution.
         let reduction = row_reduce_tracked(&shifted, true);
-        recorder.solution_mut().push_sub_solution(reduction);
+        recorder.push_sub_solution(reduction);
     }
 
     Some(recorder.finish(matrix_expr(matrix)))
