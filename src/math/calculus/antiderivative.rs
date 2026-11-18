@@ -1324,7 +1324,7 @@ where
             derivative_text
         };
         let pending = NodeInner::<T>::operand(Token::Integral(
-            Box::new(case.rewritten),
+            Expr::from_node(case.rewritten),
             'u',
         ))
         .wrap();
@@ -1571,7 +1571,7 @@ where
             // `u v`. The nested block below derives that pending integral,
             // and `combine` closes the term with its concrete value.
             let pending = NodeInner::<T>::operand(Token::Integral(
-                Box::new(inner_integrand.clone()),
+                Expr::from_node(inner_integrand.clone()),
                 self.variable,
             ))
             .wrap();

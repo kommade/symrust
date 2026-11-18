@@ -255,7 +255,13 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                 Token::Matrix(matrix) => Ok(matrix_to_latex(matrix)),
                 Token::Vector(vector) => Ok(vector_to_latex(vector)),
                 Token::Integral(inner, variable) => {
-                    let inner_latex = inner.inner.borrow().to_latex()?;
+                    // `to_latex` lives on `Expr` and reports through
+                    // `ExprError`; reuse `unwrap_or_else` back to the plain
+                    // rendering so the surrounding `NodeError` result keeps
+                    // its type.
+                    let inner_latex = inner
+                        .to_latex()
+                        .unwrap_or_else(|_| inner.to_string());
                     Ok(format!(r"\int {inner_latex} \,d{variable}"))
                 }
                 Token::DerivativeOf(inner, variable) => {
@@ -263,7 +269,9 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                     // bracketed whenever it is more than a single atom, so
                     // `\frac{d}{dx} x` stays clean while a compound subject
                     // keeps its own brackets.
-                    let inner_latex = inner.inner.borrow().to_latex()?;
+                    let inner_latex = inner
+                        .to_latex()
+                        .unwrap_or_else(|_| inner.to_string());
                     if inner_latex.chars().all(|c| c.is_ascii_alphanumeric())
                         && !inner_latex.is_empty()
                     {

@@ -80,13 +80,13 @@ impl<T: FloatType + Display> Node<T> {
     /// simplified or traversed. See [`Token::Integral`].
     #[must_use]
     pub fn pending_integral(integrand: Node<T>, variable: char) -> Self {
-        NodeInner::operand(Token::Integral(Box::new(integrand), variable)).wrap()
+        NodeInner::operand(Token::Integral(crate::math::structs::expr::Expr::from_node(integrand), variable)).wrap()
     }
-    /// A narrative derivative `d(inner)/d(variable)` leaf, the `d/dx`
-    /// companion of [`Node::pending_integral`]. Same opaque-atom rules.
+    /// A narrative derivative `d/dx f` leaf, the `d/dx` companion of
+    /// [`Node::pending_integral`]. Same opaque-atom rules.
     #[must_use]
     pub fn derivative_of(expression: Node<T>, variable: char) -> Self {
-        NodeInner::operand(Token::DerivativeOf(Box::new(expression), variable)).wrap()
+        NodeInner::operand(Token::DerivativeOf(crate::math::structs::expr::Expr::from_node(expression), variable)).wrap()
     }
     /// Whether this tree contains a formal root sum (`Σ_{Z: p(Z)=0} …`).
     ///
@@ -183,10 +183,10 @@ impl<T: FloatType + Display> Node<T> {
                 // Narrative tokens: the tree inside is retyped entrywise, the
                 // variable name carries over unchanged.
                 Token::Integral(inner, variable) => {
-                    Token::Integral(Box::new(Node::from_real(inner)), *variable)
+                    Token::Integral(crate::math::structs::expr::Expr::from_node(Node::from_real(inner.tree())), *variable)
                 }
                 Token::DerivativeOf(inner, variable) => {
-                    Token::DerivativeOf(Box::new(Node::from_real(inner)), *variable)
+                    Token::DerivativeOf(crate::math::structs::expr::Expr::from_node(Node::from_real(inner.tree())), *variable)
                 }
                 Token::Matrix(matrix) => Token::Matrix(matrix_from_real(matrix)),
                 Token::Vector(vector) => Token::Vector(vector_from_real(vector)),

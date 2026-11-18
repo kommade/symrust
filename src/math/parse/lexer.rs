@@ -4,7 +4,6 @@ use crate::math::algebra::linear::Matrix;
 use crate::math::algebra::linear::Vector;
 use crate::math::numeric::{FloatType, Real, SymbolicLeaf};
 use crate::math::structs::expr::Expr;
-use crate::math::structs::expr::node::Node;
 
 /// A formal sum over the (unknown, generally complex) roots of a polynomial.
 ///
@@ -218,8 +217,10 @@ pub enum Token<T = Real> {
     /// The tree inside is rendered but never evaluated, simplified or
     /// traversed — the token is an opaque atom whose only behaviour is being
     /// displayed, so a recorded value can show work still to be done next to
-    /// the parts already found.
-    Integral(Box<Node<T>>, char),
+    /// the parts already found. Carries an [`Expr<T>`], matching
+    /// [`Token::Matrix`]/[`Token::Vector`] and the `Expr` values the step
+    /// narrative builds.
+    Integral(Expr<T>, char),
     /// A narrative derivative `d/d(inner) inner`, displayed `d/dx f`.
     ///
     /// The rendering orders the operator first (`d/dx f`), reading as the
@@ -228,7 +229,7 @@ pub enum Token<T = Real> {
     /// Same opaque-atom rules as [`Token::Integral`] — the lexer and parser
     /// never produce one; the tree inside is rendered but never evaluated,
     /// simplified or traversed.
-    DerivativeOf(Box<Node<T>>, char),
+    DerivativeOf(Expr<T>, char),
     /// A matrix literal, `[[a, b], [c, d]]`.
     ///
     /// The entries are expressions over this token's own leaf type, so a
