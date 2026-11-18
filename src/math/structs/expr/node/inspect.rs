@@ -234,7 +234,6 @@ impl<T: SymbolicLeaf> NodeInner<T> {
         }
         let numerator = op_node.left.clone();
         let denominator = op_node.right.clone();
-        drop(borrow);
         // The denominator must be a positive integer constant.
         let index = denominator.inner.borrow().evaluate()?;
         if !index.is_integer() || index.is_negative() || index.is_zero() {
@@ -286,7 +285,7 @@ impl<T: SymbolicLeaf> NodeInner<T> {
     pub(crate) fn nodes_equal(left: &Node<T>, right: &Node<T>) -> bool {
         let left_borrow = left.inner.borrow();
         let right_borrow = right.inner.borrow();
-        left_borrow.eq(&right_borrow)
+        left_borrow.eq(right_borrow)
     }
 }
 

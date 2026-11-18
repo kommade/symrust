@@ -311,7 +311,7 @@ pub(crate) fn is_one<T: SymbolicLeaf>(node: &Node<T>) -> bool {
 }
 
 pub(crate) fn equal<T: SymbolicLeaf>(left: &Node<T>, right: &Node<T>) -> bool {
-    left.inner.borrow().eq(&right.inner.borrow())
+    left.inner.borrow().eq(right.inner.borrow())
 }
 
 /// The independent variable used by the expression, defaulting to `x`.

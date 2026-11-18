@@ -237,15 +237,15 @@ impl<T: SymbolicLeaf> Expr<T> {
         let f_prime = f.differentiated();
         let g_prime = g.differentiated();
         // Nothing changes on either side: the rule makes no progress.
-        if f_prime.tree.inner.borrow().eq(&f.tree.inner.borrow())
-            && g_prime.tree.inner.borrow().eq(&g.tree.inner.borrow())
+        if f_prime.tree.inner.borrow().eq(f.tree.inner.borrow())
+            && g_prime.tree.inner.borrow().eq(g.tree.inner.borrow())
         {
             return None;
         }
         // The numerator has stopped changing (constant): `constant / g`, and `g`
         // is still growing (otherwise the denominator derivative would also have
         // stopped, caught above), so the limit is `0`.
-        if f_prime.tree.inner.borrow().eq(&f.tree.inner.borrow()) {
+        if f_prime.tree.inner.borrow().eq(f.tree.inner.borrow()) {
             return Some(Limit::Finite(T::zero()));
         }
         let quotient = Expr::from_node(NodeInner::from_operation(

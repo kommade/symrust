@@ -1,7 +1,10 @@
 //! Node tree of a symbolic expression.
 //!
-//! A [`Node`] is a reference-counted, interior-mutable tree over `Token` leaves.
-//! The implementation is split by responsibility: `construct` builds a tree,
+//! A [`Node`] is a reference-counted tree over `Token` leaves, shared through
+//! [`std::sync::Arc`]. Nodes are immutable once built — every rewrite builds a
+//! fresh tree — so sharing needs no locks, and a tree is `Send` + `Sync`
+//! exactly when its leaf type `T` is. The implementation is split by
+//! responsibility: `construct` builds a tree,
 //! `convert` re-types it between float leaf types, `inspect` queries it,
 //! `simplify` rewrites it, `display` renders it and `functions` exposes the
 //! arithmetic and simplification traits.
@@ -14,7 +17,7 @@ mod functions;
 mod inspect;
 mod simplify;
 
-use std::{cell::RefCell, rc::Rc};
+use std::sync::Arc;
 
 use crate::{math::numeric::Real, math::parse::lexer::Token};
 
@@ -62,8 +65,50 @@ pub(crate) struct NodeInner<T = Real> {
 
 #[derive(Clone, Debug)]
 pub struct Node<T = Real> {
-    pub(crate) inner: Rc<RefCell<NodeInner<T>>>,
+    pub(crate) inner: Shared<T>,
 }
+
+/// Threadsafe handle to a node's immutable payload.
+///
+/// Nodes are frozen once built; algebra rewrites construct new trees instead
+/// of editing shared ones, so plain [`std::sync::Arc`] supplies every
+/// guarantee the tree needs — no `RefCell`, no guard types, no locks, no
+/// poison. `Shared<T>` and any [`Node`] built over it are `Send` + `Sync`
+/// exactly when the leaf type `T` is; a `!Send` leaf keeps the tree bound to
+/// one thread, just as before.
+#[derive(Clone, Debug)]
+pub(crate) struct Shared<T> {
+    inner: Arc<NodeInner<T>>,
+}
+
+impl<T> Shared<T> {
+    pub(crate) fn new(inner: NodeInner<T>) -> Self {
+        Self {
+            inner: Arc::new(inner),
+        }
+    }
+
+    /// Shared read access to the payload. The name echoes the `RefCell`
+    /// borrow this once was; it now returns a plain reference with no guard
+    /// to keep alive and no lock to forget.
+    pub(crate) fn borrow(&self) -> &NodeInner<T> {
+        &self.inner
+    }
+
+    /// Whether two handles point at the same payload allocation. Lets rewrite
+    /// passes detect "nothing changed below" in O(1) and hand back the
+    /// original node instead of rebuilding an identical tree.
+    pub(crate) fn shared_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+}
+
+// The tree crosses threads whenever its leaf data does.
+const _: () = {
+    const fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<Node<Real>>();
+    assert_send_sync::<Node<f64>>();
+};
 
 pub use functions::{NodeFunctions, NodeOperations};
 

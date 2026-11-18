@@ -1,6 +1,6 @@
 //! Construction of nodes: the public [`Node`] constructors and the internal
 //! [`NodeInner`] builders they delegate to.
-use std::{cell::RefCell, error::Error, fmt::Display, rc::Rc};
+use std::{error::Error, fmt::Display};
 
 
 
@@ -8,14 +8,22 @@ use crate::{math::numeric::{FloatType, Real},
     math::parse::lexer::{Const, Func, Op, Token},
 };
 
-use super::{Node, NodeInner, NodeValue, OpNode};
+use super::{Node, NodeInner, NodeValue, OpNode, Shared};
 use super::convert::{matrix_from_real, vector_from_real};
 
 impl<T> Node<T> {
     fn new(inner: NodeInner<T>) -> Self {
         Self {
-            inner: Rc::new(RefCell::new(inner)),
+            inner: Shared::new(inner),
         }
+    }
+
+    /// Whether `self` and `other` wrap the very same payload allocation, not
+    /// merely equal structure. Identical subtrees cloned out of one tree stay
+    /// shared, so a rewrite pass can tell "children unchanged" apart from
+    /// "children rewritten to an equal shape" in O(1).
+    pub(crate) fn shares_with(&self, other: &Self) -> bool {
+        self.inner.shared_with(&other.inner)
     }
 }
 
@@ -77,7 +85,7 @@ impl<T: FloatType + Display> Node<T> {
     ///
     /// Never produced by the parser — only the step narratives build one —
     /// and opaque to the engine: it renders but is never evaluated,
-    /// simplified or traversed. See [`Token::Integral`].
+    /// simplified or traversed. See `Token::Integral`.
     #[must_use]
     pub fn pending_integral(integrand: Node<T>, variable: char) -> Self {
         NodeInner::operand(Token::Integral(crate::math::structs::expr::Expr::from_node(integrand), variable)).wrap()
@@ -366,8 +374,6 @@ impl<T: FloatType + Display> NodeInner<T> {
                 Token::Operator(_) => false,
                 _ => panic!("Invalid token for operator: {}", Self::token_kind_label(&token)),
             };
-        drop(left_borrow);
-        drop(right_borrow);
         Self {
             value: NodeValue::Operator(OpNode { token, left, right }),
             has_indp: has_var,
@@ -385,10 +391,8 @@ impl<T: FloatType + Display> NodeInner<T> {
         let has_var = node_borrow.has_indp;
         let has_const = node_borrow.has_const;
         if node_borrow.is_empty() {
-            drop(node_borrow);
             node
         } else {
-            drop(node_borrow);
             Self {
                 value: NodeValue::Operator(OpNode {
                     token: Token::Function(func),

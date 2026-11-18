@@ -41,7 +41,6 @@ where
                             if op.is_mul() {
                                 let left = op_node.left.clone();
                                 let right = op_node.right.clone();
-                                drop(borrow);
                                 if Self::is_constant_node(&left)
                                     && let Some(mut inner) =
                                         Self::extract_pow_components(&right, extract_fns)
@@ -74,7 +73,6 @@ where
                             if *op == Op::Sub {
                                 let left = op_node.left.clone();
                                 let right = op_node.right.clone();
-                                drop(borrow);
                                 if left.inner.borrow().is_zero()
                                     && let Some(mut inner) =
                                         Self::extract_pow_components(&right, extract_fns)
@@ -92,7 +90,6 @@ where
                             if *op == Op::Div {
                                 let left = op_node.left.clone();
                                 let right = op_node.right.clone();
-                                drop(borrow);
                                 if Self::is_constant_node(&left)
                                     && let Some(mut inner) =
                                         Self::extract_pow_components(&right, extract_fns)
@@ -153,7 +150,6 @@ where
     pub(crate) fn extract_constant_factor(node: &Node<T>) -> Option<(Node<T>, Node<T>)> {
         let borrow = node.inner.borrow();
         if !borrow.has_indp {
-            drop(borrow);
             return Some((node.clone(), Self::one()));
         }
         if let NodeValue::Operator(op_node) = &borrow.value
@@ -161,7 +157,6 @@ where
                 && op.is_mul() {
                     let left = op_node.left.clone();
                     let right = op_node.right.clone();
-                    drop(borrow);
                     let left_const = Self::is_constant_node(&left);
                     let right_const = Self::is_constant_node(&right);
                     return match (left_const, right_const) {
@@ -185,12 +180,10 @@ where
                 && op.is_mul() {
                     let left = op_node.left.clone();
                     let right = op_node.right.clone();
-                    drop(borrow);
                     Self::collect_mul_factors(&left, factors);
                     Self::collect_mul_factors(&right, factors);
                     return;
                 }
-        drop(borrow);
         factors.push(node.clone());
     }
 
@@ -372,7 +365,6 @@ where
                     Op::Add => {
                         let left = op_node.left.clone();
                         let right = op_node.right.clone();
-                        drop(borrow);
                         Self::collect_sum_terms(&left, sign, terms);
                         Self::collect_sum_terms(&right, sign, terms);
                         return;
@@ -380,7 +372,6 @@ where
                     Op::Sub => {
                         let left = op_node.left.clone();
                         let right = op_node.right.clone();
-                        drop(borrow);
                         Self::collect_sum_terms(&left, sign, terms);
                         Self::collect_sum_terms(&right, -sign, terms);
                         return;

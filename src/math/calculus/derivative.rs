@@ -130,7 +130,6 @@ where
             _ if !borrowed.has_indp => zero(),
             NodeValue::Operand(Token::Indp(_)) => one(),
             _ => {
-                drop(borrowed);
                 let split = split_constant(&self);
                 if split.is_factored(&self) {
                     let split_node = Expr::from_node(self.clone());
@@ -159,23 +158,18 @@ where
                             .get_derivative(steps)
                             .sub(op_node.right.clone().get_derivative(steps)),
                         Token::Operator(Op::Mul | Op::ImplicitMul) => {
-                            drop(borrowed);
                             return self.product_rule(steps);
                         }
                         Token::Operator(Op::Div) => {
-                            drop(borrowed);
                             return self.quotient_rule(steps);
                         }
                         Token::Operator(Op::Pow) => {
                             if op_node.right.inner.borrow().has_indp {
-                                drop(borrowed);
                                 return self.exp_rule(steps);
                             }
-                            drop(borrowed);
                             return self.power_rule(steps);
                         }
                         Token::Function(_) => {
-                            drop(borrowed);
                             return self.chain_rule(steps);
                         }
                         _ => unreachable!(),

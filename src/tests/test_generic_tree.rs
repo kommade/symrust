@@ -61,3 +61,28 @@ fn string_literals_parse_directly_into_t() {
         other => panic!("expected a float leaf, got {other:?}"),
     }
 }
+
+#[test]
+fn tree_and_solutions_are_send_sync() {
+    super::setup();
+    const fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<Node<f64>>();
+    assert_send_sync::<Node<f32>>();
+    assert_send_sync::<Expr>();
+    assert_send_sync::<Expr<f64>>();
+    assert_send_sync::<crate::math::structs::solution::Solution>();
+    assert_send_sync::<crate::math::structs::solution::Solution<f64>>();
+}
+
+#[test]
+fn expr_simplifies_on_another_thread() {
+    super::setup();
+    let expr: Expr<f64> = create_expr!("(x + x) + 1"; f64).unwrap();
+    let rendered = std::thread::spawn(move || {
+        // The tree moves to a fresh thread, is rewritten there and rendered.
+        expr.simplify(false).to_string()
+    })
+    .join()
+    .unwrap();
+    assert!(rendered.contains("x"), "unexpected render: {rendered}");
+}

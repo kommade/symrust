@@ -33,8 +33,6 @@ fn negated_operand<T: SymbolicLeaf>(node: &Node<T>) -> Option<String> {
     }
     let inner = op_node.right.inner.borrow();
     let rendered = format!("{inner}");
-    drop(inner);
-    drop(borrow);
     // `-(a + b)` needs the brackets kept; a bare atom does not.
     if rendered.starts_with('-') || is_atom(&rendered) {
         Some(format!("-{rendered}"))

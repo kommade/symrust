@@ -317,7 +317,6 @@ impl<T: SymbolicLeaf> NodeFunctions<T> for Node<T> {
                     other_base.is_some_and(|b| a.same_tree(&b))
                 }) {
                     let eq = self.same_tree(&other);
-                    drop(self_borrow);
                     match (self_exp, other_exp) {
                         (None, None) if eq => {
                             return NodeInner::<T>::from_operation(
@@ -367,7 +366,6 @@ impl<T: SymbolicLeaf> NodeFunctions<T> for Node<T> {
                     other_base.is_some_and(|b| a.same_tree(&b))
                 }) {
                     let eq = self.same_tree(&other);
-                    drop(self_borrow);
                     match (self_exp, other_exp) {
                         (None, None) if eq => return NodeInner::<T>::one(),
                         (Some(exp), None) | (None, Some(exp)) => {
@@ -531,6 +529,11 @@ impl<T: SymbolicLeaf> Node<T> {
                             inner_op_node.left.clone(),
                         ));
                     }
+                // No log rule fired and the argument is the same subtree we
+                // took in: rebuilding would allocate an identical node.
+                if arg.shares_with(&op_node.right) {
+                    return self;
+                }
                 NodeInner::<T>::from_function(Func::Log(base), arg)
             }
             // `sqrt(u^2)` is `|u|`, and `|u|` is `u` when `u` cannot be
@@ -552,10 +555,12 @@ impl<T: SymbolicLeaf> Node<T> {
                 if let Some(base) = square_root_of_rational_square(&simplified) {
                     return base;
                 }
+                if simplified.shares_with(&argument) {
+                    return self;
+                }
                 NodeInner::<T>::from_function(Func::Sqrt, simplified)
             }
             t if t.is_empty() || t.is_operand() || t.is_fn() => {
-                drop(t);
                 self
             }
             t if t.is_op_node() => {
@@ -577,8 +582,6 @@ impl<T: SymbolicLeaf> Node<T> {
                                 && !right_borrow.has_func
                                 && !left_borrow.has_func
                             {
-                                drop(left_borrow);
-                                drop(right_borrow);
                                 return right
                                     .distribute_constant(left.remove_constants(), MulType::OpMul);
                             } else if !right_borrow.has_indp
@@ -588,8 +591,6 @@ impl<T: SymbolicLeaf> Node<T> {
                                 && !left_borrow.has_func
                                 && !right_borrow.has_func
                             {
-                                drop(left_borrow);
-                                drop(right_borrow);
                                 return left
                                     .distribute_constant(right.remove_constants(), MulType::OpMul);
                             }
@@ -598,17 +599,13 @@ impl<T: SymbolicLeaf> Node<T> {
                                     return NodeInner::<T>::zero();
                                 }
                                 if left_borrow.is_one() {
-                                    drop(right_borrow);
                                     return right;
                                 } else if left_borrow.is_neg_one() {
-                                    drop(right_borrow);
                                     return right.negate();
                                 }
                                 if right_borrow.is_one() {
-                                    drop(left_borrow);
                                     return left;
                                 } else if right_borrow.is_neg_one() {
-                                    drop(left_borrow);
                                     return left.negate();
                                 }
                                 if (left_borrow.is_operator_type(Op::Sub)
@@ -617,8 +614,6 @@ impl<T: SymbolicLeaf> Node<T> {
                                     || right_borrow.is_operator_type(Op::Add))
                                     && expand
                                 {
-                                    drop(left_borrow);
-                                    drop(right_borrow);
                                     return left
                                         .distribute_expr(right, MulType::OpMul)
                                         .simplify(false, combine_fns);
@@ -628,10 +623,8 @@ impl<T: SymbolicLeaf> Node<T> {
                                     return NodeInner::<T>::zero();
                                 }
                                 if right_borrow.is_one() {
-                                    drop(left_borrow);
                                     return left;
                                 } else if right_borrow.is_neg_one() {
-                                    drop(left_borrow);
                                     return left.negate();
                                 }
                                 let left_const_val = if !left_borrow.has_indp
@@ -647,14 +640,10 @@ impl<T: SymbolicLeaf> Node<T> {
                                     || right_borrow.is_operator_type(Op::Add))
                                     && expand
                                 {
-                                    drop(left_borrow);
-                                    drop(right_borrow);
                                     return left
                                         .distribute_expr(right, MulType::OpDiv)
                                         .simplify(false, combine_fns);
                                 }
-                                drop(left_borrow);
-                                drop(right_borrow);
                                 if let Some(num_val) = left_const_val
                                     && let Some((den_const, den_rest)) =
                                         NodeInner::<T>::extract_constant_factor(&right)
@@ -688,10 +677,8 @@ impl<T: SymbolicLeaf> Node<T> {
                                 if right_borrow.is_zero() {
                                     return NodeInner::<T>::one();
                                 } else if right_borrow.is_one() {
-                                    drop(left_borrow);
                                     return left;
                                 } else if right_borrow.is_neg_one() {
-                                    drop(left_borrow);
                                     return left.recip();
                                 }
                                 // `sqrt(a)^n = a^(n/2)` when `n` is an EVEN
@@ -715,8 +702,6 @@ impl<T: SymbolicLeaf> Node<T> {
                                     let radicand = op_node.left.inner.borrow().get_right().ok();
                                     if let Some(radicand) = radicand {
                                         let halved = exponent / T::from_i64(2);
-                                        drop(left_borrow);
-                                        drop(right_borrow);
                                         let half_node =
                                             NodeInner::<T>::from_float(halved).wrap();
                                         return NodeInner::<T>::from_operation(
@@ -729,24 +714,18 @@ impl<T: SymbolicLeaf> Node<T> {
                                 }
                             } else if op == Op::Add {
                                 if left_borrow.is_zero() {
-                                    drop(right_borrow);
                                     return right;
                                 } else if left_borrow.is_neg() {
                                     let left_neg = op_node.left.clone().negate();
-                                    drop(right_borrow);
                                     return right.sub(left_neg);
                                 }
                                 if right_borrow.is_zero() {
-                                    drop(left_borrow);
                                     return left;
                                 } else if right_borrow.is_neg() {
                                     let right_neg = op_node.right.clone().negate();
-                                    drop(left_borrow);
                                     return left.sub(right_neg);
                                 }
                                 if !left_borrow.has_indp && right_borrow.has_indp {
-                                    drop(left_borrow);
-                                    drop(right_borrow);
                                     return right.add(left).simplify(expand, combine_fns);
                                 }
                             } else if op == Op::Sub {
@@ -754,18 +733,14 @@ impl<T: SymbolicLeaf> Node<T> {
                                     return op_node.right.clone().negate();
                                 }
                                 if right_borrow.is_zero() {
-                                    drop(left_borrow);
                                     return left;
                                 } else if right_borrow.is_neg() {
                                     let right_neg = op_node.right.clone().negate();
-                                    drop(left_borrow);
                                     return left.add(right_neg);
                                 }
                                 if !left_borrow.has_indp && right_borrow.has_indp {
                                     // Keep the constant first: reordering a
                                     // subtraction would flip its sign.
-                                    drop(left_borrow);
-                                    drop(right_borrow);
                                     return NodeInner::<T>::from_operation(Op::Sub, left, right);
                                 }
                             }
@@ -789,19 +764,22 @@ impl<T: SymbolicLeaf> Node<T> {
                                     return result.simplify(expand, false);
                                 }
                             }
-                            drop(left_borrow);
-                            drop(right_borrow);
+                            // No rule fired and neither child changed: the
+                            // rebuilt node would be identical to the original.
+                            if left.shares_with(&op_node.left)
+                                && right.shares_with(&op_node.right)
+                            {
+                                return self;
+                            }
                             NodeInner::<T>::from_operation(op, left, right)
                         } else {
                             unreachable!()
                         }
                     }
                     (true, false) => {
-                        drop(right_borrow);
                         right
                     }
                     (false, true) => {
-                        drop(left_borrow);
                         left
                     }
                     (true, true) => NodeInner::<T>::empty(),
@@ -819,7 +797,6 @@ impl<T: SymbolicLeaf> Node<T> {
                         let left = op_node.left.clone();
                         let right = op_node.right.clone();
                         let op_clone = op.clone();
-                        drop(node);
                         let left_factored = left.factorise();
                         let right_factored = right.factorise();
                         return NodeInner::<T>::from_operation(op_clone, left_factored, right_factored)
@@ -837,7 +814,6 @@ impl<T: SymbolicLeaf> Node<T> {
                         Op::Add => {
                             let left = op_node.left.clone();
                             let right = op_node.right.clone();
-                            drop(borrowed);
                             collect_sum_terms(left, sign, acc);
                             collect_sum_terms(right, sign, acc);
                             return;
@@ -845,7 +821,6 @@ impl<T: SymbolicLeaf> Node<T> {
                         Op::Sub => {
                             let left = op_node.left.clone();
                             let right = op_node.right.clone();
-                            drop(borrowed);
                             collect_sum_terms(left, sign, acc);
                             collect_sum_terms(right, -sign, acc);
                             return;
@@ -853,7 +828,6 @@ impl<T: SymbolicLeaf> Node<T> {
                         _ => {}
                     }
                 }
-            drop(borrowed);
             acc.push((node, sign));
         }
 
@@ -867,7 +841,6 @@ impl<T: SymbolicLeaf> Node<T> {
                     if *op == Op::Mul || *op == Op::ImplicitMul {
                         let left = op_node.left.clone();
                         let right = op_node.right.clone();
-                        drop(borrowed);
                         collect_mul_terms(left, acc);
                         collect_mul_terms(right, acc);
                         return;
@@ -878,13 +851,11 @@ impl<T: SymbolicLeaf> Node<T> {
                             NodeInner::<T>::one(),
                             op_node.right.clone(),
                         );
-                        drop(borrowed);
                         collect_mul_terms(left, acc);
                         collect_mul_terms(right, acc);
                         return;
                     }
                 }
-            drop(borrowed);
             acc.push(node);
         }
 
