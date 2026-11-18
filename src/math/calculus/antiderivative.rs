@@ -44,7 +44,7 @@ mod trig;
 
 use std::{
     error::Error,
-    fmt::Display,
+    fmt::{self, Display},
     panic::AssertUnwindSafe,
     time::{Duration, Instant},
 };
@@ -93,6 +93,20 @@ pub enum IntegrationError {
     /// A definite integral bound could not be turned into a numeric value
     /// (for example the antiderivative is undefined or still symbolic there).
     BoundNotEvaluable(String),
+    /// The definite integral diverges: the antiderivative has no finite value
+    /// at one of the bounds, so `F(upper) - F(lower)` is not a number.
+    ///
+    /// The `antiderivative` field quotes the form being evaluated, `bound` is
+    /// where it misbehaves and `behaviour` says how (`+infinity`,
+    /// `-infinity`, or `does not exist`).
+    Divergent {
+        /// The antiderivative whose value at the bound is not finite.
+        antiderivative: String,
+        /// The bound where the antiderivative has no finite value.
+        bound: String,
+        /// How the antiderivative behaves at that bound.
+        behaviour: String,
+    },
 }
 
 impl Display for IntegrationError {
@@ -115,6 +129,11 @@ impl Display for IntegrationError {
             Self::BoundNotEvaluable(bound) => write!(
                 f,
                 "could not evaluate the antiderivative at the bound {bound}"
+            ),
+            Self::Divergent { antiderivative, bound, behaviour } => write!(
+                f,
+                "the definite integral does not converge: the antiderivative \
+                 {antiderivative} has no finite value as x -> {bound} (limit {behaviour})"
             ),
         }
     }
@@ -153,8 +172,10 @@ pub trait Antiderivative {
     ///
     /// The antiderivative `F` is found, then the result is `F(upper) - F(lower)`
     /// evaluated in `T`. Bounds may be infinite (`Real::infinity()`, or any `T`
-    /// where `T::is_infinite()` holds) to request an improper integral; the
-    /// infinite case is not yet implemented.
+    /// where `T::is_infinite()` holds) to request an improper integral; an
+    /// infinite bound is taken as a limit. When the antiderivative has no
+    /// finite value at a bound the integral diverges and
+    /// [`IntegrationError::Divergent`] is returned with the reason.
     fn integrate<V>(&self, lower: V, upper: V) -> Result<V, IntegrationError>
     where
         Self: Sized,
@@ -180,8 +201,11 @@ pub trait Antiderivative {
     /// Evaluate a definite integral, recording every step the search applies.
     ///
     /// The answer is the same as [`Antiderivative::integrate`]; the returned
-    /// [`Solution`] additionally records how the antiderivative was found, and
-    /// its final result is the numeric value of the definite integral.
+    /// [`Solution`] additionally records how the antiderivative was found, the
+    /// final antiderivative itself, and how each bound was substituted
+    /// (`F(bound) = value`, or the limit when substitution hits an
+    /// indeterminate form). Its final result is the numeric value of the
+    /// definite integral.
     /// # Examples
     /// ```rust
     /// use rust_calculus::math::numeric::Real;
@@ -298,21 +322,131 @@ where
              integration cancels in a definite integral.",
             lower, upper
         );
-        let solution = self.get_antiderivative_solution()?;
-        let value = evaluate_definite_integral(solution.result(), lower, upper)?;
-        let mut solution = solution;
+        let mut solution = self.get_antiderivative_solution()?;
+
+        // State the antiderivative the search produced: every step above
+        // recorded a piece of the derivation, and this one names the result
+        // the bounds of integration go into.
+        let antiderivative = solution.result().clone();
+        let antiderivative_text = antiderivative.to_string();
+        solution.push_step(
+            "the antiderivative",
+            "the bounds of integration are substituted into this",
+            antiderivative.clone(),
+        );
+
+        // Record both substitutions: `F(bound) = value`, or the limit when
+        // substituting would hit an indeterminate form (see [`bound_value`]).
+        let variable = crate::math::calculus::expr::independent_variable(&antiderivative.tree);
+        let upper_value = bound_value(&antiderivative, variable, upper.to_real(), &antiderivative_text)?;
+        let lower_value = bound_value(&antiderivative, variable, lower.to_real(), &antiderivative_text)?;
+        for (name, bound_display, evaluation) in [
+            ("substitute the upper bound", upper.to_string(), &upper_value),
+            ("substitute the lower bound", lower.to_string(), &lower_value),
+        ] {
+            let value = evaluation.value().clone();
+            let description = match evaluation {
+                BoundValue::Substitution(_) => format!("F({bound_display}) = {value}"),
+                BoundValue::Limit(_) => {
+                    format!("lim_{{x -> {bound_display}}} {antiderivative_text} = {value}")
+                }
+            };
+            let leaf_value = T::from_real(value);
+            solution.push_step(
+                name,
+                description,
+                Expr::from_node(Node::<T>::float(leaf_value)),
+            );
+        }
+
+        // `F(upper) - F(lower)`, computed in Real, then bridged to the
+        // caller's leaf type: the value was computed in the bound type `V`.
+        let value = upper_value.value().clone() - lower_value.value().clone();
+        if value.is_nan() {
+            return Err(IntegrationError::Divergent {
+                antiderivative: antiderivative_text,
+                bound: format!("[{lower}, {upper}]"),
+                behaviour: String::from("an indeterminate difference between the bounds"),
+            });
+        }
+        let leaf_value = T::from_real(value);
         solution.set_result_comment(comment);
-        // Record the numeric answer in this tree's leaf type: the value was
-        // computed in the bound type `V`, so it crosses through `Real`.
-        let leaf_value = T::from_real(value.to_real());
         Ok(solution.finish(Expr::from_node(Node::<T>::float(leaf_value))))
+    }
+}
+
+/// The antiderivative's value at one bound, together with how it was obtained.
+enum BoundValue {
+    /// Substituting the bound straight into `F` evaluated to a finite number.
+    Substitution(Real),
+    /// Substitution hit an indeterminate form or an infinity (`0 · ln 0`,
+    /// `1/0`); the limit as the variable approaches the bound was used.
+    Limit(Real),
+}
+
+impl BoundValue {
+    /// The value, however it was obtained.
+    fn value(&self) -> &Real {
+        match self {
+            Self::Substitution(value) | Self::Limit(value) => value,
+        }
+    }
+}
+
+/// The value of `antiderivative` at `bound`, taking the limit when direct
+/// substitution does not produce a finite number.
+///
+/// Even when the antiderivative is well defined at the bound, substituting can
+/// land on an indeterminate form: at `x = 0` the antiderivative `x ln(x) - x`
+/// reads as `0 · (-∞) - 0 = NaN`, while its limit is the perfectly finite 0 —
+/// which is what `∫₁⁰⁻ ln` needs. The limit is taken exactly for that case;
+/// when it still has no finite value the definite integral genuinely diverges
+/// and [`IntegrationError::Divergent`] explains why.
+fn bound_value<B>(
+    antiderivative: &Expr<B>,
+    variable: char,
+    bound: Real,
+    antiderivative_text: &str,
+) -> Result<BoundValue, IntegrationError>
+where
+    B: SymbolicLeaf,
+{
+    use crate::math::structs::expr::limit::Limit;
+    let bound_text = bound.to_string();
+    let divergent = |behaviour: String| IntegrationError::Divergent {
+        antiderivative: antiderivative_text.to_string(),
+        bound: bound_text.clone(),
+        behaviour,
+    };
+    if bound.is_infinite() {
+        // An improper integral: only the limit is meaningful.
+        return match antiderivative.limit(variable, bound) {
+            Limit::Finite(value) => Ok(BoundValue::Limit(value)),
+            other => Err(divergent(other.to_string())),
+        };
+    }
+    let direct = antiderivative.evaluate(bound.clone()).value();
+    match direct {
+        Some(value) if !value.is_nan() && !value.is_infinite() => {
+            Ok(BoundValue::Substitution(value))
+        }
+        // NaN or ±∞: indeterminate or divergent — the limit decides.
+        Some(_) => match antiderivative.limit(variable, bound) {
+            Limit::Finite(value) if !value.is_nan() => Ok(BoundValue::Limit(value)),
+            other => Err(divergent(other.to_string())),
+        },
+        // The antiderivative is still symbolic (a foreign variable survived
+        // the integration), so no bound evaluation is possible at all.
+        None => Err(IntegrationError::BoundNotEvaluable(bound.to_string())),
     }
 }
 
 /// Evaluate `antiderivative` over `[lower, upper]` as `F(upper) - F(lower)`.
 ///
-/// A finite bound is a plain substitution. An infinite bound is taken as a
-/// limit, which lets an improper integral converge or report that it does not.
+/// A finite bound is a plain substitution, taking the limit when substitution
+/// lands on an indeterminate form. An infinite bound is a limit, which lets an
+/// improper integral converge; a bound whose limit is not finite makes the
+/// integral diverge and is reported as [`IntegrationError::Divergent`].
 fn evaluate_definite_integral<B, V>(
     antiderivative: &Expr<B>,
     lower: V,
@@ -323,37 +457,20 @@ where
     V: crate::math::numeric::FloatType + Display,
 {
     let variable = crate::math::calculus::expr::independent_variable(&antiderivative.tree);
-
-    // Evaluate the antiderivative at a bound: a plain substitution when the
-    // bound is finite, otherwise a limit toward ±∞ (improper integral).
-    let value_at = |bound: &V| -> Result<Real, IntegrationError> {
-        let bound = bound.to_real();
-        let value = if bound.is_infinite() {
-            match antiderivative.limit(variable, bound.clone()) {
-                crate::math::structs::expr::limit::Limit::Finite(value) => value,
-                crate::math::structs::expr::limit::Limit::PosInfinity
-                | crate::math::structs::expr::limit::Limit::NegInfinity => {
-                    // The antiderivative diverges at the bound, so the
-                    // definite integral does not converge.
-                    return Err(IntegrationError::BoundNotEvaluable(bound.to_string()));
-                }
-                crate::math::structs::expr::limit::Limit::DoesNotExist => {
-                    return Err(IntegrationError::BoundNotEvaluable(bound.to_string()));
-                }
-            }
-        } else {
-            antiderivative
-                .evaluate(bound.clone())
-                .value()
-                .ok_or_else(|| IntegrationError::BoundNotEvaluable(bound.to_string()))?
-        };
-        Ok(value)
-    };
-
-    let upper_value = value_at(&upper)?;
-    let lower_value = value_at(&lower)?;
+    let antiderivative_text = antiderivative.to_string();
+    let upper_value = bound_value(antiderivative, variable, upper.to_real(), &antiderivative_text)?;
+    let lower_value = bound_value(antiderivative, variable, lower.to_real(), &antiderivative_text)?;
     // `F(upper) - F(lower)`, computed in Real, then bridged to the caller's type.
-    let result = upper_value - lower_value;
+    let result = upper_value.value().clone() - lower_value.value().clone();
+    if result.is_nan() {
+        // Unreachable while `bound_value` rejects non-finite bound values, but
+        // kept so `evaluate_definite_integral` can never hand out a NaN.
+        return Err(IntegrationError::Divergent {
+            antiderivative: antiderivative_text,
+            bound: format!("[{lower}, {upper}]"),
+            behaviour: String::from("an indeterminate difference between the bounds"),
+        });
+    }
     Ok(V::from_real(result))
 }
 
@@ -390,6 +507,23 @@ impl Default for IntegratorContext {
             DEFAULT_STEP_BUDGET,
             0,
             0,
+        )
+    }
+}
+
+impl Display for IntegratorContext {
+    /// The budgets as they stand: the remaining wall-clock time (the deadline
+    /// is absolute, so the display is relative to now), the step budget and
+    /// the two depth caps.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let remaining = self.deadline.saturating_duration_since(Instant::now());
+        write!(
+            f,
+            "budget: {:.1}s / {} steps remaining, recursion depth {}, by-parts depth {}",
+            remaining.as_secs_f64(),
+            self.steps,
+            self.depth,
+            self.parts_depth
         )
     }
 }

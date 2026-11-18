@@ -1,5 +1,6 @@
 //! [`VectorSet`]: an ordered collection of runtime vectors.
 
+use std::fmt::Display;
 use std::ops::Index;
 
 use super::storage::{in_span, is_linearly_independent, span_basis, span_dimension};
@@ -188,6 +189,37 @@ impl <T> PartialEq for VectorSet<T> where T: Matrixable {
 impl <T> std::fmt::Debug for VectorSet<T> where T: Matrixable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list().entries(self.vectors.iter()).finish()
+    }
+}
+
+impl <T> Display for VectorSet<T> where T: Matrixable + Display {
+    /// The vectors side by side as the columns of one aligned block when they
+    /// all have the same length (the usual case: a basis, a row space); a
+    /// set of differing lengths falls back to printing each vector in turn.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use super::matrix::{column_widths_of, writeln_aligned_row};
+        let Some(first_length) = self.vectors.first().map(Vector::len) else {
+            return Ok(());
+        };
+        let uniform = self.vectors.iter().all(|vector| vector.len() == first_length);
+        if !uniform {
+            for vector in &self.vectors {
+                write!(f, "{vector}")?;
+            }
+            return Ok(());
+        }
+        // Entry (row, column) is `vectors[column][row]`.
+        let widths = column_widths_of((0..first_length).map(|row| {
+            self.vectors.iter().map(move |vector| vector[row].to_string())
+        }));
+        for row in 0..first_length {
+            writeln_aligned_row(
+                f,
+                self.vectors.iter().map(|vector| vector[row].to_string()),
+                &widths,
+            )?;
+        }
+        Ok(())
     }
 }
 

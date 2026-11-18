@@ -140,7 +140,8 @@ where
     /// let entries: Vec<Rat> = [2, 0, 0, 4].iter().map(|v| Rat::from_i64(*v)).collect();
     /// let matrix = Matrix::from_vec(2, 2, entries).unwrap();
     /// let solution = matrix.inverse_steps().unwrap();
-    /// assert_eq!(solution.result().to_string(), "[1/2 0]\n[0 1/4]\n");
+    /// // Columns align to their widest entry: `1/2` is 3 wide, `1/4` too.
+    /// assert_eq!(solution.result().to_string(), "[1/2   0]\n[  0 1/4]\n");
     /// ```
     #[must_use]
     pub fn inverse_steps(&self) -> Option<Solution<Matrix<T>, Matrix<T>>> {

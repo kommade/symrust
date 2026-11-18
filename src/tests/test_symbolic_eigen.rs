@@ -32,7 +32,7 @@ fn characteristic_polynomial_of_a_diagonal_matrix() {
     let polynomial = source.characteristic_polynomial().expect("square matrix");
     // det(λI - A) = (λ - x)(λ - 3) = λ² - (x + 3)λ + 3x
     assert_eq!(polynomial.degree(), Some(2));
-
+    
     // Check by substituting λ = x: it must be a root, i.e. the polynomial
     // evaluates to 0 at λ = x for any x.
     let coefficients = polynomial.coefficients();

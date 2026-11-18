@@ -56,7 +56,7 @@ fn rref_records_steps() {
 
     assert_eq!(solution.problem_type(), "reduced row echelon form");
     assert_steps_progress(&solution);
-
+    
     // The tracked result must agree with the untracked algorithm: compare the
     // parsed entries numerically rather than as strings, since equivalent
     // expressions may render differently.

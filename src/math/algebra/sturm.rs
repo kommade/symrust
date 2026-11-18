@@ -13,6 +13,8 @@
 //! that constructor takes the squarefree part first so repeated roots are never
 //! double-counted.
 
+use std::fmt::Display;
+
 use super::polynomial::Poly;
 use super::rational::Rat;
 
@@ -148,5 +150,19 @@ impl SturmSequence {
             .first()
             .and_then(|poly| poly.evaluate(x))
             .is_some_and(|value| value.is_zero())
+    }
+}
+
+impl Display for SturmSequence {
+    /// The chain, one polynomial per line, `p` first; the negated remainders
+    /// render with their signs folded into the coefficients.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (index, term) in self.terms.iter().enumerate() {
+            if index > 0 {
+                writeln!(f)?;
+            }
+            write!(f, "{term}")?;
+        }
+        Ok(())
     }
 }

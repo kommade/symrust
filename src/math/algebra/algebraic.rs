@@ -678,10 +678,20 @@ impl RealAlgebraic {
     /// Render the root as an expression node.
     ///
     /// The root is emitted as a decimal approximation. A symbolic
-    /// `root(poly, k)` node would be more faithful, but the expression tree has
-    /// no such constructor yet; this keeps the output usable until one is added.
+    /// `root(poly, k)` node would be more faithful, but the expression tree
+    /// has no such constructor yet; this keeps the output usable until one is
+    /// added.
     pub fn to_node(&self, _variable: &Node) -> Node {
         Node::number(self.to_f64().round() as i64)
+    }
+}
+
+impl std::fmt::Display for RealAlgebraic {
+    /// The root as a decimal approximation, good to about 15 significant
+    /// digits (see [`RealAlgebraic::to_f64`]). The exact form is the defining
+    /// polynomial and isolating interval the struct itself carries.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_f64())
     }
 }
 

@@ -275,24 +275,14 @@ impl<T: Display, S: Display> Display for Solution<T, S> {
         for (index, step) in self.steps.iter().enumerate() {
             match step {
                 SolutionStep::Elementary(step) => {
+                    write!(f, "  {}. {}: {}", index + 1, step.step_name, step.description)?;
+                    // A step that only records a decision: show what it
+                    // concluded without inventing an expression for it.
                     match &step.step_result {
-                        Some(result) => writeln!(
-                            f,
-                            "  {}. {}: {} => {}",
-                            index + 1,
-                            step.step_name,
-                            step.description,
-                            result
-                        )?,
-                        // A step that only records a decision: show what it
-                        // concluded without inventing an expression for it.
-                        None => writeln!(
-                            f,
-                            "  {}. {}: {}",
-                            index + 1,
-                            step.step_name,
-                            step.description
-                        )?,
+                        Some(result) => {
+                            writeln_step_result(f, &result.to_string(), "  ")?;
+                        }
+                        None => writeln!(f)?,
                     }
                 }
                 SolutionStep::SubSolution(solution) => {
@@ -302,7 +292,18 @@ impl<T: Display, S: Display> Display for Solution<T, S> {
                 }
             }
         }
-        writeln!(f, "= {}", self.result)?;
+        write!(f, "= ")?;
+        let rendered = self.result.to_string();
+        if rendered.contains('\n') {
+            // A multi-line final answer (a matrix result) starts on its own
+            // line and keeps its block shape.
+            writeln!(f)?;
+            for line in rendered.lines() {
+                writeln!(f, "  {line}")?;
+            }
+        } else {
+            writeln!(f, "{rendered}")?;
+        }
         if !self.result_comment.is_empty() {
             writeln!(f, "  ({})", self.result_comment)?;
         }
@@ -310,11 +311,56 @@ impl<T: Display, S: Display> Display for Solution<T, S> {
     }
 }
 
+/// Write the rendered form of a step result after its leading `=> `.
+///
+/// A multi-line value (a matrix, say) would run its first row on after `=>`
+/// while the other rows start at column zero, which reads as garbage. Such a
+/// value starts on its own line instead, and every line is indented by
+/// `indent` inside the step's own indentation, so the block stays visually
+/// attached to its step:
+///
+/// ```text
+///   2. orthogonalise: subtracted the projection =>
+///     [ 1  0]
+///     [-0  1]
+/// ```
+fn writeln_step_result(f: &mut fmt::Formatter<'_>, rendered: &str, indent: &str) -> fmt::Result {
+    if rendered.contains('\n') {
+        writeln!(f, " =>")?;
+        for line in rendered.lines() {
+            writeln!(f, "  {indent}{line}")?;
+        }
+    } else {
+        writeln!(f, " => {rendered}")?;
+    }
+    Ok(())
+}
+
 impl<T: Display, S: Display> Display for ElementaryStep<T, S> {
+    /// A standalone step: `name: description => result`. A multi-line result
+    /// starts after `=>` on its own line; a single-line result keeps the
+    /// historic no-trailing-newline form so `to_string` assertions stay exact.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.step_name, self.description)?;
         match &self.step_result {
-            Some(result) => write!(f, "{}: {} => {}", self.step_name, self.description, result),
-            None => write!(f, "{}: {}", self.step_name, self.description),
+            Some(result) => {
+                let rendered = result.to_string();
+                if rendered.contains('\n') {
+                    write!(f, " =>\n{rendered}")
+                } else {
+                    write!(f, " => {rendered}")
+                }
+            }
+            None => Ok(()),
+        }
+    }
+}
+
+impl<T: Display, S: Display> Display for SolutionStep<T, S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Elementary(step) => step.fmt(f),
+            Self::SubSolution(solution) => solution.fmt(f),
         }
     }
 }

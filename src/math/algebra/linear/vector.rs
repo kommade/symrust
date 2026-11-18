@@ -175,8 +175,18 @@ impl <T: std::fmt::Debug> std::fmt::Debug for Vector<T> {
 
 impl <T> Display for Vector<T> where T: Display {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // One entry per line, each padded to the widest entry *inside* the
+        // brackets, so the brackets line up down the column.
+        let width = self
+            .data
+            .iter()
+            .map(|value| value.to_string().chars().count())
+            .max()
+            .unwrap_or(0);
         for value in &self.data {
-            writeln!(f, "[{}]", value)?;
+            let entry = value.to_string();
+            let pad = width.saturating_sub(entry.chars().count());
+            writeln!(f, "[{}{entry}]", " ".repeat(pad))?;
         }
         Ok(())
     }

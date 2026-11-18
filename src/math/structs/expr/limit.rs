@@ -72,6 +72,8 @@ impl<T: std::fmt::Display> std::fmt::Display for Limit<T> {
 const MAX_LHOPITAL_DEPTH: usize = 10;
 /// How many points a numeric probe samples.
 const PROBE_STEPS: usize = 12;
+/// How many consecutive non-shrinking, same-direction moves mark a divergence.
+const MONOTONE_RUN: usize = 4;
 
 impl<T: SymbolicLeaf> Expr<T> {
     /// Evaluate `lim_{var -> toward} self`.
@@ -523,6 +525,10 @@ fn classify(samples: impl Iterator<Item = Real>) -> Option<Limit<Real>> {
     let mut tail_min: Option<Real> = None;
     let mut tail_max: Option<Real> = None;
     let mut saw_any = false;
+    // The last non-settling move and how many consecutive moves of the same
+    // direction have kept at least half of their previous magnitude.
+    let mut movement: Option<(bool, Real)> = None;
+    let mut movement_run = 0usize;
 
     for value in samples {
         if value.is_nan() {
@@ -559,6 +565,31 @@ fn classify(samples: impl Iterator<Item = Real>) -> Option<Limit<Real>> {
         if settled_now {
             // Two consecutive samples agree: converged.
             return Some(Limit::Finite(value));
+        }
+        // Sustained movement in one direction whose steps do not shrink is
+        // the signature of divergence: decade-spaced samples of a convergent
+        // sequence shrink their steps by roughly a factor of ten every step,
+        // while a divergent one (like `ln(x)` toward 0, too slow for the
+        // abrupt-growth test below) keeps stepping just as far.
+        if let Some(prev) = &previous {
+            let difference = value.clone() - prev.clone();
+            let negative = difference.is_negative();
+            let magnitude = difference.abs();
+            let sustained = matches!(
+                &movement,
+                Some((moving, last_magnitude))
+                    if *moving == negative
+                        && magnitude.as_f64() >= last_magnitude.as_f64() * 0.5
+            );
+            movement_run = if sustained { movement_run + 1 } else { 1 };
+            movement = Some((negative, magnitude));
+            if movement_run >= MONOTONE_RUN {
+                return Some(if negative {
+                    Limit::NegInfinity
+                } else {
+                    Limit::PosInfinity
+                });
+            }
         }
         finite_count += 1;
         previous = Some(value.clone());

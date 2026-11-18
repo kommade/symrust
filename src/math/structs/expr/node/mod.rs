@@ -28,6 +28,16 @@ pub enum MulType {
     OpDiv,
 }
 
+impl std::fmt::Display for MulType {
+    /// The operator each variant stands for.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OpMul => write!(f, "*"),
+            Self::OpDiv => write!(f, "/"),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct OpNode<T = Real> {
     pub token: Token<T>,

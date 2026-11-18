@@ -250,18 +250,67 @@ impl <T> std::fmt::Debug for Matrix<T> where T: std::fmt::Debug {
 
 impl <T> Display for Matrix<T> where T: Display {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Each column is as wide as its widest entry, so rows of different
+        // entry sizes still line up column by column.
+        let widths = column_widths_of((0..self.columns).map(|column| {
+            (0..self.rows)
+                .map(move |row| self.data[row * self.columns + column].to_string())
+        }));
         for row in 0..self.rows {
-            write!(f, "[")?;
-            for column in 0..self.columns {
-                if column > 0 {
-                    write!(f, " ")?;
-                }
-                write!(f, "{}", self.data[row * self.columns + column])?;
-            }
-            writeln!(f, "]")?;
+            writeln_aligned_row(
+                f,
+                (0..self.columns).map(|column| self.data[row * self.columns + column].to_string()),
+                &widths,
+            )?;
         }
         Ok(())
     }
+}
+
+/// The text width of the widest entry of every column, used by the aligned
+/// [`Display`] implementations of the matrix types.
+pub(crate) fn column_widths_of<I>(iter: impl Iterator<Item = I>) -> Vec<usize>
+where
+    I: IntoIterator<Item = String>,
+{
+    let columns: Vec<Vec<String>> = iter.map(|column| column.into_iter().collect()).collect();
+    columns
+        .iter()
+        .map(|column| {
+            column
+                .iter()
+                .map(|entry| entry.chars().count())
+                .max()
+                .unwrap_or(0)
+        })
+        .collect()
+}
+
+/// Write one bracketed, space-separated row whose entries are right-aligned
+/// to `widths`, ending with a newline.
+pub(crate) fn writeln_aligned_row(
+    f: &mut std::fmt::Formatter<'_>,
+    entries: impl Iterator<Item = String>,
+    widths: &[usize],
+) -> std::fmt::Result {
+    write!(f, "[")?;
+    for (column, entry) in entries.enumerate() {
+        if column > 0 {
+            write!(f, " ")?;
+        }
+        // Right-align: entries of different widths share their right edge,
+        // which keeps numeric columns readable.
+        let pad = widths
+            .get(column)
+            .copied()
+            .unwrap_or(0)
+            .saturating_sub(entry.chars().count());
+        for _ in 0..pad {
+            write!(f, " ")?;
+        }
+        write!(f, "{entry}")?;
+    }
+    writeln!(f, "]")
 }
 
 impl <T> FromIterator<T> for Matrix<T> {

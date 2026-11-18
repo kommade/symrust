@@ -162,3 +162,66 @@ fn dynamic_from_static_matches() {
         }
     }
 }
+
+/// Every column is as wide as its widest entry and rows are right-aligned to
+/// it, so a matrix with entries of different widths still reads as columns.
+#[test]
+fn a_matrix_renders_with_aligned_columns() {
+    let matrix = dynamic(2, 2, &[1, 255, 10, 3]);
+    // Widths: column 0 is 2 wide (`10`), column 1 is 3 wide (`255`).
+    assert_eq!(matrix.to_string(), "[ 1 255]\n[10   3]\n");
+
+    // A single column pads too.
+    let column = dynamic(3, 1, &[1, 255, 10]);
+    assert_eq!(column.to_string(), "[  1]\n[255]\n[ 10]\n");
+}
+
+/// A vector renders as one bracketed entry per line, padded to the widest
+/// entry so the brackets line up.
+#[test]
+fn a_vector_renders_with_aligned_entries() {
+    let vector = Vector::from_vec(vec![rat(1), rat(255), rat(10)]);
+    assert_eq!(vector.to_string(), "[  1]\n[255]\n[ 10]\n");
+}
+
+/// A set of same-length vectors renders as one aligned block with the vectors
+/// as its columns.
+#[test]
+fn a_vector_set_renders_with_aligned_columns() {
+    use crate::math::algebra::linear::VectorSet;
+
+    let first = Vector::from_vec(vec![rat(1), rat(0)]);
+    let second = Vector::from_vec(vec![rat(0), rat(255)]);
+    let set = VectorSet::from_vectors(vec![first, second]);
+    assert_eq!(set.to_string(), "[1   0]\n[0 255]\n");
+}
+
+/// A solution's recorded matrix steps render as blocks.
+///
+/// A step whose value is multi-line starts on its own line after `=>` and
+/// indents under its step, so the first row never runs on from the
+/// description while the second sits at column zero.
+#[test]
+fn a_multiline_step_result_starts_on_a_new_line() {
+    use crate::math::structs::solution::{ElementaryStep, Solution};
+
+    let matrix = dynamic(2, 2, &[1, 255, 10, 3]);
+    let matrix_text = matrix.to_string();
+
+    // A standalone step.
+    let step: ElementaryStep<Matrix<Rat>, Matrix<Rat>> =
+        ElementaryStep::new("rule", "described", Some(matrix.clone()));
+    assert_eq!(
+        step.to_string(),
+        format!("rule: described =>\n{matrix_text}")
+    );
+
+    // The numbered solution indents the block under the step.
+    let mut solution = Solution::<Matrix<Rat>, Matrix<Rat>>::new(matrix.clone(), "test");
+    solution.push_step("rule", "described", matrix);
+    let rendered = solution.to_string();
+    assert!(
+        rendered.contains("  1. rule: described =>\n    ["),
+        "the matrix block should start on its own line, indented under the step:\n{rendered}"
+    );
+}

@@ -60,42 +60,73 @@ fn write_matrix_with_factor<T: SymbolicLeaf>(
     matrix: &crate::math::algebra::linear::Matrix<Expr<T>>,
     f: &mut std::fmt::Formatter<'_>,
 ) -> std::fmt::Result {
-    match common_factor(matrix) {
+    let (prefix, divisor) = match common_factor(matrix) {
         Some(factor) => {
             let divisor = Expr::from_node(factor.clone());
             // Render the factor through the normal expression printer so a
             // fractional factor reads as `1 / 5` rather than as a raw tree.
-            write!(f, "{} ", factor.inner.borrow())?;
-            write_matrix_entries(matrix, Some(&divisor), f)
+            let prefix = format!("{} ", factor.inner.borrow());
+            (prefix, Some(divisor))
         }
-        None => write_matrix_entries(matrix, None, f),
-    }
+        None => (String::new(), None),
+    };
+    // The first row starts right after the factor; continuation rows indent
+    // to the same column so the brackets line up.
+    let block = write_matrix_entries(matrix, divisor.as_ref(), prefix.chars().count());
+    write!(f, "{prefix}{block}")
 }
 
 /// Write the matrix entries, each divided by `divisor` when it is given.
+///
+/// Rows are bracketed, space separated and right-aligned to the widest entry
+/// of their column, so entries of different widths stay in step. Rows after
+/// the first are indented by `prefix_width` spaces, which keeps the brackets
+/// aligned under a factor written before the first row.
 fn write_matrix_entries<T: SymbolicLeaf>(
     matrix: &crate::math::algebra::linear::Matrix<Expr<T>>,
     divisor: Option<&Expr<T>>,
-    f: &mut std::fmt::Formatter<'_>,
-) -> std::fmt::Result {
-    for row in 0..matrix.rows() {
-        write!(f, "[")?;
-        for (column, entry_ref) in matrix[row].iter().enumerate() {
-            if column > 0 {
-                write!(f, " ")?;
-            }
-            let entry = entry_ref.clone();
-            let shown = match divisor {
-                Some(divisor) => tidy(Expr::from_node(
-                    entry.tree().clone().div(divisor.tree().clone()),
-                )),
-                None => entry,
-            };
-            write!(f, "{shown}")?;
+    prefix_width: usize,
+) -> String {
+    let rows = matrix.rows();
+    let columns = matrix.columns();
+    // Render to text once: the column widths must be measured on exactly the
+    // text that will be printed.
+    let entry_at = |row: usize, column: usize| -> String {
+        let entry = matrix[row][column].clone();
+        match divisor {
+            Some(divisor) => tidy(Expr::from_node(
+                entry.tree().clone().div(divisor.tree().clone()),
+            ))
+            .to_string(),
+            None => entry.to_string(),
         }
-        writeln!(f, "]")?;
+    };
+    let widths = crate::math::algebra::linear::column_widths_of(
+        (0..columns).map(|column| (0..rows).map(move |row| entry_at(row, column))),
+    );
+    let mut rendered = String::new();
+    for row in 0..rows {
+        if row > 0 {
+            for _ in 0..prefix_width {
+                rendered.push(' ');
+            }
+        }
+        let mut line = String::from("[");
+        for (column, width) in widths.iter().enumerate() {
+            if column > 0 {
+                line.push(' ');
+            }
+            let text = entry_at(row, column);
+            for _ in text.chars().count()..*width {
+                line.push(' ');
+            }
+            line.push_str(&text);
+        }
+        line.push(']');
+        rendered.push_str(&line);
+        rendered.push('\n');
     }
-    Ok(())
+    rendered
 }
 
 /// A factor that divides every entry of the matrix, if there is a useful one.
@@ -353,7 +384,16 @@ impl<T: SymbolicLeaf> NodeInner<T> {
     }
 }
 
+impl<T: SymbolicLeaf> Display for Node<T> {
+    /// A node renders exactly like the inner tree it wraps.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self.inner.borrow(), f)
+    }
+}
+
 impl<T: SymbolicLeaf> Display for NodeInner<T> {
+    /// Write the tree to a string. All branches handle parenthesisation so two
+    /// equivalent renderings never differ by spurious brackets.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.value {
             NodeValue::Operand(Token::Matrix(ref matrix)) => {

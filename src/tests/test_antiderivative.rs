@@ -337,6 +337,7 @@ fn integrate_solution_matches_integrate_and_records_steps() {
     let solution = expr
         .integrate_solution(lower, upper)
         .expect("2x integrates over [0, 3]");
+    
     let recorded: Real = solution
         .result()
         .evaluate(0.0_f64)
@@ -533,6 +534,7 @@ fn root_sum_result_carries_explanatory_comment() {
         .unwrap()
         .get_antiderivative_solution()
         .expect("root-sum fallback should produce a solution");
+    
     assert!(
         solution.result().contains_root_sum(),
         "expected a root-sum result, got {}",
@@ -549,4 +551,169 @@ fn root_sum_result_carries_explanatory_comment() {
     // The answer-only path stays identical in value and carries no comment.
     let plain = create_expr!("1/(x^3-3x+1)").unwrap().get_antiderivative().unwrap();
     assert_eq!(plain.to_string(), solution.result().to_string());
+}
+
+/// `integrate_solution` names the antiderivative the search produced and shows
+/// how each bound was substituted into it, before the numeric answer.
+#[test]
+fn integrate_solution_shows_the_antiderivative_and_the_bound_substitutions() {
+    use crate::math::numeric::Real;
+    use crate::math::structs::solution::SolutionStep;
+
+    super::setup();
+    let solution = create_expr!("2x")
+        .unwrap()
+        .integrate_solution(Real::from_i64(0), Real::from_i64(3))
+        .expect("2x integrates over [0, 3]");
+
+    let elementary: Vec<(&str, Option<&str>, Option<&str>)> = solution
+        .steps()
+        .iter()
+        .filter_map(|step| match step {
+            SolutionStep::Elementary(step) => {
+                Some((step.step_name.as_str(), Some(step.description.as_str()), None))
+            }
+            _ => None,
+        })
+        .collect();
+
+    let antiderivative_name = "the antiderivative";
+    let upper_name = "substitute the upper bound";
+    let lower_name = "substitute the lower bound";
+    assert!(
+        elementary.iter().any(|(name, _, _)| *name == antiderivative_name),
+        "the solution should name the antiderivative, got {:?}",
+        elementary.iter().map(|(name, _, _)| *name).collect::<Vec<_>>()
+    );
+    let upper = elementary
+        .iter()
+        .find(|(name, _, _)| *name == upper_name)
+        .expect("the upper bound substitution should be recorded");
+    let lower = elementary
+        .iter()
+        .find(|(name, _, _)| *name == lower_name)
+        .expect("the lower bound substitution should be recorded");
+    assert_eq!(upper.1, Some("F(3) = 9"), "upper bound: {:?}", upper);
+    assert_eq!(lower.1, Some("F(0) = 0"), "lower bound: {:?}", lower);
+
+    // The rendered solution carries the antiderivative and both bound values.
+    let rendered = solution.to_string();
+    assert!(rendered.contains("the antiderivative"), "{rendered}");
+    assert!(rendered.contains("F(3) = 9"), "{rendered}");
+    assert!(rendered.contains("F(0) = 0"), "{rendered}");
+}
+
+/// Substituting into the antiderivative can land on an indeterminate form
+/// (`x ln(x) - x` at `0` reads as `0 · (-∞) - 0 = NaN`): the evaluators must
+/// then take the limit instead of handing out NaN.
+#[test]
+fn an_indeterminate_bound_takes_the_limit_not_nan() {
+    use crate::math::numeric::Real;
+    use crate::math::structs::solution::SolutionStep;
+
+    super::setup();
+    // ∫₀¹ ln(x) dx = -1: the antiderivative x ln(x) - x is NaN at 0 by
+    // substitution, but its limit there is 0.
+    let value = create_expr!("ln(x)")
+        .unwrap()
+        .integrate(Real::from_i64(0), Real::from_i64(1))
+        .expect("the indeterminate bound must resolve to a limit");
+    assert_eq!(value, Real::from_f64(-1.0));
+
+    // The recorded solution says the limit was used.
+    let solution = create_expr!("ln(x)")
+        .unwrap()
+        .integrate_solution(Real::from_i64(0), Real::from_i64(1))
+        .expect("the solution version takes the same route");
+    let lower_step = solution
+        .steps()
+        .iter()
+        .filter_map(|step| match step {
+            SolutionStep::Elementary(step) if step.step_name == "substitute the lower bound" => {
+                Some(step.description.as_str())
+            }
+            _ => None,
+        })
+        .next()
+        .expect("the lower bound substitution should be recorded");
+    assert!(
+        lower_step.starts_with("lim_{x -> 0}"),
+        "a NaN substitution should be described as a limit, got: {lower_step}"
+    );
+}
+
+/// A bound where the antiderivative genuinely has no finite value makes the
+/// definite integral diverge; that is reported as an error carrying the
+/// mathematical reason, never as a NaN answer.
+#[test]
+fn a_divergent_bound_reports_why_instead_of_nan() {
+    use crate::math::calculus::antiderivative::IntegrationError;
+    use crate::math::numeric::Real;
+
+    super::setup();
+    // ∫₀¹ dx/x: the antiderivative ln(x) tends to -∞ at 0.
+    match create_expr!("1/x").unwrap().integrate(Real::from_i64(0), Real::from_i64(1)) {
+        Err(IntegrationError::Divergent { antiderivative, bound, behaviour }) => {
+            assert!(antiderivative.contains("ln"), "the antiderivative is quoted, got {antiderivative}");
+            assert_eq!(bound, "0");
+            assert_eq!(behaviour, "-infinity");
+        }
+        other => panic!("expected a divergence report, got {other:?}"),
+    }
+
+    // An antiderivative that is not real-valued on one side of the bound
+    // (`x ^ 1.5` at `-1`) has no limit at all.
+    match create_expr!("sqrt(x)").unwrap().integrate(Real::from_i64(-1), Real::from_i64(1)) {
+        Err(IntegrationError::Divergent { behaviour, .. }) => {
+            assert_eq!(behaviour, "does not exist");
+        }
+        other => panic!("expected a divergence report, got {other:?}"),
+    }
+
+    // The errors describe the divergence when printed.
+    let error = create_expr!("1/x")
+        .unwrap()
+        .integrate(Real::from_i64(0), Real::from_i64(1))
+        .unwrap_err();
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("does not converge") && rendered.contains("ln"),
+        "the error should say why the integral diverges, got: {rendered}"
+    );
+}
+
+/// Improper integrals over infinite bounds still converge through the same
+/// limit machinery, and the solution names the limit as the bound value.
+#[test]
+fn an_improper_integral_converges_via_the_limit() {
+    use crate::math::numeric::Real;
+    use crate::math::structs::solution::SolutionStep;
+
+    super::setup();
+    // ∫₁^∞ dx/x² = 1, found as lim_{x -> ∞} (-1/x) = 0 minus F(1) = -1.
+    let value = create_expr!("1/x^2")
+        .unwrap()
+        .integrate(Real::from_i64(1), Real::infinity())
+        .expect("the improper integral converges");
+    assert_eq!(value, Real::from_f64(1.0));
+
+    let solution = create_expr!("1/x^2")
+        .unwrap()
+        .integrate_solution(Real::from_i64(1), Real::infinity())
+        .expect("the solution version converges the same way");
+    let upper_step = solution
+        .steps()
+        .iter()
+        .filter_map(|step| match step {
+            SolutionStep::Elementary(step) if step.step_name == "substitute the upper bound" => {
+                Some(step.description.as_str())
+            }
+            _ => None,
+        })
+        .next()
+        .expect("the upper bound substitution should be recorded");
+    assert!(
+        upper_step.contains("lim"),
+        "an infinite bound is always a limit, got: {upper_step}"
+    );
 }

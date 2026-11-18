@@ -78,21 +78,24 @@ where
 }
 
 /// Write a matrix to `f` one row per line, each row wrapped in brackets and
-/// entries space-separated.
+/// entries right-aligned to the widest entry of their column.
 pub(crate) fn write_matrix<T, M>(matrix: &M, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result
 where
     T: Matrixable + Display,
     M: MatrixOps<T>,
 {
-    for row in 0..matrix.row_count() {
-        write!(f, "[")?;
-        for column in 0..matrix.column_count() {
-            if column > 0 {
-                write!(f, " ")?;
-            }
-            write!(f, "{}", matrix.entry(row, column))?;
-        }
-        writeln!(f, "]")?;
+    use super::matrix::{column_widths_of, writeln_aligned_row};
+    let rows = matrix.row_count();
+    let columns = matrix.column_count();
+    let widths = column_widths_of((0..columns).map(|column| {
+        (0..rows).map(move |row| matrix.entry(row, column).to_string())
+    }));
+    for row in 0..rows {
+        writeln_aligned_row(
+            f,
+            (0..columns).map(|column| matrix.entry(row, column).to_string()),
+            &widths,
+        )?;
     }
     Ok(())
 }

@@ -26,6 +26,7 @@ pub use api::{MatrixMul, SquareMatrixFns};
 pub use api::static_api::{StaticMatrixMul, StaticSquareMatrixFns};
 pub use decomposition::{Diagonalization, Svd};
 pub use matrix::Matrix;
+pub(crate) use matrix::column_widths_of;
 #[cfg(feature = "generic_const")]
 pub use static_matrix::{StaticMatrix, StaticVector};
 #[cfg(feature = "generic_const")]

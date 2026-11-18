@@ -168,6 +168,49 @@ impl<T: SymbolicLeaf> ExprPoly<T> {
     }
 }
 
+impl<T: SymbolicLeaf> std::fmt::Display for ExprPoly<T> {
+    /// The polynomial in the eigenvalue `λ`, highest degree first:
+    /// `λ ^ 2 + x λ + 3`. Zero coefficients are skipped; the zero polynomial
+    /// renders as `0`. A coefficient that is itself a sum is bracketed so the
+    /// following λ cannot read as applying to one term only.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut written = false;
+        for (degree, coefficient) in self.coefficients.iter().enumerate().rev() {
+            if coefficient.is_zero_value() {
+                continue;
+            }
+            if written {
+                write!(f, " + ")?;
+            }
+            let text = coefficient.to_string();
+            // `1` never multiplies the λ; anything with an interior sum needs
+            // brackets first.
+            let needs_brackets = text.contains(" + ") || text.contains(" - ");
+            let factor = if text == "1" {
+                None
+            } else if needs_brackets {
+                Some(format!("({text})"))
+            } else {
+                Some(text)
+            };
+            match degree {
+                0 => write!(f, "{}", factor.as_deref().unwrap_or("1"))?,
+                1 if factor.is_none() => write!(f, "λ")?,
+                1 => write!(f, "{} λ", factor.expect("factor text handled above"))?,
+                degree if factor.is_none() => write!(f, "λ ^ {degree}")?,
+                degree => {
+                    write!(f, "{} λ ^ {degree}", factor.expect("factor text handled above"))?
+                }
+            }
+            written = true;
+        }
+        if !written {
+            write!(f, "0")?;
+        }
+        Ok(())
+    }
+}
+
 /// Simplify an entry, and fold it to a plain number when it is fully numeric.
 ///
 /// Unlike the numeric-only version this replaces, exact values survive: a

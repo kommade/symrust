@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 
 
-use crate::math::numeric::{ExpressionScalar, FloatBridge, FloatType, Real};
+use crate::math::numeric::{ExpressionScalar, FloatBridge, FloatType, Real, SymbolicLeaf};
 use crate::math::parse::lexer::{Const, Func, Op, Token};
 use crate::math::structs::expr::{Expr, Node, NodeInner, node::NodeValue};
 
@@ -43,6 +43,17 @@ pub enum Evaluated<T, L = Real> {
     /// A symbolic expression in terms of the variables that were not
     /// substituted.
     Expression(Expr<L>),
+}
+
+impl<T: std::fmt::Display, L: SymbolicLeaf> std::fmt::Display for Evaluated<T, L> {
+    /// A value prints as itself; a symbolic remainder prints as the
+    /// (partially evaluated) expression it carries.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Value(value) => write!(f, "{value}"),
+            Self::Expression(expression) => write!(f, "{expression}"),
+        }
+    }
 }
 
 impl<T, L> Evaluated<T, L> {
