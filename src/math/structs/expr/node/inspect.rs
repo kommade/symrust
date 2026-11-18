@@ -382,6 +382,8 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                 Token::Number(num) => Some(T::from_i64(*num)),
                 Token::Float(num) => Some(num.clone()),
                 Token::Constant(k) => Some(k.get_value()),
+                // Narrative tokens (`∫ f dx`, `d f/dx`) never evaluate.
+                Token::Integral(..) | Token::DerivativeOf(..) => None,
                 _ => unreachable!("NodeInner::evaluate: unexpected token {token:?}"),
             },
             NodeValue::Operator(op_node) => match &op_node.token {

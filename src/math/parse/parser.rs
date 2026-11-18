@@ -231,6 +231,8 @@ impl<T: FloatType + Display> Parser<T> {
                 | Token::Constant(_)
                 | Token::Var(_)
                 | Token::RootSum(_)
+                | Token::Integral(..)
+                | Token::DerivativeOf(..)
                 | Token::Matrix(_)
                 | Token::Vector(_)
                 | Token::Indp(_) => {
@@ -297,6 +299,8 @@ impl<T: FloatType + Display> Parser<T> {
                 | Token::Constant(_)
                 | Token::Var(_)
                 | Token::RootSum(_)
+                | Token::Integral(..)
+                | Token::DerivativeOf(..)
                 | Token::Matrix(_)
                 | Token::Vector(_)
                 | Token::Indp(_) => {

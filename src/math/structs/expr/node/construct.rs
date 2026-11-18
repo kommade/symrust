@@ -73,6 +73,21 @@ impl<T: FloatType + Display> Node<T> {
     pub fn root_sum(data: crate::math::parse::lexer::RootSumData) -> Self {
         NodeInner::operand(Token::RootSum(data)).wrap()
     }
+    /// A narrative pending integral `∫ inner d(variable)` leaf.
+    ///
+    /// Never produced by the parser — only the step narratives build one —
+    /// and opaque to the engine: it renders but is never evaluated,
+    /// simplified or traversed. See [`Token::Integral`].
+    #[must_use]
+    pub fn pending_integral(integrand: Node<T>, variable: char) -> Self {
+        NodeInner::operand(Token::Integral(Box::new(integrand), variable)).wrap()
+    }
+    /// A narrative derivative `d(inner)/d(variable)` leaf, the `d/dx`
+    /// companion of [`Node::pending_integral`]. Same opaque-atom rules.
+    #[must_use]
+    pub fn derivative_of(expression: Node<T>, variable: char) -> Self {
+        NodeInner::operand(Token::DerivativeOf(Box::new(expression), variable)).wrap()
+    }
     /// Whether this tree contains a formal root sum (`Σ_{Z: p(Z)=0} …`).
     ///
     /// Used to explain, in a [`Solution`][crate::math::structs::solution::Solution]'s
@@ -165,6 +180,14 @@ impl<T: FloatType + Display> Node<T> {
                 Token::Indp(c) => Token::Indp(*c),
                 Token::Var(c) => Token::Var(*c),
                 Token::RootSum(data) => Token::RootSum(data.clone()),
+                // Narrative tokens: the tree inside is retyped entrywise, the
+                // variable name carries over unchanged.
+                Token::Integral(inner, variable) => {
+                    Token::Integral(Box::new(Node::from_real(inner)), *variable)
+                }
+                Token::DerivativeOf(inner, variable) => {
+                    Token::DerivativeOf(Box::new(Node::from_real(inner)), *variable)
+                }
                 Token::Matrix(matrix) => Token::Matrix(matrix_from_real(matrix)),
                 Token::Vector(vector) => Token::Vector(vector_from_real(vector)),
                 Token::LBracket => Token::LBracket,
@@ -307,6 +330,9 @@ impl<T: FloatType + Display> NodeInner<T> {
             Token::Constant(_) | Token::Var(_) => (false, true, false),
             // A root sum contains the integration variable inside `ln|x − Z|`.
             Token::RootSum(_) => (true, false, false),
+            // The narrative integral/derivative carry the variable inside the
+            // tree they wrap, so they count as symbolic, not constant.
+            Token::Integral(..) | Token::DerivativeOf(..) => (true, false, false),
             // A matrix is symbolic if any of its entries is; its entries are
             // expressions, so they may contain the independent variable.
             Token::Matrix(matrix) => (

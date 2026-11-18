@@ -55,7 +55,7 @@ use crate::{
     math::structs::{
         expr::{
             Expr,
-            node::{Node, NodeFunctions},
+            node::{Node, NodeFunctions, NodeInner},
         },
         solution::{NoSteps, Recorder, Solution, StepRecorder},
     },
@@ -1492,14 +1492,22 @@ where
             let uv_text = describe_signed(&uv);
             let inner_integrand = helpers::mul(v.clone(), du.clone());
             let inner_text = describe_signed(&inner_integrand);
-            // By parts, ∫ u dv = u v − ∫ v du: the step states the whole
-            // equation — the assembled u v term *and* the integral still to
-            // solve — instead of ending in a bare `=> u v` that hides where
-            // the rest of the answer comes from. The nested block below
-            // derives the pending integral, and `combine` closes the term.
-            self.step_without_result(
+            // By parts, ∫ u dv = u v − ∫ v du: the step's value IS the whole
+            // equation — the assembled u v term minus the integral still to
+            // solve, written with the narrative pending-integral token so the
+            // `=>` shows the pending work instead of hiding it behind a bare
+            // `u v`. The nested block below derives that pending integral,
+            // and `combine` closes the term with its concrete value.
+            let pending = NodeInner::<T>::operand(Token::Integral(
+                Box::new(inner_integrand.clone()),
+                self.variable,
+            ))
+            .wrap();
+            let carrying = helpers::sub(uv.clone(), pending);
+            self.step(
                 "assemble u v",
-                || format!("∫ u dv = u v − ∫ v du = {uv_text} − ∫ {inner_text} dx"),
+                || format!("∫ u dv = u v − ∫ v du, with ∫ v du = ∫ {inner_text} dx to come"),
+                || carrying.clone(),
             );
             // The remaining integral, again as indented working, followed by
             // the combination its result feeds: u v − ∫ v du.

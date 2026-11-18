@@ -663,11 +663,42 @@ fn by_parts_nests_its_sub_integrals() {
     );
     assert!(rendered.contains("find v: sin(x)"), "{rendered}");
     assert!(rendered.contains("the remaining integral: -cos(x)"), "{rendered}");
-    // The identity and the combination are explicit; the assemble step states
-    // the pending integral instead of ending in a bare `=> u v`.
+    // The identity is quoted, and the assemble step's value carries the
+    // pending integral: `=> -x cos(x) - ∫ -cos(x) dx`, not a bare `u v`.
     assert!(rendered.contains("∫ u dv = u v − ∫ v du"), "{rendered}");
-    assert!(rendered.contains("= -x cos(x) − ∫ -cos(x) dx"), "{rendered}");
+    assert!(rendered.contains("=> -x cos(x) - ∫ -cos(x) dx"), "{rendered}");
     assert!(rendered.contains("u v − ∫ v du = "), "{rendered}");
+}
+
+/// The narrative pending-integral token renders inside a step value, is inert
+/// (never evaluates, never collapses) and has a LaTeX form.
+#[test]
+fn a_pending_integral_token_is_display_only() {
+    use crate::math::numeric::Real;
+    use crate::math::structs::expr::node::Node;
+
+    super::setup();
+    let integrand = create_expr!("-cos(x)").unwrap();
+    let pending = Node::<Real>::pending_integral(integrand.tree().clone(), 'x');
+    assert_eq!(pending.to_string(), "∫ -cos(x) dx");
+
+    // Embedded in a step value the pending integral rides along visibly…
+    let term = create_expr!("-x cos(x)").unwrap();
+    let carrying = term - Expr::<Real>::from_node(pending.clone());
+    let carrying_text = carrying.to_string();
+    assert!(
+        carrying_text.ends_with("- ∫ -cos(x) dx"),
+        "the pending integral should be displayed inside the value, got {carrying_text}"
+    );
+
+    // …but inert: substituting a bound cannot collapse it to a number, so it
+    // is never mistaken for a finished answer.
+    assert!(!carrying.is_zero());
+    assert!(carrying.evaluate(1.0_f64).expression().is_some());
+
+    // The `d/dx` companion renders the same way.
+    let rate = Node::<Real>::derivative_of(integrand.tree().clone(), 'x');
+    assert_eq!(rate.to_string(), "d(-cos(x))/dx");
 }
 
 /// Linearity is recorded as a single step showing the whole split, with every

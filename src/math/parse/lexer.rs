@@ -4,6 +4,7 @@ use crate::math::algebra::linear::Matrix;
 use crate::math::algebra::linear::Vector;
 use crate::math::numeric::{FloatType, Real, SymbolicLeaf};
 use crate::math::structs::expr::Expr;
+use crate::math::structs::expr::node::Node;
 
 /// A formal sum over the (unknown, generally complex) roots of a polynomial.
 ///
@@ -210,6 +211,19 @@ pub enum Token<T = Real> {
     Var(char),
     /// A formal `Σ_{Z : p(Z) = 0}` root sum (see [`RootSumData`]).
     RootSum(RootSumData),
+    /// A narrative pending integral `∫ inner d(variable)`, inside a step
+    /// value.
+    ///
+    /// The lexer and parser never produce one; only the step narratives do.
+    /// The tree inside is rendered but never evaluated, simplified or
+    /// traversed — the token is an opaque atom whose only behaviour is being
+    /// displayed, so a recorded value can show work still to be done next to
+    /// the parts already found.
+    Integral(Box<Node<T>>, char),
+    /// A narrative derivative `d(inner)/d(variable)`, the `d/dx` companion of
+    /// [`Token::Integral`]: same opaque-atom rules, same usage — the step
+    /// narratives of substitutions can quote a rate of change symbolically.
+    DerivativeOf(Box<Node<T>>, char),
     /// A matrix literal, `[[a, b], [c, d]]`.
     ///
     /// The entries are expressions over this token's own leaf type, so a
@@ -243,6 +257,8 @@ impl<T: SymbolicLeaf> Display for Token<T> {
             Self::Float(n) => write!(f, "{n}"),
             Self::Indp(c) | Self::Var(c) => write!(f, "{c}"),
             Self::RootSum(data) => write!(f, "{data}"),
+            Self::Integral(inner, variable) => write!(f, "∫ {inner} d{variable}"),
+            Self::DerivativeOf(inner, variable) => write!(f, "d({inner})/d{variable}"),
             Self::Matrix(matrix) => write!(f, "{matrix}"),
             Self::Vector(vector) => write!(f, "{vector}"),
             Self::LBracket => write!(f, "["),
@@ -313,6 +329,8 @@ impl<T> Token<T> {
                 | Self::Indp(_)
                 | Self::Function(_)
                 | Self::RootSum(_)
+                | Self::Integral(..)
+                | Self::DerivativeOf(..)
                 | Self::Matrix(_)
                 | Self::Vector(_)
                 | Self::LPar

@@ -254,6 +254,14 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                 )),
                 Token::Matrix(matrix) => Ok(matrix_to_latex(matrix)),
                 Token::Vector(vector) => Ok(vector_to_latex(vector)),
+                Token::Integral(inner, variable) => {
+                    let inner_latex = inner.inner.borrow().to_latex()?;
+                    Ok(format!(r"\int {inner_latex} \,d{variable}"))
+                }
+                Token::DerivativeOf(inner, variable) => {
+                    let inner_latex = inner.inner.borrow().to_latex()?;
+                    Ok(format!(r"\frac{{d}}{{d{variable}}}\left({inner_latex}\right)"))
+                }
                 _ => Err(NodeError::WrongToken("operand".to_string())),
             },
             NodeValue::Operator(op_node) => {

@@ -48,6 +48,14 @@ impl<T: FloatType + Display> Node<T> {
                 Token::Indp(c) => Token::Indp(*c),
                 Token::Var(c) => Token::Var(*c),
                 Token::RootSum(data) => Token::RootSum(data.clone()),
+                // Narrative tokens: the tree inside is retyped entrywise, the
+                // variable name carries over unchanged.
+                Token::Integral(inner, variable) => {
+                    Token::Integral(Box::new(Node::from_typed(inner)), *variable)
+                }
+                Token::DerivativeOf(inner, variable) => {
+                    Token::DerivativeOf(Box::new(Node::from_typed(inner)), *variable)
+                }
                 Token::Matrix(matrix) => Token::Matrix(convert_matrix(matrix)),
                 Token::Vector(vector) => Token::Vector(convert_vector(vector)),
                 Token::LBracket => Token::LBracket,
