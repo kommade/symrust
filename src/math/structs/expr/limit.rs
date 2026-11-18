@@ -14,7 +14,6 @@
 //!    toward `±∞`) and classify convergence, divergence and sign. This is the
 //!    fallback that handles shapes neither of the above can decide.
 //!
-//! The limits are computed in [`Real`] (the crate's arbitrary-precision float);
 //! [`crate::math::calculus::antiderivative`] uses this to evaluate improper integrals.
 
 use std::collections::HashMap;
@@ -78,8 +77,9 @@ const MONOTONE_RUN: usize = 4;
 impl<T: SymbolicLeaf> Expr<T> {
     /// Evaluate `lim_{var -> toward} self`.
     ///
-    /// `toward` may be any `Real`, including [`Real::infinity`] or
-    /// [`Real::neg_infinity`] for limits at infinity.
+    /// `toward` is a value of the tree's own leaf type, so any leaf works;
+    /// infinity for improper limits is the leaf's own (`Real::infinity()` or
+    /// the `f32`/`f64` constants).
     ///
     /// # Examples
     /// ```
@@ -89,15 +89,15 @@ impl<T: SymbolicLeaf> Expr<T> {
     ///
     /// // lim_{x->0} sin(x)/x = 1
     /// let expr = create_expr!("sin(x)/x").unwrap();
-    /// let limit = expr.limit('x', Real::from_i64(0));
+    /// let limit = expr.limit('x', &Real::from_i64(0));
     /// assert_eq!(limit, Limit::Finite(Real::from_i64(1)));
     /// ```
     #[must_use]
-    pub fn limit(&self, var: char, toward: Real) -> Limit<Real> {
-        self.limit_inner(var, &toward, 0)
+    pub fn limit(&self, var: char, toward: &T) -> Limit<T> {
+        self.limit_inner(var, toward, 0)
     }
 
-    fn limit_inner(&self, var: char, toward: &Real, depth: usize) -> Limit<Real> {
+    fn limit_inner(&self, var: char, toward: &T, depth: usize) -> Limit<T> {
         // At infinity, a naive substitution can be misleading: `2^x` overflows
         // to a huge-but-finite value, so `x^8 / 2^x` substitutes to a tiny
         // (but non-zero) float instead of `0`. Prefer L'Hôpital's rule for a
@@ -175,7 +175,7 @@ impl<T: SymbolicLeaf> Expr<T> {
     }
 
     /// Substitute `var = toward` and evaluate to a number, if possible.
-    fn substitute_evaluate(&self, var: char, toward: &Real) -> Option<Real> {
+    fn substitute_evaluate(&self, var: char, toward: &T) -> Option<T> {
         let mut values = HashMap::new();
         values.insert(var, toward.clone());
         self.evaluate_with(&values).value()
@@ -194,7 +194,7 @@ impl<T: SymbolicLeaf> Expr<T> {
 
     /// Whether `self` is an indeterminate form at the target that IEEE
     /// arithmetic would mask (specifically the powers `0^0`, `∞^0`, `1^∞`).
-    fn is_indeterminate_form(&self, var: char, toward: &Real) -> bool {
+    fn is_indeterminate_form(&self, var: char, toward: &T) -> bool {
         let Shape::Operator(Token::Operator(Op::Pow), base, exponent) = shape(&self.tree) else {
             return false;
         };
@@ -217,9 +217,9 @@ impl<T: SymbolicLeaf> Expr<T> {
     fn lhopital_at_infinity(
         &self,
         var: char,
-        toward: &Real,
+        toward: &T,
         depth: usize,
-    ) -> Option<Limit<Real>> {
+    ) -> Option<Limit<T>> {
         let Shape::Operator(Token::Operator(Op::Div), numerator, denominator) =
             shape(&self.tree)
         else {
@@ -246,7 +246,7 @@ impl<T: SymbolicLeaf> Expr<T> {
         // is still growing (otherwise the denominator derivative would also have
         // stopped, caught above), so the limit is `0`.
         if f_prime.tree.inner.borrow().eq(&f.tree.inner.borrow()) {
-            return Some(Limit::Finite(Real::zero()));
+            return Some(Limit::Finite(T::zero()));
         }
         let quotient = Expr::from_node(NodeInner::from_operation(
             Op::Div,
@@ -258,7 +258,7 @@ impl<T: SymbolicLeaf> Expr<T> {
 
     /// Apply L'Hôpital's rule if `self` is a `f / g` whose direct limit is
     /// `0/0` or `∞/∞`, returning the limit of `f' / g'`.
-    fn lhopital(&self, var: char, toward: &Real, depth: usize) -> Option<Limit<Real>> {
+    fn lhopital(&self, var: char, toward: &T, depth: usize) -> Option<Limit<T>> {
         // Only a top-level quotient has a numerator and denominator.
         let Shape::Operator(Token::Operator(Op::Div), numerator, denominator) = shape(&self.tree)
         else {
@@ -284,7 +284,7 @@ impl<T: SymbolicLeaf> Expr<T> {
         if matches!(&f_limit, Some(v) if !v.is_infinite() && !v.is_nan())
             && matches!(&g_limit, Some(v) if v.is_infinite())
         {
-            return Some(Limit::Finite(Real::zero()));
+            return Some(Limit::Finite(T::zero()));
         }
 
         if !zero_over_zero && !inf_over_inf {
@@ -306,7 +306,7 @@ impl<T: SymbolicLeaf> Expr<T> {
     ///
     /// * `0 · ∞` → `f / (1/g)`
     /// * `∞ − ∞` of two fractions → a single fraction over a common denominator
-    fn normalize(&self, var: char, toward: &Real) -> Option<Self> {
+    fn normalize(&self, var: char, toward: &T) -> Option<Self> {
         use crate::math::structs::expr::node::Node as NodeBuilder;
         match shape(&self.tree) {
             Shape::Operator(Token::Operator(Op::Mul | Op::ImplicitMul), left, right) => {
@@ -341,7 +341,7 @@ impl<T: SymbolicLeaf> Expr<T> {
     }
 
     /// Sample a sequence approaching the target and classify the behaviour.
-    fn probe(&self, var: char, toward: &Real) -> Limit<Real> {
+    fn probe(&self, var: char, toward: &T) -> Limit<T> {
         if toward.is_infinite() {
             // One sequence growing toward ±∞.
             return self
@@ -373,7 +373,7 @@ impl<T: SymbolicLeaf> Expr<T> {
     /// Probe with points that approach `toward` from the right (`c + 2^-n`),
     /// or grow toward `±∞` when `toward` is infinite. Returns `None` when no
     /// sample produced a usable (non-NaN) value.
-    fn probe_sequence(&self, var: char, toward: &Real, at_infinity: bool) -> Option<Limit<Real>> {
+    fn probe_sequence(&self, var: char, toward: &T, at_infinity: bool) -> Option<Limit<T>> {
         let points = if at_infinity {
             growth_points(toward)
         } else {
@@ -385,16 +385,16 @@ impl<T: SymbolicLeaf> Expr<T> {
     /// Probe from the left of a finite `toward` (`c - 2^-n`).
     fn probe_left(
         &self,
-        toward: &Real,
-        sample: impl FnMut(Real) -> Option<Real>,
-    ) -> Option<Limit<Real>> {
+        toward: &T,
+        sample: impl FnMut(T) -> Option<T>,
+    ) -> Option<Limit<T>> {
         let points = approach_points_left(toward);
         classify(points.into_iter().filter_map(sample))
     }
 
     /// Handle an indeterminate power `f^g` (`0⁰`, `∞⁰`, `1^∞`) exactly by taking
     /// logarithms: `f^g = e^(g ln f)`, so `lim f^g = exp(lim g·ln f)`.
-    fn pow_limit(&self, var: char, toward: &Real, depth: usize) -> Option<Limit<Real>> {
+    fn pow_limit(&self, var: char, toward: &T, depth: usize) -> Option<Limit<T>> {
         let Shape::Operator(Token::Operator(Op::Pow), base, exponent) = shape(&self.tree) else {
             return None;
         };
@@ -414,7 +414,7 @@ impl<T: SymbolicLeaf> Expr<T> {
             Limit::Finite(value) => Limit::Finite(value.exp()),
             // e^(+∞) = +∞, e^(-∞) = 0.
             Limit::PosInfinity => Limit::PosInfinity,
-            Limit::NegInfinity => Limit::Finite(Real::zero()),
+            Limit::NegInfinity => Limit::Finite(T::zero()),
             Limit::DoesNotExist => Limit::DoesNotExist,
         })
     }
@@ -490,7 +490,7 @@ enum Form {
 }
 
 /// Classify the direct limit of `expr` at `var -> toward`.
-fn form<T: SymbolicLeaf>(expr: &Expr<T>, var: char, toward: &Real) -> Form {
+fn form<T: SymbolicLeaf>(expr: &Expr<T>, var: char, toward: &T) -> Form {
     match expr.substitute_evaluate(var, toward) {
         Some(value) if value.is_zero() => Form::Zero,
         Some(value) if value.is_one() => Form::One,
@@ -517,17 +517,17 @@ fn as_fraction<T: SymbolicLeaf>(expr: &Expr<T>) -> Option<(Node<T>, Node<T>)> {
 /// `x -> ∞`) is reported as [`Limit::DoesNotExist`] instead of being mistaken for
 /// a converged value. A finite answer is only returned once two consecutive
 /// samples settle; a lone sample is never trusted.
-fn classify(samples: impl Iterator<Item = Real>) -> Option<Limit<Real>> {
-    let mut previous: Option<Real> = None;
+fn classify<T: SymbolicLeaf>(samples: impl Iterator<Item = T>) -> Option<Limit<T>> {
+    let mut previous: Option<T> = None;
     let mut growing_sign: Option<bool> = None;
-    let mut last: Option<Real> = None;
+    let mut last: Option<T> = None;
     let mut finite_count = 0usize;
-    let mut tail_min: Option<Real> = None;
-    let mut tail_max: Option<Real> = None;
+    let mut tail_min: Option<T> = None;
+    let mut tail_max: Option<T> = None;
     let mut saw_any = false;
     // The last non-settling move and how many consecutive moves of the same
     // direction have kept at least half of their previous magnitude.
-    let mut movement: Option<(bool, Real)> = None;
+    let mut movement: Option<(bool, T)> = None;
     let mut movement_run = 0usize;
 
     for value in samples {
@@ -578,8 +578,7 @@ fn classify(samples: impl Iterator<Item = Real>) -> Option<Limit<Real>> {
             let sustained = matches!(
                 &movement,
                 Some((moving, last_magnitude))
-                    if *moving == negative
-                        && magnitude.as_f64() >= last_magnitude.as_f64() * 0.5
+                    if *moving == negative && magnitude >= last_magnitude.clone() / T::from_i64(2)
             );
             movement_run = if sustained { movement_run + 1 } else { 1 };
             movement = Some((negative, magnitude));
@@ -631,21 +630,21 @@ fn classify(samples: impl Iterator<Item = Real>) -> Option<Limit<Real>> {
 
 /// Whether the spread between the tail's smallest and largest finite samples is
 /// small relative to their magnitude (i.e. the oscillation is not wide).
-fn envelope_shrank(min: &Real, max: &Real, scale: &Real) -> bool {
+fn envelope_shrank<T: SymbolicLeaf>(min: &T, max: &T, scale: &T) -> bool {
     let spread = (max.clone() - min.clone()).abs();
-    let magnitude = Real::one() + scale.clone().abs();
-    spread <= Real::from_f64(1e-6) * magnitude
+    let magnitude = T::one() + scale.clone().abs();
+    spread <= T::from_real(Real::from_f64(1e-6)) * magnitude
 }
 
 
 /// Points growing toward `±∞`: `±1, ±10, ±100, ...`.
-fn growth_points(toward: &Real) -> Vec<Real> {
+fn growth_points<T: SymbolicLeaf>(toward: &T) -> Vec<T> {
     let negative = toward.is_negative();
-    let mut magnitude = 1.0_f64;
+    let mut magnitude = if negative { T::neg_one() } else { T::one() };
     (0..PROBE_STEPS)
         .map(|_| {
-            let value = Real::from_f64(if negative { -magnitude } else { magnitude });
-            magnitude *= 10.0;
+            let value = magnitude.clone();
+            magnitude = magnitude.clone() * T::from_i64(10);
             value
         })
         .collect()
@@ -656,40 +655,42 @@ fn growth_points(toward: &Real) -> Vec<Real> {
 /// Decades (rather than powers of two) keep the samples well separated so
 /// successive values do not coincidentally coincide (for example
 /// `x ln(x)` at `x = 2^-1` and `2^-2`), which would trip the settling test.
-fn approach_points(toward: &Real) -> Vec<Real> {
-    let mut step = 0.1_f64;
+fn approach_points<T: SymbolicLeaf>(toward: &T) -> Vec<T> {
+    let tenth = T::from_real(Real::from_f64(0.1));
+    let mut step = tenth.clone();
     (0..PROBE_STEPS)
         .map(|_| {
-            let value = toward.clone() + Real::from_f64(step);
-            step *= 0.1;
+            let value = toward.clone() + step.clone();
+            step = step.clone() * tenth.clone();
             value
         })
         .collect()
 }
 
 /// Points approaching a finite `toward` from the left: `c - 10^-n`.
-fn approach_points_left(toward: &Real) -> Vec<Real> {
-    let mut step = 0.1_f64;
+fn approach_points_left<T: SymbolicLeaf>(toward: &T) -> Vec<T> {
+    let tenth = T::from_real(Real::from_f64(0.1));
+    let mut step = tenth.clone();
     (0..PROBE_STEPS)
         .map(|_| {
-            let value = toward.clone() - Real::from_f64(step);
-            step *= 0.1;
+            let value = toward.clone() - step.clone();
+            step = step.clone() * tenth.clone();
             value
         })
         .collect()
 }
 
 /// Whether two successive samples are close enough to be considered equal.
-fn settled(previous: &Real, current: &Real) -> bool {
+fn settled<T: SymbolicLeaf>(previous: &T, current: &T) -> bool {
     let difference = (current.clone() - previous.clone()).abs();
-    let scale = Real::one() + current.clone().abs();
-    difference <= Real::from_f64(1e-9) * scale
+    let scale = T::one() + current.clone().abs();
+    difference <= T::from_real(Real::from_f64(1e-9)) * scale
 }
 
 /// Whether the sequence is moving away quickly (a divergence signal).
-fn growing(previous: &Real, current: &Real) -> bool {
+fn growing<T: SymbolicLeaf>(previous: &T, current: &T) -> bool {
     let previous_abs = previous.clone().abs();
     let current_abs = current.clone().abs();
-    current_abs > previous_abs.clone() && current_abs > Real::from_f64(1e6) * previous_abs
+    current_abs > previous_abs.clone() && current_abs > T::from_real(Real::from_f64(1e6)) * previous_abs
 }
 

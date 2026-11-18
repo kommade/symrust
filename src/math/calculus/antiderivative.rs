@@ -141,7 +141,8 @@ impl Display for IntegrationError {
 
 impl Error for IntegrationError {}
 
-pub trait Antiderivative {
+pub trait Antiderivative<T> {
+    /// Find the antiderivative of the expression.
     fn get_antiderivative(&self) -> Result<Self, IntegrationError>
     where
         Self: Sized;
@@ -176,10 +177,9 @@ pub trait Antiderivative {
     /// infinite bound is taken as a limit. When the antiderivative has no
     /// finite value at a bound the integral diverges and
     /// [`IntegrationError::Divergent`] is returned with the reason.
-    fn integrate<V>(&self, lower: V, upper: V) -> Result<V, IntegrationError>
+    fn integrate(&self, lower: T, upper: T) -> Result<T, IntegrationError>
     where
         Self: Sized,
-        V: crate::math::numeric::FloatType + Display
     {
         self.integrate_with_context(lower, upper, IntegratorContext::default())
     }
@@ -188,15 +188,14 @@ pub trait Antiderivative {
     ///
     /// See [`Antiderivative::integrate`] for the result and
     /// [`IntegratorContext`] for the context fields.
-    fn integrate_with_context<V>(
+    fn integrate_with_context(
         &self,
-        lower: V,
-        upper: V,
+        lower: T,
+        upper: T,
         context: IntegratorContext,
-    ) -> Result<V, IntegrationError>
+    ) -> Result<T, IntegrationError>
     where
-        Self: Sized,
-        V: crate::math::numeric::FloatType + Display;
+        Self: Sized;
 
     /// Evaluate a definite integral, recording every step the search applies.
     ///
@@ -217,13 +216,12 @@ pub trait Antiderivative {
     /// assert_eq!(solution.result().to_string(), "9");
     /// assert!(!solution.steps().is_empty());
     /// ```
-    fn integrate_solution<V>(&self, lower: V, upper: V) -> Result<Solution<Self, Self>, IntegrationError>
+    fn integrate_solution(&self, lower: T, upper: T) -> Result<Solution<Self, Self>, IntegrationError>
     where
-        Self: Sized + Clone,
-        V: crate::math::numeric::FloatType + Display;
+        Self: Sized + Clone;
 }
 
-impl<T> Antiderivative for Expr<T>
+impl<T> Antiderivative<T> for Expr<T>
 where
     T: SymbolicLeaf,
 {
@@ -288,34 +286,25 @@ where
     /// let value = expr.integrate(Real::from_i64(0), Real::from_i64(3)).unwrap();
     /// assert_eq!(value, Real::from_i64(9));
     /// ```
-    fn integrate<V>(&self, lower: V, upper: V) -> Result<V, IntegrationError>
-    where
-        V: crate::math::numeric::FloatType + Display,
-    {
+    fn integrate(&self, lower: T, upper: T) -> Result<T, IntegrationError> {
         self.integrate_with_context(lower, upper, IntegratorContext::default())
     }
 
-    fn integrate_with_context<V>(
+    fn integrate_with_context(
         &self,
-        lower: V,
-        upper: V,
+        lower: T,
+        upper: T,
         context: IntegratorContext,
-    ) -> Result<V, IntegrationError>
-    where
-        V: crate::math::numeric::FloatType + Display,
-    {
+    ) -> Result<T, IntegrationError> {
         let antiderivative = self.get_antiderivative_with_context(context)?;
         evaluate_definite_integral(&antiderivative, lower, upper)
     }
 
-    fn integrate_solution<V>(
+    fn integrate_solution(
         &self,
-        lower: V,
-        upper: V,
-    ) -> Result<Solution<Self, Self>, IntegrationError>
-    where
-        V: crate::math::numeric::FloatType + Display + Clone,
-    {
+        lower: T,
+        upper: T,
+    ) -> Result<Solution<Self, Self>, IntegrationError> {
         // Format the comment before the bounds are moved into the evaluation.
         let comment = format!(
             "the antiderivative evaluated over [{}, {}]; the constant of \
@@ -338,8 +327,8 @@ where
         // Record both substitutions: `F(bound) = value`, or the limit when
         // substituting would hit an indeterminate form (see [`bound_value`]).
         let variable = crate::math::calculus::expr::independent_variable(&antiderivative.tree);
-        let upper_value = bound_value(&antiderivative, variable, upper.to_real(), &antiderivative_text)?;
-        let lower_value = bound_value(&antiderivative, variable, lower.to_real(), &antiderivative_text)?;
+        let upper_value = bound_value(&antiderivative, variable, &upper, &antiderivative_text)?;
+        let lower_value = bound_value(&antiderivative, variable, &lower, &antiderivative_text)?;
         for (name, bound_display, evaluation) in [
             ("substitute the upper bound", upper.to_string(), &upper_value),
             ("substitute the lower bound", lower.to_string(), &lower_value),
@@ -351,11 +340,10 @@ where
                     format!("lim_{{x -> {bound_display}}} {antiderivative_text} = {value}")
                 }
             };
-            let leaf_value = T::from_real(value);
             solution.push_step(
                 name,
                 description,
-                Expr::from_node(Node::<T>::float(leaf_value)),
+                Expr::from_node(Node::<T>::float(value)),
             );
         }
 
@@ -369,24 +357,23 @@ where
                 behaviour: String::from("an indeterminate difference between the bounds"),
             });
         }
-        let leaf_value = T::from_real(value);
         solution.set_result_comment(comment);
-        Ok(solution.finish(Expr::from_node(Node::<T>::float(leaf_value))))
+        Ok(solution.finish(Expr::from_node(Node::<T>::float(value))))
     }
 }
 
 /// The antiderivative's value at one bound, together with how it was obtained.
-enum BoundValue {
+enum BoundValue<T = Real> {
     /// Substituting the bound straight into `F` evaluated to a finite number.
-    Substitution(Real),
+    Substitution(T),
     /// Substitution hit an indeterminate form or an infinity (`0 · ln 0`,
     /// `1/0`); the limit as the variable approaches the bound was used.
-    Limit(Real),
+    Limit(T),
 }
 
-impl BoundValue {
+impl<T> BoundValue<T> {
     /// The value, however it was obtained.
-    fn value(&self) -> &Real {
+    fn value(&self) -> &T {
         match self {
             Self::Substitution(value) | Self::Limit(value) => value,
         }
@@ -405,9 +392,9 @@ impl BoundValue {
 fn bound_value<B>(
     antiderivative: &Expr<B>,
     variable: char,
-    bound: Real,
+    bound: &B,
     antiderivative_text: &str,
-) -> Result<BoundValue, IntegrationError>
+) -> Result<BoundValue<B>, IntegrationError>
 where
     B: SymbolicLeaf,
 {
@@ -447,19 +434,18 @@ where
 /// lands on an indeterminate form. An infinite bound is a limit, which lets an
 /// improper integral converge; a bound whose limit is not finite makes the
 /// integral diverge and is reported as [`IntegrationError::Divergent`].
-fn evaluate_definite_integral<B, V>(
+fn evaluate_definite_integral<B>(
     antiderivative: &Expr<B>,
-    lower: V,
-    upper: V,
-) -> Result<V, IntegrationError>
+    lower: B,
+    upper: B,
+) -> Result<B, IntegrationError>
 where
     B: SymbolicLeaf,
-    V: crate::math::numeric::FloatType + Display,
 {
     let variable = crate::math::calculus::expr::independent_variable(&antiderivative.tree);
     let antiderivative_text = antiderivative.to_string();
-    let upper_value = bound_value(antiderivative, variable, upper.to_real(), &antiderivative_text)?;
-    let lower_value = bound_value(antiderivative, variable, lower.to_real(), &antiderivative_text)?;
+    let upper_value = bound_value(antiderivative, variable, &upper, &antiderivative_text)?;
+    let lower_value = bound_value(antiderivative, variable, &lower, &antiderivative_text)?;
     // `F(upper) - F(lower)`, computed in Real, then bridged to the caller's type.
     let result = upper_value.value().clone() - lower_value.value().clone();
     if result.is_nan() {
@@ -471,7 +457,7 @@ where
             behaviour: String::from("an indeterminate difference between the bounds"),
         });
     }
-    Ok(V::from_real(result))
+    Ok(result)
 }
 
 /// A single integration run can be configured with a context that sets the

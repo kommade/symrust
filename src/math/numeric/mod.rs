@@ -217,6 +217,10 @@ pub trait ExpressionScalar: NumCore + FloatBridge {
         self.ln() / Self::from_real(base).ln()
     }
 
+    fn exp(self) -> Self {
+        Self::e().pow(self)
+    }
+
     // --- constants -----------------------------------------------------
 
     /// The constant `π`.

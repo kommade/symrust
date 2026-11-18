@@ -2,12 +2,12 @@
 
 use crate::math::calculus::antiderivative::Antiderivative;
 use crate::create_expr;
-use crate::math::numeric::Real;
+use crate::math::numeric::{FloatType, Real};
 use crate::math::structs::expr::limit::Limit;
 
-fn approx(limit: Limit<Real>, expected: f64) -> bool {
+fn approx<T: FloatType>(limit: Limit<T>, expected: f64) -> bool {
     match limit {
-        Limit::Finite(value) => (value.to_f64() - expected).abs() < 1e-6,
+        Limit::Finite(value) => (value.to_real().to_f64() - expected).abs() < 1e-6,
         _ => false,
     }
 }
@@ -17,15 +17,15 @@ fn limits_resolved_by_direct_substitution() {
     super::setup();
     // A polynomial is continuous: direct substitution works.
     let expr = create_expr!("x^2 + 1").unwrap();
-    assert_eq!(expr.limit('x', Real::from_i64(2)), Limit::Finite(Real::from_i64(5)));
+    assert_eq!(expr.limit('x', &Real::from_i64(2)), Limit::Finite(Real::from_i64(5)));
 }
 
 #[test]
 fn limits_zero_over_zero_need_lhopital() {
     super::setup();
     // lim_{x->0} sin(x)/x = 1 (L'Hôpital).
-    let expr = create_expr!("sin(x)/x").unwrap();
-    assert!(approx(expr.limit('x', Real::from_i64(0)), 1.0));
+    let expr = create_expr!("sin(x)/x"; f64).unwrap();
+    assert!(approx(expr.limit('x', &0.0), 1.0));
 }
 
 #[test]
@@ -33,7 +33,7 @@ fn limit_of_one_minus_cos_over_x_squared() {
     super::setup();
     // lim_{x->0} (1 - cos(x)) / x^2 = 1/2.
     let expr = create_expr!("(1 - cos(x))/x^2").unwrap();
-    assert!(approx(expr.limit('x', Real::from_i64(0)), 0.5));
+    assert!(approx(expr.limit('x', &Real::from_i64(0)), 0.5));
 }
 
 #[test]
@@ -41,7 +41,7 @@ fn limit_at_infinity_of_rational() {
     super::setup();
     // lim_{x->inf} 1/x = 0.
     let expr = create_expr!("1/x").unwrap();
-    assert!(approx(expr.limit('x', Real::infinity()), 0.0));
+    assert!(approx(expr.limit('x', &Real::infinity()), 0.0));
 }
 
 #[test]
@@ -49,7 +49,7 @@ fn limit_at_infinity_grows() {
     super::setup();
     // lim_{x->inf} x = +inf.
     let expr = create_expr!("x").unwrap();
-    assert_eq!(expr.limit('x', Real::infinity()), Limit::PosInfinity);
+    assert_eq!(expr.limit('x', &Real::infinity()), Limit::PosInfinity);
 }
 
 #[test]
@@ -86,7 +86,7 @@ fn zero_times_infinity_rewritten() {
     super::setup();
     // lim_{x->0+} x ln(x) = 0  (0 · ∞ rewritten to x / (1/ln x)).
     let expr = create_expr!("x ln(x)").unwrap();
-    assert!(approx(expr.limit('x', Real::from_i64(0)), 0.0));
+    assert!(approx(expr.limit('x', &Real::from_i64(0)), 0.0));
 }
 
 #[test]
@@ -94,7 +94,7 @@ fn one_to_the_infinity_rewritten() {
     super::setup();
     // lim_{x->inf} (1 + 1/x)^x = e  (1^∞ rewritten via exp(g ln f)).
     let expr = create_expr!("(1 + 1/x)^x").unwrap();
-    assert!(approx(expr.limit('x', Real::infinity()), std::f64::consts::E));
+    assert!(approx(expr.limit('x', &Real::infinity()), std::f64::consts::E));
 }
 
 #[test]
@@ -102,7 +102,7 @@ fn zero_to_the_zero_rewritten() {
     super::setup();
     // lim_{x->0+} x^x = 1  (0^0 rewritten via exp(g ln f)).
     let expr = create_expr!("x^x").unwrap();
-    assert!(approx(expr.limit('x', Real::from_i64(0)), 1.0));
+    assert!(approx(expr.limit('x', &Real::from_i64(0)), 1.0));
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn oscillation_is_reported_as_not_existing() {
     super::setup();
     // lim_{x->0} sin(1/x) does not exist (oscillates without a limit).
     let expr = create_expr!("sin(1/x)").unwrap();
-    assert_eq!(expr.limit('x', Real::from_i64(0)), Limit::DoesNotExist);
+    assert_eq!(expr.limit('x', &Real::from_i64(0)), Limit::DoesNotExist);
 }
 
 #[test]
@@ -118,5 +118,5 @@ fn polynomial_over_exponential_goes_to_zero() {
     super::setup();
     // lim_{x->inf} x^8 / 2^x = 0 (eight applications of L'Hôpital).
     let expr = create_expr!("x^8/2^x").unwrap();
-    assert_eq!(expr.limit('x', Real::infinity()), Limit::Finite(Real::zero()));
+    assert_eq!(expr.limit('x', &Real::infinity()), Limit::Finite(Real::zero()));
 }
