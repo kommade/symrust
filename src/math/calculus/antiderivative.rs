@@ -1320,11 +1320,41 @@ where
     }
 
     fn try_substitution(&mut self, node: &Node<T>) -> Result<Option<Node<T>>, IntegrationError> {
-        let result = self.find_substitution(node)?;
-        Ok(self.record_technique("substitution", node, result))
+        let Some(case) = self.find_substitution(node) else {
+            return Ok(None);
+        };
+        // Declare the substitution and show the integrand rewritten in `u`:
+        // the value is the pending u-integral —
+        //   substitution: u = x ^ 2, du = 2 x dx => ∫ sin(u) du
+        // — so the `=>` displays the work the substitution sets up instead of
+        // an opaque antiderivative. The answer closes the solution (or the
+        // enclosing sub-solution) with `u` substituted back out.
+        let variable = self.variable;
+        let inner_text = describe_signed(&case.inner);
+        let derivative_text = describe_signed(&case.derivative);
+        let derivative_text = if derivative_text.contains(' ') {
+            format!("({derivative_text})")
+        } else {
+            derivative_text
+        };
+        let pending = NodeInner::<T>::operand(Token::Integral(
+            Box::new(case.rewritten),
+            'u',
+        ))
+        .wrap();
+        self.step(
+            "substitution",
+            || format!("u = {inner_text}, du = {derivative_text} d{variable}"),
+            || pending,
+        );
+        Ok(Some(case.result))
     }
 
-    fn find_substitution(&mut self, node: &Node<T>) -> Result<Option<Node<T>>, IntegrationError> {
+    fn find_substitution(
+        &mut self,
+        node: &Node<T>,
+    ) -> Option<SubstitutionCase<T>> {
+        let u = Node::<T>::var('u');
         let product = helpers::flatten_product(node);
         // `f'(x) / f(x)` integrates to a logarithm.
         for (index, divisor) in product.denom.iter().enumerate() {
@@ -1339,8 +1369,17 @@ where
             if let Some(ratio) =
                 helpers::proportional_to(&product.numer, &divisors, None, &derivative)
             {
+                // u = f(x): the integrand is `ratio · du / u`, i.e. `ratio/u` du.
                 let logarithm = helpers::function(Func::Ln, divisor.clone());
-                return Ok(Some(helpers::multiply_by(logarithm, ratio)));
+                let result = helpers::multiply_by(logarithm, ratio.clone());
+                let rewritten =
+                    helpers::scale(helpers::div(one(), u.clone()), ratio);
+                return Some(SubstitutionCase {
+                    result,
+                    inner: divisor.clone(),
+                    derivative,
+                    rewritten,
+                });
             }
         }
         for (index, factor) in product.numer.iter().enumerate() {
@@ -1352,12 +1391,22 @@ where
             };
             match helpers::shape(factor) {
                 Shape::Operator(Token::Function(func), _, argument) => {
-                    if let (Some(inner), Some(antiderivative)) = (
+                    if let (Some(derivative), Some(antiderivative)) = (
                         helpers::differentiate(&argument),
                         antiderivative_of_function(&func, argument.clone()),
                     )
-                        && let Some(ratio) = ratio_of(&inner) {
-                            return Ok(Some(helpers::multiply_by(antiderivative, ratio)));
+                        && let Some(ratio) = ratio_of(&derivative) {
+                            // u = the function's argument: `ratio · f(u)` du.
+                            let result =
+                                helpers::multiply_by(antiderivative, ratio.clone());
+                            let renamed = helpers::function(func.clone(), u.clone());
+                            let rewritten = helpers::scale(renamed, ratio);
+                            return Some(SubstitutionCase {
+                                result,
+                                inner: argument.clone(),
+                                derivative,
+                                rewritten,
+                            });
                         }
                 }
                 Shape::Operator(Token::Operator(Op::Pow), base, exponent) => {
@@ -1366,11 +1415,11 @@ where
                         if !constant.is_normal() || constant.is_negative() {
                             continue;
                         }
-                        if let (Some(inner), is_e) = (
+                        if let (Some(derivative), is_e) = (
                             helpers::differentiate(&exponent),
                             constant.float_equal(&T::e()),
                         )
-                            && let Some(ratio) = ratio_of(&inner) {
+                            && let Some(ratio) = ratio_of(&derivative) {
                                 let antiderivative = if is_e {
                                     factor.clone()
                                 } else {
@@ -1378,17 +1427,32 @@ where
                                         helpers::function(Func::Ln, helpers::float(constant));
                                     helpers::div(factor.clone(), logarithm)
                                 };
-                                return Ok(Some(helpers::multiply_by(antiderivative, ratio)));
+                                // u = the exponent: `ratio · a ^ u` du (the
+                                // base node carries `e` when it is `e ^ u`).
+                                let result =
+                                    helpers::multiply_by(antiderivative, ratio.clone());
+                                let renamed = helpers::pow(base.clone(), u.clone());
+                                let rewritten = helpers::scale(renamed, ratio);
+                                return Some(SubstitutionCase {
+                                    result,
+                                    inner: exponent.clone(),
+                                    derivative,
+                                    rewritten,
+                                });
                             }
-                    } else if let (Some(inner), Some(exponent_value)) = (
+                    } else if let (Some(derivative), Some(exponent_value)) = (
                         helpers::differentiate(&base),
                         helpers::constant_value(&exponent),
                     )
-                        && let Some(ratio) = ratio_of(&inner) {
-                            let antiderivative = if exponent_value.is_neg_one() {
+                        && let Some(ratio) = ratio_of(&derivative) {
+                            // u = the base: `ratio · u ^ n` du, or `ratio/u` du
+                            // when n was -1.
+                            let inner = base.clone();
+                            let neg_one = exponent_value.is_neg_one();
+                            let antiderivative = if neg_one {
                                 helpers::function(Func::Ln, base)
                             } else {
-                                let new_exponent = exponent_value + T::one();
+                                let new_exponent = exponent_value.clone() + T::one();
                                 if new_exponent.is_zero() {
                                     continue;
                                 }
@@ -1396,7 +1460,21 @@ where
                                     helpers::pow(base, helpers::float(new_exponent.clone()));
                                 helpers::divide_by(power, new_exponent)
                             };
-                            return Ok(Some(helpers::multiply_by(antiderivative, ratio)));
+                            let rewritten = if neg_one {
+                                helpers::scale(helpers::div(one(), u.clone()), ratio.clone())
+                            } else {
+                                helpers::scale(
+                                    helpers::pow(u.clone(), helpers::float(exponent_value)),
+                                    ratio.clone(),
+                                )
+                            };
+                            let result = helpers::multiply_by(antiderivative, ratio);
+                            return Some(SubstitutionCase {
+                                result,
+                                inner,
+                                derivative,
+                                rewritten,
+                            });
                         }
                 }
                 _ => {}
@@ -1404,14 +1482,22 @@ where
             // `f(x) * f'(x)` integrates to `f(x)^2 / 2`.
             if let Some(derivative) = helpers::differentiate(factor)
                 && let Some(ratio) = ratio_of(&derivative) {
+                    // u = the factor itself: `ratio · u` du.
                     let square = helpers::pow(factor.clone(), number(2));
-                    return Ok(Some(helpers::divide_by(
-                        helpers::multiply_by(square, ratio),
+                    let result = helpers::divide_by(
+                        helpers::multiply_by(square, ratio.clone()),
                         float_from::<T>(2.0),
-                    )));
+                    );
+                    let rewritten = helpers::scale(u.clone(), ratio);
+                    return Some(SubstitutionCase {
+                        result,
+                        inner: factor.clone(),
+                        derivative,
+                        rewritten,
+                    });
                 }
         }
-        Ok(None)
+        None
     }
 
     fn try_by_parts(&mut self, node: &Node<T>) -> Result<Option<Node<T>>, IntegrationError> {
@@ -1531,6 +1617,21 @@ where
         }
         Ok(None)
     }
+}
+
+/// A successful substitution search: what was renamed to `u`, how it moves,
+/// and the two answers — the antiderivative and the integrand rewritten as a
+/// `u`-integral for the step narrative.
+struct SubstitutionCase<T> {
+    /// The antiderivative with `u` substituted back out.
+    result: Node<T>,
+    /// The expression that was renamed to `u`.
+    inner: Node<T>,
+    /// `d(inner)/d(var)`, the factor the rest of the integrand matches.
+    derivative: Node<T>,
+    /// The integrand rewritten as a `u`-integrand (the constant ratio folded
+    /// in), ready to sit inside a narrative `∫ … du` token.
+    rewritten: Node<T>,
 }
 
 /// Whether the node is `u^(-n)`, i.e. a reciprocal power.

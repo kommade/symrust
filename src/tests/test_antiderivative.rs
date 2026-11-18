@@ -731,6 +731,48 @@ fn linearity_is_recorded_in_one_step() {
     );
 }
 
+/// The substitution step declares `u` and its differential, and its value is
+/// the integrand rewritten as a `u`-integral — the `=>` shows the rewrite the
+/// technique sets up, and the final answer closes the solution with `u`
+/// substituted back out.
+#[test]
+fn substitution_declares_u_and_shows_the_rewritten_integral() {
+    super::setup();
+    // The constant factor comes out first (linearity), so the substitution
+    // works on `x sin(x ^ 2)` and carries the residual `1/2` in the rewrite:
+    // with u = x ^ 2, x dx = du / 2, so the integral is ∫ sin(u) / 2 du.
+    let solution = create_expr!("2xsin(x^2)")
+        .unwrap()
+        .get_antiderivative_solution()
+        .expect("2 x sin(x ^ 2) integrates by substitution");
+    let rendered = solution.to_string();
+    assert!(
+        rendered.contains("u = x ^ 2, du = (2 x) dx => ∫ sin(u) / 2 du"),
+        "the substitution step should declare u/du and show the rewrite:\n{rendered}"
+    );
+    // The closing answer has `u` back-substituted.
+    assert!(
+        rendered.trim_end().ends_with("= -cos(x ^ 2)"),
+        "the solution should close with the back-substituted answer:\n{rendered}"
+    );
+
+    // A genuine unit ratio: du = 1/x dx appears in the integrand verbatim,
+    // so the rewritten integral carries no residual factor.
+    let unit = create_expr!("sin(ln(x))/x")
+        .unwrap()
+        .get_antiderivative_solution()
+        .expect("sin(ln(x)) / x integrates by substitution");
+    let rendered = unit.to_string();
+    assert!(
+        rendered.contains("u = ln(x), du = (1 / x) dx => ∫ sin(u) du"),
+        "unit-ratio substitution narrative:\n{rendered}"
+    );
+    assert!(
+        rendered.trim_end().ends_with("= -cos(ln(x))"),
+        "the rewritten integral solves to the back-substituted answer:\n{rendered}"
+    );
+}
+
 /// Substituting into the antiderivative can land on an indeterminate form
 /// (`x ln(x) - x` at `0` reads as `0 · (-∞) - 0 = NaN`): the evaluators must
 /// then take the limit instead of handing out NaN.
