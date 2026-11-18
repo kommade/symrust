@@ -340,9 +340,8 @@ fn integrate_solution_matches_integrate_and_records_steps() {
     println!("solution:\n{solution}");
     let recorded: Real = solution
         .result()
-        .evaluate(0.0_f64)
+        .evaluate(Real::zero())
         .value()
-        .map(Real::from_f64)
         .expect("the solution result is numeric");
     assert_eq!(recorded, plain, "the recorded value must match `integrate`");
     assert!(
@@ -662,11 +661,43 @@ fn by_parts_nests_its_sub_integrals() {
         sub_solutions >= 2,
         "the v integral and the remaining integral should be sub-solutions:\n{rendered}"
     );
-    assert!(rendered.contains("find v: ∫ sin(x) dx"), "{rendered}");
-    assert!(rendered.contains("the remaining integral:"), "{rendered}");
-    // The identity and the combination are explicit.
+    assert!(rendered.contains("find v: sin(x)"), "{rendered}");
+    assert!(rendered.contains("the remaining integral: -cos(x)"), "{rendered}");
+    // The identity and the combination are explicit; the assemble step states
+    // the pending integral instead of ending in a bare `=> u v`.
     assert!(rendered.contains("∫ u dv = u v − ∫ v du"), "{rendered}");
+    assert!(rendered.contains("= -x cos(x) − ∫ -cos(x) dx"), "{rendered}");
     assert!(rendered.contains("u v − ∫ v du = "), "{rendered}");
+}
+
+/// Linearity is recorded as a single step showing the whole split, with every
+/// term's constant hoisted in the same breath — the way the identity is
+/// written on paper — instead of a bare "split into N terms" followed by one
+/// "constant multiple" step per term.
+#[test]
+fn linearity_is_recorded_in_one_step() {
+    super::setup();
+    let solution = create_expr!("2xsin(x) + 2xcos(x)^3/3")
+        .unwrap()
+        .get_antiderivative_solution()
+        .expect("the integrand splits into two terms");
+    let rendered = solution.to_string();
+    assert!(
+        rendered.contains(
+            "∫ 2 x sin(x) + 2 x (cos(x) ^ 3 / 3) dx = 2 ∫ x sin(x) dx + 2/3 ∫ x cos(x) ^ 3 dx"
+        ),
+        "the linearity step should show the full split with hoisted constants:\n{rendered}"
+    );
+    // The per-term constant extraction is absorbed into the linearity line.
+    assert!(
+        !rendered.contains("constant multiple"),
+        "no separate constant-multiple steps should remain:\n{rendered}"
+    );
+    // Each still-integral term is solved below the split, exactly as written.
+    assert!(
+        rendered.contains("standard integral"),
+        "the split terms are still solved step by step:\n{rendered}"
+    );
 }
 
 /// Substituting into the antiderivative can land on an indeterminate form

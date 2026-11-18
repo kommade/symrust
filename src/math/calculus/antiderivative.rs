@@ -331,7 +331,7 @@ where
         let antiderivative_text = antiderivative.to_string();
         solution.push_step(
             "calculation complete",
-            "the antiderivative; the bounds of integration are substituted into this",
+            "the antiderivative is",
             antiderivative.clone(),
         );
 
@@ -720,12 +720,9 @@ where
             let value = helpers::constant_value(node)
                 .ok_or_else(|| IntegrationError::Unsupported(describe(node)))?;
             let result = helpers::multiply_by(self.variable_node(), value.clone());
-            let description = format!(
-                "{} is constant, so the antiderivative is {} {}",
-                describe(node),
-                describe_number(&value),
-                self.variable
-            );
+            // The `=>` carries the antiderivative; the description names the
+            // integral being solved, in the notation the reader started from.
+            let description = format!("∫ {} dx", describe(node));
             self.step("constant rule", || description, || result.clone());
             return Ok(result);
         }
@@ -756,23 +753,64 @@ where
                 let integral = self.integrate(&right)?;
                 return Ok(integral.negate());
             }
-        // Integrate sums term by term.
+        // Integrate sums term by term, in one recorded step: each term's
+        // constant factor comes out in the same breath, so the solution shows
+        // the identity the way it is written on paper —
+        //   ∫ f + g dx = ∫ f dx + ∫ g dx   (constants hoisted)
+        // — and the sub-integrals below work on unit-constant terms.
         if let Some(terms) = helpers::sum_terms(node) {
-            let term_count = terms.len();
-            // Record the split before the sub-integrals run, so the solution
-            // reads as a derivation: the decision comes first, the work it
-            // causes follows. Recording afterwards printed the children's
-            // answers above the step that asked for them.
+            let mut pieces: Vec<(bool, String)> = Vec::with_capacity(terms.len());
+            let mut units: Vec<(Option<T>, Node<T>)> = Vec::with_capacity(terms.len());
+            for (negated, term) in terms {
+                let (constant, dependent) = helpers::pull_out_constant(&term);
+                // Fold the additive sign into the constant: `-3 f` integrates
+                // to `-3 F`, one factor, not two rules. `factor` keeps the
+                // sign for the scaling below; `magnitude` is only for the
+                // rendered text, where the sign lives in the separator.
+                let factor = constant.unwrap_or_else(T::one);
+                let factor = if negated { -factor } else { factor };
+                let negative = factor.is_negative();
+                let magnitude = if negative { -factor.clone() } else { factor.clone() };
+                let body = if magnitude.is_one() {
+                    format!("∫ {} dx", describe_signed(&dependent))
+                } else {
+                    format!(
+                        "{} ∫ {} dx",
+                        describe_number(&magnitude),
+                        describe_signed(&dependent)
+                    )
+                };
+                pieces.push((negative, body));
+                // A unit constant needs no scaling; anything else — sign
+                // included — multiplies the term's antiderivative once it is
+                // known.
+                let scale_by = if factor.is_one() { None } else { Some(factor) };
+                units.push((scale_by, dependent));
+            }
             self.step_without_result("linearity", || {
-                format!("Split {} into {term_count} terms", describe(node))
+                let mut line = format!("∫ {} dx =", describe(node));
+                for (index, (negative, body)) in pieces.iter().enumerate() {
+                    if index == 0 {
+                        if *negative {
+                            line.push_str(" -");
+                        } else {
+                            line.push(' ');
+                        }
+                    } else {
+                        line.push_str(if *negative { " − " } else { " + " });
+                    }
+                    line.push_str(body);
+                }
+                line
             });
             let mut total = zero();
-            for (negated, term) in terms {
-                let mut integral = self.integrate(&term)?;
-                if negated {
-                    integral = integral.negate();
-                }
-                total = helpers::add(total, integral);
+            for (scale_by, unit_term) in units {
+                let integral = self.integrate(&unit_term)?;
+                let scaled = match scale_by {
+                    Some(factor) => helpers::scale(integral, factor),
+                    None => integral,
+                };
+                total = helpers::add(total, scaled);
             }
             return Ok(total);
         }
@@ -794,11 +832,13 @@ where
                 }
                 // Decide before integrating the dependent part, so the reader
                 // sees the factor being pulled out and then the smaller
-                // integral it leaves.
+                // integral it leaves. The equation *is* the step: the constant
+                // moves in front of the smaller integral, nothing else.
                 let description = format!(
-                    "pull the constant {} out of {}",
+                    "∫ {} dx = {} ∫ {} dx",
+                    describe_signed(node),
                     describe_number(&value),
-                    describe_signed(node)
+                    describe_signed(&dependent)
                 );
                 self.step_without_result("constant multiple", || description);
                 let integral = self.integrate(&dependent)?;
@@ -895,7 +935,11 @@ where
         result: Option<Node<T>>,
     ) -> Option<Node<T>> {
         if let Some(found) = &result {
-            let described = describe_signed(node);
+            // Every technique funnelled through here answers one question —
+            // what is the antiderivative of `node`? — so the description
+            // states that question in integral notation and the `=>` gives
+            // the answer: `standard integral: ∫ sin(x) dx => -cos(x)`.
+            let described = format!("∫ {} dx", describe_signed(node));
             let found = found.clone();
             self.step(step_name, || described, || found);
         }
@@ -1434,11 +1478,10 @@ where
                 )
             });
             // v = ∫ dv, solved on a nested recorder so its working is
-            // indented under the step that asked for it.
-            let v_heading = rest_text.clone();
-            let v = match self.integrate_nested(&rest, || {
-                format!("find v: ∫ {v_heading} dx")
-            }) {
+            // indented under the step that asked for it. The label stays
+            // bare: the nested header renders `find v: sin(x)` — the
+            // integrand once, no doubled colon.
+            let v = match self.integrate_nested(&rest, || String::from("find v")) {
                 Ok(value) => value,
                 Err(IntegrationError::Timeout) => return Err(IntegrationError::Timeout),
                 Err(_) => {
@@ -1449,23 +1492,19 @@ where
             let uv_text = describe_signed(&uv);
             let inner_integrand = helpers::mul(v.clone(), du.clone());
             let inner_text = describe_signed(&inner_integrand);
-            // By parts, ∫ u dv = u v − ∫ v du: the assembled `u v` term is
-            // what the technique has produced so far, and the description
-            // names exactly what still has to be integrated.
-            self.step(
+            // By parts, ∫ u dv = u v − ∫ v du: the step states the whole
+            // equation — the assembled u v term *and* the integral still to
+            // solve — instead of ending in a bare `=> u v` that hides where
+            // the rest of the answer comes from. The nested block below
+            // derives the pending integral, and `combine` closes the term.
+            self.step_without_result(
                 "assemble u v",
-                || {
-                    format!(
-                        "∫ u dv = u v − ∫ v du, so u v = {uv_text} and ∫ v du = ∫ {inner_text} dx"
-                    )
-                },
-                || uv.clone(),
+                || format!("∫ u dv = u v − ∫ v du = {uv_text} − ∫ {inner_text} dx"),
             );
             // The remaining integral, again as indented working, followed by
             // the combination its result feeds: u v − ∫ v du.
-            let remaining_heading = inner_text.clone();
             let inner = match self.integrate_nested(&inner_integrand, || {
-                format!("the remaining integral: ∫ {remaining_heading} dx")
+                String::from("the remaining integral")
             }) {
                 Ok(value) => value,
                 Err(IntegrationError::Timeout) => return Err(IntegrationError::Timeout),
