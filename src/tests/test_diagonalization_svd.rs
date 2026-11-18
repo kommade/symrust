@@ -113,7 +113,7 @@ fn static_svd_reconstructs_a_diagonal_matrix() {
     let u = svd.left_singular_vectors();
     let s = svd.sigma();
     let v = svd.right_singular_vectors();
-    let reconstructed = u.mul_matrix(&s).mul_matrix(&v.transpose());
+    let reconstructed = u.mul_matrix(s).mul_matrix(&v.transpose());
     for row in 0..2 {
         for column in 0..2 {
             assert_eq!(
@@ -137,7 +137,7 @@ fn dynamic_svd_reconstructs_the_matrix() {
     let u = svd.left_singular_vectors();
     let s = svd.sigma();
     let v = svd.right_singular_vectors();
-    let reconstructed = u.mul_matrix(&s).mul_matrix(&v.transpose());
+    let reconstructed = u.mul_matrix(s).mul_matrix(&v.transpose());
     assert_eq!(reconstructed, matrix, "U S V^T must equal A");
 
     // Singular values are non-negative and descending.
@@ -154,7 +154,7 @@ fn svd_of_identity_is_identity() {
     assert_eq!(svd.singular_values(), &[rat(1), rat(1)]);
     let reconstructed = svd
         .left_singular_vectors()
-        .mul_matrix(&svd.sigma())
+        .mul_matrix(svd.sigma())
         .mul_matrix(&svd.right_singular_vectors().transpose());
     for row in 0..2 {
         for column in 0..2 {

@@ -82,7 +82,7 @@ pub trait ExactField:
 
     /// A approximate conversion to `f64` (used by the numerical SVD fallback and
     /// the default `sqrt`/`try_sqrt`).
-    fn as_f64(self) -> f64;
+    fn as_f64(&self) -> f64;
 
     /// Whether this value is zero.
     ///
@@ -242,7 +242,7 @@ impl<T: ExactField> Matrixable for T {}
 /// [`FloatType`] alone covers constructing and evaluating a leaf; the
 /// simplifier additionally negates coefficients (a negation is the tree
 /// `0 - x`), orders terms by degree ([`PartialOrd`]) and renders them
-/// ([`Display`]). The blanket implementation keeps every call site down to a
+/// ([`std::fmt::Display`]). The blanket implementation keeps every call site down to a
 /// single bound — `T: SymbolicLeaf` — instead of the four separate traits it
 /// used to spell out.
 ///

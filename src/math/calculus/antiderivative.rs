@@ -513,7 +513,7 @@ where
         self.tick()?;
         let simplified = node.clone().simplify(false, true);
         let key = describe(&simplified);
-        if self.active.iter().any(|existing| *existing == key) {
+        if self.active.contains(&key) {
             // Re-entering the same integral means the recursion is cyclic; the
             // technique that caused it needs to bail out.
             return Err(IntegrationError::Unsupported(key));
@@ -547,11 +547,10 @@ where
             return Ok(result);
         }
         // `ln(1/u)` is `-ln(u)`.
-        if let Shape::Operator(Token::Function(Func::Ln), _, argument) = helpers::shape(node) {
-            if let Shape::Operator(Token::Operator(Op::Div), numerator, denominator) =
+        if let Shape::Operator(Token::Function(Func::Ln), _, argument) = helpers::shape(node)
+            && let Shape::Operator(Token::Operator(Op::Div), numerator, denominator) =
                 helpers::shape(&argument)
-            {
-                if helpers::is_one(&numerator) {
+                && helpers::is_one(&numerator) {
                     let rewritten = helpers::negate(helpers::function(Func::Ln, denominator));
                     self.step(
                         "logarithm rewrite",
@@ -560,8 +559,6 @@ where
                     );
                     return self.integrate(&rewritten);
                 }
-            }
-        }
         // `log_b(u)` is `ln(u) / ln(b)`: rewrite it so the change of base is
         // visible and the natural logarithm is integrated normally.
         if let Shape::Operator(Token::Function(Func::Log(base)), _, argument) = helpers::shape(node)
@@ -571,12 +568,11 @@ where
             return Ok(helpers::div(numerator, denominator));
         }
         // `-u` integrates to the negation of the integral of `u`.
-        if let Shape::Operator(Token::Operator(Op::Sub), left, right) = helpers::shape(node) {
-            if helpers::is_zero(&left) {
+        if let Shape::Operator(Token::Operator(Op::Sub), left, right) = helpers::shape(node)
+            && helpers::is_zero(&left) {
                 let integral = self.integrate(&right)?;
                 return Ok(integral.negate());
             }
-        }
         // Integrate sums term by term.
         if let Some(terms) = helpers::sum_terms(node) {
             let term_count = terms.len();
@@ -608,8 +604,8 @@ where
         }
         // Pull constant factors out of products.
         let (constant, dependent) = helpers::pull_out_constant(node);
-        if let Some(value) = constant {
-            if !helpers::equal(&dependent, node) {
+        if let Some(value) = constant
+            && !helpers::equal(&dependent, node) {
                 if helpers::is_one(&dependent) {
                     return Ok(helpers::multiply_by(self.variable_node(), value));
                 }
@@ -626,7 +622,6 @@ where
                 let scaled = helpers::scale(integral, value.clone());
                 return Ok(scaled);
             }
-        }
         // Expand small integer powers of products so the techniques below can
         // see the individual factors (for example `(x ln(x))^2`). The expansion
         // is integrated directly because simplifying it would fold it back.
@@ -744,16 +739,13 @@ where
                 // power rule (e.g. `sqrt(1 - x) ^ 3` = `(1 - x)^(3/2)`).
                 if let Shape::Operator(Token::Function(Func::Sqrt), _, argument) =
                     helpers::shape(&base)
-                {
-                    if helpers::linear_coefficients(&argument).is_some() {
-                        if let Some(value) = helpers::constant_value(&exponent) {
+                    && helpers::linear_coefficients(&argument).is_some()
+                        && let Some(value) = helpers::constant_value(&exponent) {
                             let halved = helpers::float(value * float_from::<T>(0.5));
                             if let Some(result) = self.power_of(argument, halved) {
                                 return Some(result);
                             }
                         }
-                    }
-                }
                 self.power_of(base, exponent)
             }
             Shape::Operator(Token::Operator(Op::Div), numerator, denominator) => {
@@ -773,20 +765,16 @@ where
             }
             Shape::Operator(Token::Function(func), _, arg) => {
                 // `sqrt(u^n)` is `u^(n/2)` for a linear `u`.
-                if matches!(func, Func::Sqrt) {
-                    if let Shape::Operator(Token::Operator(Op::Pow), base, exponent) =
+                if matches!(func, Func::Sqrt)
+                    && let Shape::Operator(Token::Operator(Op::Pow), base, exponent) =
                         helpers::shape(&arg)
-                    {
-                        if helpers::linear_coefficients(&base).is_some() {
-                            if let Some(value) = helpers::constant_value(&exponent) {
+                        && helpers::linear_coefficients(&base).is_some()
+                            && let Some(value) = helpers::constant_value(&exponent) {
                                 let halved = helpers::float(value * float_from::<T>(0.5));
                                 if let Some(result) = self.power_of(base, halved) {
                                     return Some(result);
                                 }
                             }
-                        }
-                    }
-                }
                 let (slope, _) = helpers::linear_coefficients(&arg)?;
                 let antiderivative = antiderivative_of_function(&func, arg.clone())?;
                 Some(helpers::divide_by(antiderivative, slope))
@@ -1140,11 +1128,10 @@ where
                     if let (Some(inner), Some(antiderivative)) = (
                         helpers::differentiate(&argument),
                         antiderivative_of_function(&func, argument.clone()),
-                    ) {
-                        if let Some(ratio) = ratio_of(&inner) {
+                    )
+                        && let Some(ratio) = ratio_of(&inner) {
                             return Ok(Some(helpers::multiply_by(antiderivative, ratio)));
                         }
-                    }
                 }
                 Shape::Operator(Token::Operator(Op::Pow), base, exponent) => {
                     if let Some(constant) = helpers::constant_value(&base) {
@@ -1155,8 +1142,8 @@ where
                         if let (Some(inner), is_e) = (
                             helpers::differentiate(&exponent),
                             constant.float_equal(&T::e()),
-                        ) {
-                            if let Some(ratio) = ratio_of(&inner) {
+                        )
+                            && let Some(ratio) = ratio_of(&inner) {
                                 let antiderivative = if is_e {
                                     factor.clone()
                                 } else {
@@ -1166,12 +1153,11 @@ where
                                 };
                                 return Ok(Some(helpers::multiply_by(antiderivative, ratio)));
                             }
-                        }
                     } else if let (Some(inner), Some(exponent_value)) = (
                         helpers::differentiate(&base),
                         helpers::constant_value(&exponent),
-                    ) {
-                        if let Some(ratio) = ratio_of(&inner) {
+                    )
+                        && let Some(ratio) = ratio_of(&inner) {
                             let antiderivative = if exponent_value.is_neg_one() {
                                 helpers::function(Func::Ln, base)
                             } else {
@@ -1185,20 +1171,18 @@ where
                             };
                             return Ok(Some(helpers::multiply_by(antiderivative, ratio)));
                         }
-                    }
                 }
                 _ => {}
             }
             // `f(x) * f'(x)` integrates to `f(x)^2 / 2`.
-            if let Some(derivative) = helpers::differentiate(factor) {
-                if let Some(ratio) = ratio_of(&derivative) {
+            if let Some(derivative) = helpers::differentiate(factor)
+                && let Some(ratio) = ratio_of(&derivative) {
                     let square = helpers::pow(factor.clone(), number(2));
                     return Ok(Some(helpers::divide_by(
                         helpers::multiply_by(square, ratio),
                         float_from::<T>(2.0),
                     )));
                 }
-            }
         }
         Ok(None)
     }
@@ -1294,11 +1278,10 @@ fn is_reciprocal_power<T>(node: &Node<T>) -> bool
 where
     T: SymbolicLeaf,
 {
-    if let Shape::Operator(Token::Operator(Op::Pow), _base, exponent) = helpers::shape(node) {
-        if let Some(value) = helpers::constant_value(&exponent) {
+    if let Shape::Operator(Token::Operator(Op::Pow), _base, exponent) = helpers::shape(node)
+        && let Some(value) = helpers::constant_value(&exponent) {
             return value.is_negative();
         }
-    }
     false
 }
 

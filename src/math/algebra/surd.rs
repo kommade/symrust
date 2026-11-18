@@ -71,7 +71,7 @@ impl ExactField for Surd {
         Self::rational(Rat::ONE)
     }
 
-    fn as_f64(self) -> f64 {
+    fn as_f64(&self) -> f64 {
         self.a.to_f64() + self.b.to_f64() * (self.k as f64).sqrt()
     }
 
@@ -164,6 +164,10 @@ impl Surd {
         }
     }
 
+    /// Fallible checked negation: the counterpart of the `std::ops::Neg` impl
+    /// above, so the inherent name is deliberate (same for `add`, `sub`,
+    /// `mul` and `div` below, which return `Option` on overflow).
+    #[allow(clippy::should_implement_trait)]
     pub fn neg(self) -> Self {
         Self {
             k: self.k,
@@ -181,15 +185,18 @@ impl Surd {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn add(self, other: Self) -> Option<Self> {
         let k = self.common_field(other)?;
         Self::new(k, self.a.add(other.a)?, self.b.add(other.b)?)
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn sub(self, other: Self) -> Option<Self> {
         self.add(other.neg())
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn mul(self, other: Self) -> Option<Self> {
         let k = self.common_field(other)?;
         // (a1 + b1 s)(a2 + b2 s) = a1a2 + k b1b2 + (a1b2 + a2b1) s
@@ -202,6 +209,7 @@ impl Surd {
         Self::new(k, a, b)
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn div(self, other: Self) -> Option<Self> {
         let k = self.common_field(other)?;
         // Multiply both sides by the conjugate of the divisor.

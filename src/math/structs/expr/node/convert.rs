@@ -38,8 +38,8 @@ impl<T: FloatType + Display> Node<T> {
                     Func::Atan => Func::Atan,
                     Func::Sqrt => Func::Sqrt,
                     Func::Ln => Func::Ln,
-                    Func::Root(index) => Func::Root(Real::from(index.to_real())),
-                    Func::Log(base) => Func::Log(Real::from(base.to_real())),
+                    Func::Root(index) => Func::Root(index.to_real()),
+                    Func::Log(base) => Func::Log(base.to_real()),
                 }),
                 Token::Operator(op) => Token::Operator(op.clone()),
                 Token::Constant(c) => Token::Constant(c.clone()),
@@ -79,9 +79,8 @@ fn convert_matrix<T: FloatType + Display>(
 ) -> crate::math::algebra::linear::Matrix<Expr> {
     use crate::math::algebra::linear::Matrix;
     let mut data = Vec::with_capacity(matrix.rows() * matrix.columns());
-    for row in 0..matrix.rows() {
-        for column in 0..matrix.columns() {
-            let entry = &matrix[row][column];
+    for row_slice in (0..matrix.rows()).map(|row| &matrix[row]) {
+        for entry in row_slice.iter() {
             data.push(Expr::from_node(from_typed_node(entry.tree())));
         }
     }
@@ -113,9 +112,8 @@ pub(super) fn matrix_from_real<T: FloatType + Display>(
 ) -> crate::math::algebra::linear::Matrix<Expr<T>> {
     use crate::math::algebra::linear::Matrix;
     let mut data = Vec::with_capacity(matrix.rows() * matrix.columns());
-    for row in 0..matrix.rows() {
-        for column in 0..matrix.columns() {
-            let entry = &matrix[row][column];
+    for row_slice in (0..matrix.rows()).map(|row| &matrix[row]) {
+        for entry in row_slice.iter() {
             data.push(Expr::<T>::from_node(Node::<T>::from_real(entry.tree())));
         }
     }

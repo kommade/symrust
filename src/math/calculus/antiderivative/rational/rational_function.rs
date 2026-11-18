@@ -170,7 +170,7 @@ where
             return None;
         }
 
-        let solution: Vec<Rat> = solve_partial_fractions(&columns, &numerator)?;
+        let solution: Vec<Rat> = solve_partial_fractions(&columns, numerator)?;
 
         let coefficient_at = |index: usize, power: usize, basis: usize| {
             descriptors.iter().position(|descriptor| {

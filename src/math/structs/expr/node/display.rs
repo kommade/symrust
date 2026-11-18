@@ -80,11 +80,11 @@ fn write_matrix_entries<T: SymbolicLeaf>(
 ) -> std::fmt::Result {
     for row in 0..matrix.rows() {
         write!(f, "[")?;
-        for column in 0..matrix.columns() {
+        for (column, entry_ref) in matrix[row].iter().enumerate() {
             if column > 0 {
                 write!(f, " ")?;
             }
-            let entry = matrix[row][column].clone();
+            let entry = entry_ref.clone();
             let shown = match divisor {
                 Some(divisor) => tidy(Expr::from_node(
                     entry.tree().clone().div(divisor.tree().clone()),
@@ -111,8 +111,7 @@ fn common_factor<T: SymbolicLeaf>(
     let mut denominator = 1i128;
     let mut seen = false;
     for row in 0..matrix.rows() {
-        for column in 0..matrix.columns() {
-            let entry = &matrix[row][column];
+        for entry in matrix[row].iter() {
             if entry.has_independent() {
                 return None;
             }
@@ -125,7 +124,7 @@ fn common_factor<T: SymbolicLeaf>(
             if seen {
                 // gcd(p/q, r/s) = gcd(p*s, r*q) / (q*s), then reduced.
                 numerator = integer_gcd(numerator * den, num * denominator);
-                denominator = denominator * den;
+                denominator *= den;
                 let reduce = integer_gcd(numerator, denominator);
                 numerator /= reduce;
                 denominator /= reduce;
@@ -160,8 +159,7 @@ pub(crate) fn matrix_to_latex<T: SymbolicLeaf>(
     let mut rows = Vec::with_capacity(matrix.rows());
     for row in 0..matrix.rows() {
         let mut entries = Vec::with_capacity(matrix.columns());
-        for column in 0..matrix.columns() {
-            let entry = &matrix[row][column];
+        for entry in matrix[row].iter() {
             entries.push(entry.to_latex().unwrap_or_else(|_| entry.to_string()));
         }
         rows.push(entries.join(" & "));
@@ -239,13 +237,12 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                             format!("{{{left_str}}}^{{{right_str}}}")
                         }
                         Op::Add | Op::Sub => {
-                            if unnecessary_brackets(&left_str) {
-                                if let Some(stripped) =
+                            if unnecessary_brackets(&left_str)
+                                && let Some(stripped) =
                                     left_str.strip_prefix('(').and_then(|s| s.strip_suffix(')'))
                                 {
                                     left_str = stripped.to_string();
                                 }
-                            }
                             if left_str == "0" && *op == Op::Sub {
                                 if right.is_operator()
                                     && !right.is_fn()
@@ -256,14 +253,13 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                                     format!("-{right_str}")
                                 }
                             } else {
-                                if unnecessary_brackets(&right_str) {
-                                    if let Some(stripped) = right_str
+                                if unnecessary_brackets(&right_str)
+                                    && let Some(stripped) = right_str
                                         .strip_prefix('(')
                                         .and_then(|s| s.strip_suffix(')'))
                                     {
                                         right_str = stripped.to_string();
                                     }
-                                }
                                 format!("({left_str} {op} {right_str})")
                             }
                         }
@@ -276,13 +272,12 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                                 && !left.is_operator_type(Op::ImplicitMul)
                                 && !left.is_operator_type(Op::Pow)
                             {
-                                if unnecessary_brackets(&left_str) {
-                                    if let Some(stripped) =
+                                if unnecessary_brackets(&left_str)
+                                    && let Some(stripped) =
                                         left_str.strip_prefix('(').and_then(|s| s.strip_suffix(')'))
                                     {
                                         left_str = stripped.to_string();
                                     }
-                                }
                                 left_str = format!("( {left_str} )");
                             }
                             if right.is_op_node()
@@ -291,14 +286,13 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                                 && !right.is_operator_type(Op::ImplicitMul)
                                 && !right.is_operator_type(Op::Pow)
                             {
-                                if unnecessary_brackets(&right_str) {
-                                    if let Some(stripped) = right_str
+                                if unnecessary_brackets(&right_str)
+                                    && let Some(stripped) = right_str
                                         .strip_prefix('(')
                                         .and_then(|s| s.strip_suffix(')'))
                                     {
                                         right_str = stripped.to_string();
                                     }
-                                }
                                 right_str = format!("( {right_str} )");
                             }
                             let left_is_one = left.is_one();
@@ -346,13 +340,12 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                     },
                     _ => return Err(NodeError::WrongToken("operator".to_string())),
                 };
-                if unnecessary_brackets(&result) {
-                    if let Some(stripped) =
+                if unnecessary_brackets(&result)
+                    && let Some(stripped) =
                         result.strip_prefix('(').and_then(|s| s.strip_suffix(')'))
                     {
                         result = stripped.to_string();
                     }
-                }
                 Ok(result)
             }
             NodeValue::Empty => Ok(String::new()),
@@ -412,13 +405,12 @@ impl<T: SymbolicLeaf> Display for NodeInner<T> {
                                 format!("{left_str} ^ {right_str}")
                             }
                             Op::Add | Op::Sub => {
-                                if unnecessary_brackets(&left_str) {
-                                    if let Some(stripped) =
+                                if unnecessary_brackets(&left_str)
+                                    && let Some(stripped) =
                                         left_str.strip_prefix('(').and_then(|s| s.strip_suffix(')'))
                                     {
                                         left_str = stripped.to_string();
                                     }
-                                }
                                 if left_str == "0" && *op == Op::Sub {
                                     // `0 - x` is the internal form of a negation.
                                     // A function call or a plain atom reads best
@@ -432,14 +424,13 @@ impl<T: SymbolicLeaf> Display for NodeInner<T> {
                                         format!("-{right_str}")
                                     }
                                 } else {
-                                    if unnecessary_brackets(&right_str) {
-                                        if let Some(stripped) = right_str
+                                    if unnecessary_brackets(&right_str)
+                                        && let Some(stripped) = right_str
                                             .strip_prefix('(')
                                             .and_then(|s| s.strip_suffix(')'))
                                         {
                                             right_str = stripped.to_string();
                                         }
-                                    }
                                     // Subtracting a negation is adding: `a - (-b)`
                                     // reads better as `a + b`, and `a - (-(b c))`
                                     // as `a + b c`. Without this the inner `0 -`
@@ -473,14 +464,13 @@ impl<T: SymbolicLeaf> Display for NodeInner<T> {
                                     && !left.is_operator_type(Op::ImplicitMul)
                                     && !left.is_operator_type(Op::Pow)
                                 {
-                                    if unnecessary_brackets(&left_str) {
-                                        if let Some(stripped) = left_str
+                                    if unnecessary_brackets(&left_str)
+                                        && let Some(stripped) = left_str
                                             .strip_prefix('(')
                                             .and_then(|s| s.strip_suffix(')'))
                                         {
                                             left_str = stripped.to_string();
                                         }
-                                    }
                                     left_str = format!("({left_str})");
                                 }
                                 if right.is_op_node()
@@ -489,14 +479,13 @@ impl<T: SymbolicLeaf> Display for NodeInner<T> {
                                     && !right.is_operator_type(Op::ImplicitMul)
                                     && !right.is_operator_type(Op::Pow)
                                 {
-                                    if unnecessary_brackets(&right_str) {
-                                        if let Some(stripped) = right_str
+                                    if unnecessary_brackets(&right_str)
+                                        && let Some(stripped) = right_str
                                             .strip_prefix('(')
                                             .and_then(|s| s.strip_suffix(')'))
                                         {
                                             right_str = stripped.to_string();
                                         }
-                                    }
                                     right_str = format!("({right_str})");
                                 }
                                 if left.is_operator_type(Op::Pow) && right.is_operator_type(Op::Pow)
@@ -562,14 +551,13 @@ impl<T: SymbolicLeaf> Display for NodeInner<T> {
                                     && !left.is_operator_type(Op::ImplicitMul)
                                     && !left.is_operator_type(Op::Pow)
                                 {
-                                    if unnecessary_brackets(&left_str) {
-                                        if let Some(stripped) = left_str
+                                    if unnecessary_brackets(&left_str)
+                                        && let Some(stripped) = left_str
                                             .strip_prefix('(')
                                             .and_then(|s| s.strip_suffix(')'))
                                         {
                                             left_str = stripped.to_string();
                                         }
-                                    }
                                     left_str = format!("({left_str})");
                                 }
                                 let mut needs_paren = false;
@@ -577,14 +565,13 @@ impl<T: SymbolicLeaf> Display for NodeInner<T> {
                                     if !right.is_operator_type(Op::Pow) {
                                         needs_paren = true;
                                     }
-                                    if unnecessary_brackets(&right_str) {
-                                        if let Some(stripped) = right_str
+                                    if unnecessary_brackets(&right_str)
+                                        && let Some(stripped) = right_str
                                             .strip_prefix('(')
                                             .and_then(|s| s.strip_suffix(')'))
                                         {
                                             right_str = stripped.to_string();
                                         }
-                                    }
                                 }
                                 if needs_paren {
                                     right_str = format!("({right_str})");
@@ -596,13 +583,12 @@ impl<T: SymbolicLeaf> Display for NodeInner<T> {
                     Token::Function(_) => format!("{op_str}({right_str})"),
                     _ => format!("{left_str}{op_str}{right_str}"),
                 };
-                if unnecessary_brackets(&result) {
-                    if let Some(stripped) =
+                if unnecessary_brackets(&result)
+                    && let Some(stripped) =
                         result.strip_prefix('(').and_then(|s| s.strip_suffix(')'))
                     {
                         result = stripped.to_string();
                     }
-                }
                 write!(f, "{result}")
             }
             NodeValue::Empty => write!(f, ""),

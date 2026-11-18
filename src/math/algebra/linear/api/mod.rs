@@ -101,8 +101,8 @@ impl <T> Matrix<T> where T: Matrixable {
     {
         let mut result = Self::new(matrix.row_count(), matrix.column_count());
         for row in 0..matrix.row_count() {
-            for column in 0..matrix.column_count() {
-                result[row][column] = matrix.entry(row, column);
+            for (column, slot) in result[row].iter_mut().enumerate() {
+                *slot = matrix.entry(row, column);
             }
         }
         result

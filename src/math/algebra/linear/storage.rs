@@ -121,18 +121,18 @@ pub(crate) fn vec_solve_system<T: Matrixable>(matrix: &VecMatrix<T>, rhs: &[T]) 
         rank += 1;
     }
 
-    for row in 0..rows {
+    for (row, value) in values.iter().enumerate().take(rows) {
         if (0..columns).all(|column| matrix.entry(row, column).is_zero_value())
-            && !values[row].is_zero_value()
+            && !value.is_zero_value()
         {
             return None;
         }
     }
 
     let mut solution = vec![T::default(); columns];
-    for row in 0..rank {
+    for (row, value) in values.iter().enumerate().take(rank) {
         if let Some(column) = (0..columns).find(|&column| !matrix.entry(row, column).is_zero_value()) {
-            solution[column] = values[row].clone();
+            solution[column] = value.clone();
         }
     }
     Some(solution)

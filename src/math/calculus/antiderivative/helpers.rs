@@ -310,15 +310,12 @@ where
         Shape::Operator(Token::Function(func), _, argument) => {
             let argument = simplify_deep_inner(&argument, depth + 1).simplify(false, true);
             // ln(1/u) = -ln(u)
-            if matches!(func, Func::Ln) {
-                if let Shape::Operator(Token::Operator(Op::Div), numerator, denominator) =
+            if matches!(func, Func::Ln)
+                && let Shape::Operator(Token::Operator(Op::Div), numerator, denominator) =
                     shape(&argument)
-                {
-                    if is_one(&numerator) {
+                    && is_one(&numerator) {
                         return function(func, denominator).negate();
                     }
-                }
-            }
             function(func, argument)
         }
         Shape::Operator(Token::Operator(op), left, right) => {
@@ -330,13 +327,11 @@ where
                 _ => NodeInner::from_operation(op, left, right).simplify(false, true),
             };
             // e^(ln(u)) = u
-            if let Shape::Operator(Token::Operator(Op::Pow), base, exponent) = shape(&simplified) {
-                if let Shape::Operator(Token::Function(Func::Ln), _, argument) = shape(&exponent) {
-                    if constant_value(&base).is_some_and(|value| value.float_equal(&T::e())) {
+            if let Shape::Operator(Token::Operator(Op::Pow), base, exponent) = shape(&simplified)
+                && let Shape::Operator(Token::Function(Func::Ln), _, argument) = shape(&exponent)
+                    && constant_value(&base).is_some_and(|value| value.float_equal(&T::e())) {
                         return argument;
                     }
-                }
-            }
             normalise_product(&simplified)
         }
         _ => node.clone(),
@@ -403,12 +398,11 @@ where
     if let Some(value) = numeric_value(node) {
         return (value, None);
     }
-    if let Shape::Operator(Token::Operator(Op::Sub), left, right) = shape(node) {
-        if is_zero(&left) {
+    if let Shape::Operator(Token::Operator(Op::Sub), left, right) = shape(node)
+        && is_zero(&left) {
             let (value, rest) = split_numeric(&right);
             return (-value, rest);
         }
-    }
     (T::one(), Some(node.clone()))
 }
 

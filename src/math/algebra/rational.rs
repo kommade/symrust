@@ -157,7 +157,7 @@ impl ExactField for Rat {
         Self::ONE
     }
 
-    fn as_f64(self) -> f64 {
+    fn as_f64(&self) -> f64 {
         self.to_f64()
     }
 
@@ -224,7 +224,7 @@ impl Rat {
         Self::from_f64(value.as_f64())
     }
 
-    /// Recover a rational from the crate's [`Real`](crate::math::numeric::Real) float type.
+    /// Recover a rational from the crate's [`Real`] float type.
     pub fn from_real(value: &crate::math::numeric::Real) -> Option<Self> {
         Self::from_float(value.as_inner())
     }
@@ -318,18 +318,24 @@ impl Rat {
         Self::new(numerator, best.1)
     }
 
+    /// Fallible checked addition (`None` on overflow). The panic-free checked
+    /// counterpart of the `std::ops::Add` impl, so the inherent name `add` is
+    /// deliberate; the same holds for `sub`, `mul`, `div` and `neg` below.
+    #[allow(clippy::should_implement_trait)]
     pub fn add(self, other: Self) -> Option<Self> {
         let left = self.num.checked_mul(other.den)?;
         let right = other.num.checked_mul(self.den)?;
         Self::new(left.checked_add(right)?, self.den.checked_mul(other.den)?)
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn sub(self, other: Self) -> Option<Self> {
         let left = self.num.checked_mul(other.den)?;
         let right = other.num.checked_mul(self.den)?;
         Self::new(left.checked_sub(right)?, self.den.checked_mul(other.den)?)
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn mul(self, other: Self) -> Option<Self> {
         Self::new(
             self.num.checked_mul(other.num)?,
@@ -337,6 +343,7 @@ impl Rat {
         )
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn div(self, other: Self) -> Option<Self> {
         if other.num == 0 {
             return None;
@@ -351,6 +358,7 @@ impl Rat {
         Self::new(self.den, self.num)
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn neg(self) -> Self {
         Self {
             num: -self.num,
@@ -399,7 +407,7 @@ impl Rat {
         arpfloat::Float::from_f64(self.to_f64()).cast(arpfloat::FP128)
     }
 
-    /// The value as the crate's [`Real`](crate::math::numeric::Real) float type.
+    /// The value as the crate's [`Real`] float type.
     pub fn to_real(&self) -> crate::math::numeric::Real {
         crate::math::numeric::Real::from_f64(self.to_f64())
     }

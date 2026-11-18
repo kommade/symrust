@@ -116,11 +116,10 @@ where
     T: SymbolicLeaf,
 {
     // C first: a quartic that splits over a quadratic extension.
-    if factor.degree() == Some(4) {
-        if let Some(term) = quartic_term(coefficients, factor, variable) {
+    if factor.degree() == Some(4)
+        && let Some(term) = quartic_term(coefficients, factor, variable) {
             return Some(term);
         }
-    }
     // B as the fallback (feature-gated; warns when the feature is off).
     general_term_algebraic(coefficients, factor, variable)
 }
@@ -192,12 +191,10 @@ where
             // `(sqrt(linear))^k`
             if let Shape::Operator(Token::Function(Func::Sqrt), _, argument) =
                 helpers::shape(&base)
-            {
-                if helpers::linear_coefficients(&argument).is_some() {
+                && helpers::linear_coefficients(&argument).is_some() {
                     let value = helpers::constant_value(&exponent)?;
                     return Some((argument, value * float_from::<T>(0.5)));
                 }
-            }
             // `(linear)^p`
             if helpers::linear_coefficients(&base).is_some() {
                 let value = helpers::constant_value(&exponent)?;

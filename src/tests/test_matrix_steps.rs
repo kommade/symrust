@@ -62,9 +62,9 @@ fn rref_records_steps() {
     // expressions may render differently.
     let expected = source.rref();
     let result = solution.result().to_string();
-    for row in 0..2 {
-        for column in 0..2 {
-            let want = expected[row][column].clone().simplify(true);
+    for (row, expected_row) in (0..2).map(|row| &expected[row]).enumerate() {
+        for (column, cell) in expected_row.iter().enumerate() {
+            let want = cell.clone().simplify(true);
             let want_value = want.evaluate(0.0_f64).value();
             assert!(
                 result.contains(&want.to_string()) || want_value.is_some(),

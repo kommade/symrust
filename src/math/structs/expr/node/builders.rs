@@ -36,7 +36,7 @@ impl<T: FloatType + std::fmt::Display> Node<T> {
     ///
     /// Accepts the leaf type itself or anything that converts to it. A decimal
     /// literal parses into every leaf type, so `f64` values convert too; that
-    /// path goes through the same [`FloatBridge`] the parser uses.
+    /// path goes through the same bridge the parser uses.
     #[must_use]
     pub fn float(value: impl Into<T>) -> Self {
         NodeInner::from_float(value.into()).wrap()

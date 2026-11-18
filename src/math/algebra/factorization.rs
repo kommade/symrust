@@ -80,8 +80,8 @@ pub(crate) fn split_quartic(poly: &Poly) -> Option<(SurdQuadratic, SurdQuadratic
     let constant = poly.coeff(0);
 
     // Biquadratic: x^4 + q x^2 + r = (x^2 + u x + s)(x^2 - u x + s).
-    if cubed.is_zero() && linear.is_zero() && !constant.is_zero() {
-        if let Some(root) = constant.sqrt_exact() {
+    if cubed.is_zero() && linear.is_zero() && !constant.is_zero()
+        && let Some(root) = constant.sqrt_exact() {
             for shift in [root, root.neg()] {
                 let Some(square) = shift.mul(Rat::from_i64(2))?.sub(squared) else {
                     continue;
@@ -105,7 +105,6 @@ pub(crate) fn split_quartic(poly: &Poly) -> Option<(SurdQuadratic, SurdQuadratic
                 }
             }
         }
-    }
 
     // Palindromic: x^4 + b x^3 + c x^2 + b x + 1 factors as
     // (x^2 + u x + 1)(x^2 + v x + 1) with u + v = b and u v = c - 2.
@@ -203,10 +202,7 @@ fn factorise_inner(poly: &Poly, use_cyclotomic: bool) -> Option<Factorization> {
         factors.push((Factor::Linear { root: Rat::ZERO }, zero_multiplicity));
     }
 
-    loop {
-        let Some(degree) = remaining.degree() else {
-            break;
-        };
+    while let Some(degree) = remaining.degree() {
         if degree == 0 {
             break;
         }
@@ -215,10 +211,7 @@ fn factorise_inner(poly: &Poly, use_cyclotomic: bool) -> Option<Factorization> {
         };
         let factor_poly = linear_factor(root);
         let mut multiplicity = 0;
-        loop {
-            let Some((quotient, remainder)) = remaining.div_rem(&factor_poly) else {
-                break;
-            };
+        while let Some((quotient, remainder)) = remaining.div_rem(&factor_poly) {
             if !remainder.is_zero() {
                 break;
             }
@@ -251,8 +244,8 @@ fn factorise_inner(poly: &Poly, use_cyclotomic: bool) -> Option<Factorization> {
             // coefficients). The factors are re-factored WITHOUT re-running
             // cyclotomic detection, so a factor that is itself `x^m ± 1`
             // (e.g. Phi_16 = x^8 + 1) cannot recurse forever.
-            if use_cyclotomic {
-                if let Some(cyclotomics) = cyclotomic_factors(&remaining) {
+            if use_cyclotomic
+                && let Some(cyclotomics) = cyclotomic_factors(&remaining) {
                     for (phi, multiplicity) in cyclotomics {
                         match factorise_inner(&phi, false) {
                             Some(inner) => {
@@ -265,19 +258,16 @@ fn factorise_inner(poly: &Poly, use_cyclotomic: bool) -> Option<Factorization> {
                     }
                     return Some(Factorization { leading, factors });
                 }
-            }
             // Repeated factors: `(q^2)` can be recognised by taking a square
             // root of the remaining polynomial.
-            if degree % 2 == 0 {
-                if let Some(root) = remaining.square_root() {
-                    if let Some(inner) = factorise_inner(&root, use_cyclotomic) {
+            if degree % 2 == 0
+                && let Some(root) = remaining.square_root()
+                    && let Some(inner) = factorise_inner(&root, use_cyclotomic) {
                         for (factor, multiplicity) in inner.factors {
                             factors.push((factor, multiplicity * 2));
                         }
                         return Some(Factorization { leading, factors });
                     }
-                }
-            }
             // Even polynomials can be factored through the substitution
             // `y = x^2`, which handles forms like `x^4 + 5x^2 + 4` and
             // `x^6 + 1 = (x^2 + 1)(x^4 - x^2 + 1)`.
@@ -376,7 +366,7 @@ fn factor_divisors(n: usize) -> Vec<usize> {
     let mut result = Vec::new();
     let mut d = 1;
     while d * d <= n {
-        if n % d == 0 {
+        if n.is_multiple_of(d) {
             result.push(d);
             if d != n / d {
                 result.push(n / d);
@@ -463,7 +453,7 @@ fn divisors(value: u128) -> Vec<i128> {
     }
     let mut candidate = 1u128;
     while candidate * candidate <= value {
-        if value % candidate == 0 {
+        if value.is_multiple_of(candidate) {
             result.push(candidate as i128);
             let other = value / candidate;
             if other != candidate {

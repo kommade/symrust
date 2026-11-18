@@ -134,9 +134,8 @@ impl <T, const N: usize> StaticSquareMatrixFns<T, N> for StaticMatrix<T, N, N> w
         let mut vectors = VectorSet::new();
         for lambda in eigenvalues {
             let mut shifted = self.clone();
-            for i in 0..N {
-                let value = shifted.data[i][i].clone() - lambda.clone();
-                shifted.data[i][i] = value;
+            for (i, diagonal) in shifted.data.iter_mut().enumerate() {
+                diagonal[i] = diagonal[i].clone() - lambda.clone();
             }
             let basis = shifted.null_space();
             if basis.is_empty() {

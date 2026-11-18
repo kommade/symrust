@@ -32,6 +32,7 @@
 use std::fmt::Display;
 
 use crate::math::algebra::linear::{Matrix, SquareMatrixFns};
+use crate::math::algebra::linear::traits::MatrixIndex;
 use crate::math::numeric::{ExactField, Matrixable, SymbolicLeaf};
 use crate::math::structs::expr::Expr;
 use crate::math::structs::expr::node::Node;
@@ -104,7 +105,8 @@ where
     /// This is the exact-arithmetic version of
     /// [`Matrix::row_reduce_solution`]: it works for any [`Matrixable`]
     /// coefficient type and does not simplify entries, which is correct for a
-    /// type like [`Rat`] where every operation is already exact.
+    /// type like [`Rat`](crate::math::algebra::rational::Rat) where every
+    /// operation is already exact.
     ///
     /// # Examples
     /// ```
@@ -389,7 +391,13 @@ where
 
     let mut q: Vec<Vec<T>> = Vec::with_capacity(columns);
     for j in 0..columns {
-        let mut vector: Vec<T> = (0..rows).map(|row| matrix[row][j].clone()).collect();
+        // Column `j` of the row-major data: every `columns`-th entry.
+        let mut vector: Vec<T> = matrix
+            .iter()
+            .skip(j)
+            .step_by(matrix.columns())
+            .cloned()
+            .collect();
 
         for (i, existing) in q.iter().enumerate() {
             let projection = dot_generic(existing, &vector);
@@ -510,9 +518,7 @@ where
 
     for column in 0..size {
         let pivot = (column..size).find(|&candidate| !augmented[candidate][column].is_zero_value());
-        let Some(pivot_row) = pivot else {
-            return None;
-        };
+        let pivot_row = pivot?;
         if pivot_row != column {
             for entry in 0..(2 * size) {
                 let left = augmented[column][entry].clone();
@@ -530,8 +536,8 @@ where
         let pivot_value = augmented[column][column].clone();
         if pivot_value != T::multiplicative_identity() {
             let inverse = T::multiplicative_identity() / pivot_value.clone();
-            for entry in 0..(2 * size) {
-                augmented[column][entry] = augmented[column][entry].clone() * inverse.clone();
+            for entry in augmented[column].iter_mut() {
+                *entry = entry.clone() * inverse.clone();
             }
             let snapshot = augmented.clone();
             recorder.record_step(
@@ -624,8 +630,8 @@ where
             let pivot_value = work[row][lead].clone();
             if pivot_value != T::multiplicative_identity() {
                 let inverse = T::multiplicative_identity() / pivot_value.clone();
-                for column in 0..columns {
-                    work[row][column] = work[row][column].clone() * inverse.clone();
+                for entry in work[row].iter_mut() {
+                    *entry = entry.clone() * inverse.clone();
                 }
                 let snapshot = work.clone();
                 recorder.record_step(
@@ -1060,9 +1066,7 @@ where
 
     for column in 0..size {
         let pivot = (column..size).find(|&candidate| !augmented[candidate][column].is_zero());
-        let Some(pivot_row) = pivot else {
-            return None;
-        };
+        let pivot_row = pivot?;
         swap_rows(
             &mut augmented,
             column,
@@ -1130,7 +1134,13 @@ where
     // Work on the columns of A, building Q column by column.
     let mut q: Vec<Vec<Expr<T>>> = Vec::with_capacity(columns);
     for j in 0..columns {
-        let mut vector: Vec<Expr<T>> = (0..rows).map(|row| matrix[row][j].clone()).collect();
+        // Column `j` of the row-major data: every `columns`-th entry.
+        let mut vector: Vec<Expr<T>> = matrix
+            .iter()
+            .skip(j)
+            .step_by(matrix.columns())
+            .cloned()
+            .collect();
 
         // Orthogonalise against every already-built q_i.
         for (i, existing) in q.iter().enumerate() {

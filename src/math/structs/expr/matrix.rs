@@ -397,10 +397,7 @@ where
     pub fn entries(&self) -> Result<Vec<Self>, ExprError> {
         Ok(self
             .vector_or_error()?
-            .as_slice()
-            .iter()
-            .cloned()
-            .collect())
+            .as_slice().to_vec())
     }
 
     /// The dot product of this vector with `other`.

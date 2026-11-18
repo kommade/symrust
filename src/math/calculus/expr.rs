@@ -103,14 +103,13 @@ pub(crate) fn function<T: SymbolicLeaf>(func: Func<T>, arg: Node<T>) -> Node<T> 
     // so tidy the argument here to keep generated antiderivatives readable.
     let arg = arg.simplify(false, true);
     // cos(-u) = cos(u) and the other functions are odd.
-    if let Shape::Operator(Token::Operator(Op::Sub), left, right) = shape(&arg) {
-        if is_zero(&left) {
+    if let Shape::Operator(Token::Operator(Op::Sub), left, right) = shape(&arg)
+        && is_zero(&left) {
             return match func {
                 Func::Sin | Func::Tan | Func::Csc | Func::Cot => negate(function(func, right)),
                 _ => function(func, right),
             };
         }
-    }
     NodeInner::from_function(func, arg)
 }
 
@@ -195,11 +194,10 @@ pub(crate) fn scale<T: SymbolicLeaf>(node: Node<T>, factor: T) -> Node<T> {
         return multiply_by(node, factor);
     }
     let (existing, dependent) = pull_out_constant(&node);
-    if let Some(existing) = existing {
-        if !equal(&dependent, &node) {
+    if let Some(existing) = existing
+        && !equal(&dependent, &node) {
             return multiply_by(dependent, existing * factor);
         }
-    }
     multiply_by(node, factor)
 }
 
@@ -331,11 +329,10 @@ fn find_variable<T: FloatType + Display>(node: &Node<T>, depth: usize) -> Option
         Shape::Operand(Token::Indp(letter)) => Some(letter),
         Shape::Operator(_, left, right) => {
             let left_is_empty = left.inner.borrow().is_empty();
-            if !left_is_empty {
-                if let Some(letter) = find_variable(&left, depth + 1) {
+            if !left_is_empty
+                && let Some(letter) = find_variable(&left, depth + 1) {
                     return Some(letter);
                 }
-            }
             find_variable(&right, depth + 1)
         }
         _ => None,
@@ -678,11 +675,10 @@ fn combine_constants<T: SymbolicLeaf>(op: &Op, left: Node<T>, right: Node<T>) ->
                 return left;
             }
             // Only fold an exact division; `3 / 2` stays a fraction.
-            if let (Some(a), Some(b)) = (left_value.to_i64(), right_value.to_i64()) {
-                if b != 0 && a % b == 0 {
+            if let (Some(a), Some(b)) = (left_value.to_i64(), right_value.to_i64())
+                && b != 0 && a % b == 0 {
                     return float(T::from_i64(a / b));
                 }
-            }
             NodeInner::from_operation(Op::Div, left, right)
         }
         _ => NodeInner::from_operation(op.clone(), left, right),

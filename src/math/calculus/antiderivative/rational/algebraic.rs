@@ -5,13 +5,11 @@
 //! exactly over the roots of unity. When the feature is compiled out, the module
 //! sets the "algebraic needed" flag so the caller can report a helpful error.
 
-use crate::{math::algebra::{
-        polynomial::Poly,
-        rational::Rat,
-    },
+use crate::{
+    math::algebra::rational::Rat,
     math::calculus::expr::float_from,
     math::numeric::SymbolicLeaf,
-    math::parse::lexer::Func ,
+    math::parse::lexer::Func,
     math::structs::expr::node::Node,
 };
 
@@ -19,6 +17,11 @@ use super::super::helpers;
 
 use super::rational_function::RationalFunction;
 use super::terms::{binomial, linear_power_parts};
+
+/// Only the feature-gated half below touches polynomials: without the
+/// `algebraic` feature this module contributes nothing but the fallback flag.
+#[cfg(feature = "algebraic")]
+use crate::math::algebra::polynomial::Poly;
 
 #[cfg(all(feature = "algebraic", feature = "complex"))]
 use crate::math::numeric::Complex;
@@ -208,11 +211,10 @@ where
     // The denominator has no real-radical factorisation (a casus-irreducibilis
     // cubic or a higher-degree factor): express the integral as an exact formal
     // root sum over the roots `Z`. (Binomial cubics were handled above.)
-    if degree >= 3 {
-        if let Some(term) = root_sum_term(coefficients, factor, variable) {
+    if degree >= 3
+        && let Some(term) = root_sum_term(coefficients, factor, variable) {
             return Some(term);
         }
-    }
 
     // Any factor that is not the classic "cubic with a single real root" is
     // handed to the general real-root peeler, which handles any degree that
@@ -653,9 +655,7 @@ where
         }
         // Find the conjugate partner (`θ' = 2π − θ`, i.e. `k' = d − k`).
         let partner_k = order - k;
-        let Some(partner_index) = primitive.iter().position(|&x| x == partner_k) else {
-            return None;
-        };
+        let partner_index = primitive.iter().position(|&x| x == partner_k)?;
         if consumed[partner_index] {
             continue;
         }
@@ -745,11 +745,10 @@ fn cyclotomic_order(factor: &Poly) -> Option<usize> {
     let limit = 2 * degree + 2;
     for d in degree..=limit {
         let xd_minus_one = x_power_minus_one(d);
-        if let Some((_, remainder)) = xd_minus_one.div_rem(factor) {
-            if remainder.is_zero() {
+        if let Some((_, remainder)) = xd_minus_one.div_rem(factor)
+            && remainder.is_zero() {
                 return Some(d);
             }
-        }
     }
     None
 }
@@ -954,12 +953,12 @@ fn complex_roots(monic: &[f64]) -> Option<Vec<(f64, f64)>> {
             let zi = roots[i];
             let (mut re, mut im) = eval(zi);
             // Divide by prod_{j != i} (zi - zj).
-            for j in 0..n {
+            for (j, zj) in roots.iter().enumerate() {
                 if j == i {
                     continue;
                 }
-                let dr = zi.0 - roots[j].0;
-                let di = zi.1 - roots[j].1;
+                let dr = zi.0 - zj.0;
+                let di = zi.1 - zj.1;
                 let den = dr * dr + di * di;
                 if den < 1e-300 {
                     break;

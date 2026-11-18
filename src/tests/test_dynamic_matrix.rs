@@ -23,10 +23,10 @@ fn identity_is_square_and_unit_diagonal() {
     let identity = Matrix::<Rat>::identity(3);
     assert_eq!(identity.rows(), 3);
     assert_eq!(identity.columns(), 3);
-    for row in 0..3 {
-        for column in 0..3 {
+    for (row, identity_row) in (0..3).map(|row| &identity[row]).enumerate() {
+        for (column, entry) in identity_row.iter().enumerate() {
             let expected = if row == column { rat(1) } else { rat(0) };
-            assert_eq!(identity[row][column], expected);
+            assert_eq!(entry, &expected);
         }
     }
 }
@@ -70,9 +70,9 @@ fn dynamic_cofactors_match_static() {
         [rat(-12), rat(3), rat(2)],
         [rat(-2), rat(-5), rat(4)],
     ];
-    for row in 0..3 {
-        for column in 0..3 {
-            assert_eq!(dynamic.cofactor(row, column), expected_cofactors[row][column]);
+    for (row, expected_row) in expected_cofactors.iter().enumerate() {
+        for (column, want) in expected_row.iter().enumerate() {
+            assert_eq!(dynamic.cofactor(row, column), *want);
         }
     }
 

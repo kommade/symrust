@@ -98,7 +98,7 @@ where
         Self::from_node(NodeInner::<T>::zero())
     }
 
-    fn as_f64(self) -> f64 {
+    fn as_f64(&self) -> f64 {
         self.evaluate(f64::NAN).value().unwrap_or(f64::NAN)
     }
 
@@ -252,7 +252,6 @@ impl<T: SymbolicLeaf> Expr<T> {
         self.tree.contains_root_sum()
     }
     /// Returns the LaTeX representation of the expression.
-    #[must_use]
     pub fn to_latex(&self) -> Result<String, ExprError> {
         Ok(self.tree.inner.borrow().to_latex()?)
     }

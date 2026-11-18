@@ -148,9 +148,7 @@ where
     let mut inverse = matrix.clone().identity_like();
 
     for column in 0..size {
-        let Some(pivot) = (column..size).find(|&row| !reduced.entry(row, column).is_zero_value()) else {
-            return None;
-        };
+        let pivot = (column..size).find(|&row| !reduced.entry(row, column).is_zero_value())?;
         swap_rows(&mut reduced, column, pivot);
         swap_rows(&mut inverse, column, pivot);
 
@@ -188,7 +186,7 @@ where
 /// The inverse of a runtime [`Matrix`], or `None` when it is singular.
 pub(crate) fn inverse_of_matrix<T: Matrixable>(matrix: &Matrix<T>) -> Option<Matrix<T>> {
     let inverse = inverse_of(matrix)?;
-    Some(Matrix::from_vec(inverse.rows(), inverse.columns(), inverse.iter().cloned().collect())?)
+    Matrix::from_vec(inverse.rows(), inverse.columns(), inverse.iter().cloned().collect())
 }
 
 /// The product of two runtime matrices.
@@ -263,11 +261,11 @@ where
 {
     let size = matrix.row_count();
     let mut result = vec![vec![T::default(); size]; size];
-    for row in 0..size {
-        for column in 0..size {
+    for (column, cofactor_row) in result.iter_mut().enumerate() {
+        for (row, slot) in cofactor_row.iter_mut().enumerate() {
             // Writing to `(column, row)` transposes as we go, which turns the
             // cofactor matrix into the adjugate.
-            result[column][row] = cofactor_of(matrix, row, column);
+            *slot = cofactor_of(matrix, row, column);
         }
     }
     result
@@ -369,14 +367,14 @@ where
         for k in 0..j {
             // r[k][j] = q_k . a_j
             let mut dot = T::additive_identity();
-            for i in 0..size {
-                dot = dot + q.entry(i, k) * v[i].clone();
+            for (i, value) in v.iter().enumerate() {
+                dot = dot + q.entry(i, k) * value.clone();
             }
             r.set_entry(k, j, dot.clone());
             // v -= r[k][j] * q_k
-            for i in 0..size {
-                let reduced = v[i].clone() - dot.clone() * q.entry(i, k);
-                v[i] = reduced;
+            for (i, slot) in v.iter_mut().enumerate() {
+                let reduced = slot.clone() - dot.clone() * q.entry(i, k);
+                *slot = reduced;
             }
         }
 
@@ -389,8 +387,8 @@ where
         }
         let norm = norm_squared.sqrt();
         r.set_entry(j, j, norm.clone());
-        for i in 0..size {
-            q.set_entry(i, j, v[i].clone() / norm.clone());
+        for (i, value) in v.iter().enumerate() {
+            q.set_entry(i, j, value.clone() / norm.clone());
         }
     }
     Some((q, r))
@@ -447,10 +445,10 @@ where
     for point in 0..=size {
         let x = Rat::from_i64(point as i64);
         let mut shifted = vec![vec![Rat::ZERO; size]; size];
-        for row in 0..size {
-            for column in 0..size {
+        for (row, shifted_row) in shifted.iter_mut().enumerate() {
+            for (column, slot) in shifted_row.iter_mut().enumerate() {
                 let entry = as_rational(matrix.entry(row, column))?;
-                shifted[row][column] = if row == column {
+                *slot = if row == column {
                     x.sub(entry)?
                 } else {
                     entry.neg()
@@ -607,6 +605,11 @@ where
     Some((eigenvectors, diagonal))
 }
 
+/// The `(U, S, singular values, V)` components returned by the SVD routines.
+/// Shapes: `U` is `m x m`, `S` is `m x n` with `min(m, n)` singular values on
+/// its diagonal (ordered large to small) and `V` is `n x n`.
+pub(crate) type SvdComponents<T> = (Matrix<T>, Matrix<T>, Vec<T>, Matrix<T>);
+
 /// The full singular value decomposition `A = U S V^T` of any (possibly
 /// rectangular) matrix, or `None` when one is not available over `T`.
 ///
@@ -624,7 +627,7 @@ where
 ///    representable as `f64` through `from_f64`/`as_f64`), which the exact
 ///    route cannot. It is skipped for genuinely exact types because rotating
 ///    them rounds through `f64` and would overflow.
-pub(crate) fn svd_of<T, M>(matrix: &M) -> Option<(Matrix<T>, Matrix<T>, Vec<T>, Matrix<T>)>
+pub(crate) fn svd_of<T, M>(matrix: &M) -> Option<SvdComponents<T>>
 where
     T: Matrixable,
     M: MatrixOps<T>,
@@ -641,7 +644,7 @@ where
 /// Exact singular value decomposition via the eigen-decomposition of `A^T A`.
 ///
 /// See [`svd_of`]; only succeeds when every intermediate value stays in `T`.
-pub(crate) fn svd_exact_of<T, M>(matrix: &M) -> Option<(Matrix<T>, Matrix<T>, Vec<T>, Matrix<T>)>
+pub(crate) fn svd_exact_of<T, M>(matrix: &M) -> Option<SvdComponents<T>>
 where
     T: Matrixable,
     M: MatrixOps<T>,
@@ -734,7 +737,7 @@ where
 /// accumulate into `V`, the final column norms are the singular values, and the
 /// normalised columns are `U`. Only used for floating `T` (see
 /// [`Matrixable::is_floating`]).
-pub(crate) fn svd_jacobi_of<T, M>(matrix: &M) -> Option<(Matrix<T>, Matrix<T>, Vec<T>, Matrix<T>)>
+pub(crate) fn svd_jacobi_of<T, M>(matrix: &M) -> Option<SvdComponents<T>>
 where
     T: Matrixable,
     M: MatrixOps<T>,
@@ -759,10 +762,12 @@ where
                 let mut alpha = T::additive_identity();
                 let mut beta = T::additive_identity();
                 let mut gamma = T::additive_identity();
-                for row in 0..rows {
-                    alpha = alpha + work[row][first].clone() * work[row][first].clone();
-                    beta = beta + work[row][second].clone() * work[row][second].clone();
-                    gamma = gamma + work[row][first].clone() * work[row][second].clone();
+                for row_values in work.iter() {
+                    let left = row_values[first].clone();
+                    let right = row_values[second].clone();
+                    alpha = alpha + left.clone() * left.clone();
+                    beta = beta + right.clone() * right.clone();
+                    gamma = gamma + left * right;
                 }
                 let zero = T::additive_identity();
                 if alpha == zero || beta == zero {
@@ -784,17 +789,17 @@ where
                 let cosine = T::from_f64(1.0 / (1.0 + tangent * tangent).sqrt());
                 let sine = T::from_f64(tangent / (1.0 + tangent * tangent).sqrt());
 
-                for row in 0..rows {
-                    let left_value = work[row][first].clone();
-                    let right_value = work[row][second].clone();
-                    work[row][first] = cosine.clone() * left_value.clone() - sine.clone() * right_value.clone();
-                    work[row][second] = sine.clone() * left_value + cosine.clone() * right_value;
+                for row_values in work.iter_mut() {
+                    let left_value = row_values[first].clone();
+                    let right_value = row_values[second].clone();
+                    row_values[first] = cosine.clone() * left_value.clone() - sine.clone() * right_value.clone();
+                    row_values[second] = sine.clone() * left_value + cosine.clone() * right_value;
                 }
-                for row in 0..columns {
-                    let left_value = right[row][first].clone();
-                    let right_value = right[row][second].clone();
-                    right[row][first] = cosine.clone() * left_value.clone() - sine.clone() * right_value.clone();
-                    right[row][second] = sine.clone() * left_value + cosine.clone() * right_value;
+                for row_values in right.iter_mut() {
+                    let left_value = row_values[first].clone();
+                    let right_value = row_values[second].clone();
+                    row_values[first] = cosine.clone() * left_value.clone() - sine.clone() * right_value.clone();
+                    row_values[second] = sine.clone() * left_value + cosine.clone() * right_value;
                 }
                 rotated = true;
             }

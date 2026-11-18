@@ -474,9 +474,9 @@ impl<T: FloatType + Display> Lexer<T> {
                     "sqrt" => Ok(Token::from_func(Func::Sqrt)),
                     "log" => {
                         let mut base = T::parse_decimal("10")
-                            .map_err(|e| LexError::ParseError(e))?;
-                        if let Ok(c) = self.unwrap_next() {
-                            if c == '_' {
+                            .map_err(LexError::ParseError)?;
+                        if let Ok(c) = self.unwrap_next()
+                            && c == '_' {
                                 let mut base_str = String::new();
                                 while let Ok(c) = self.unwrap_next() {
                                     if c.is_ascii_digit() {
@@ -502,14 +502,13 @@ impl<T: FloatType + Display> Lexer<T> {
                                     }
                                 };
                             }
-                        }
                         Ok(Token::from_func(Func::Log(base)))
                     }
                     "ln" => Ok(Token::from_func(Func::Ln)),
                     "root" => {
                         // `root_n(x)`; a bare `root(...)` defaults to the square root.
                         let mut index = T::parse_decimal("2")
-                            .map_err(|e| LexError::ParseError(e))?;
+                            .map_err(LexError::ParseError)?;
                         if let Ok(c) = self.unwrap_next() {
                             if c == '_' {
                                 let mut index_str = String::new();
@@ -583,17 +582,12 @@ impl<T: FloatType + Display> Lexer<T> {
             if matches!(tokens[cursor], Token::Operator(Op::Pow))
                 && cursor + 2 < tokens.len()
                 && matches!(tokens[cursor + 1], Token::Operator(Op::Sub))
-            {
-                match tokens[cursor + 2] {
-                    Token::Number(value) => {
-                        merged.push(tokens[cursor].clone());
-                        merged.push(Token::from_num(-value));
-                        cursor += 3;
-                        continue;
-                    }
-                    _ => {}
+                && let Token::Number(value) = tokens[cursor + 2] {
+                    merged.push(tokens[cursor].clone());
+                    merged.push(Token::from_num(-value));
+                    cursor += 3;
+                    continue;
                 }
-            }
             merged.push(tokens[cursor].clone());
             cursor += 1;
         }
@@ -674,15 +668,14 @@ impl<T: FloatType + Display> Lexer<T> {
                         }
                     }
                 }
-                Token::Operator(Op::Mul) => {
-                    if i > 0 && i + 1 < tokens.len() {
+                Token::Operator(Op::Mul)
+                    if i > 0 && i + 1 < tokens.len() => {
                         let prev = &tokens[i - 1];
                         let next = &tokens[i + 1];
                         if prev.is_implicitly_mul() && next.is_implicitly_mul() {
                             tokens[i] = Token::from_op(Op::ImplicitMul);
                         }
                     }
-                }
                 _ => {}
             }
             i += 1;

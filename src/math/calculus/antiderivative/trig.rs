@@ -198,9 +198,7 @@ where
     }
     for factor in &product.denom {
         let mut collected = Vec::new();
-        if collect_trig_powers(factor, 1, &mut collected, 0).is_none() {
-            return None;
-        }
+        collect_trig_powers(factor, 1, &mut collected, 0)?;
         // A factor in the denominator is the reciprocal function.
         for mut power in collected {
             power.func = reciprocal(&power.func)?;

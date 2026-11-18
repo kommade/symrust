@@ -293,8 +293,8 @@ impl<T: SymbolicLeaf> NodeFunctions<T> for Node<T> {
         }
     }
     fn distribute_expr(self, other: Self, mul_type: MulType) -> Self {
-        let operator;
-        match mul_type {
+        
+        let operator = match mul_type {
             MulType::OpMul => {
                 let self_borrow = self.inner.borrow();
                 let other_borrow = other.inner.borrow();
@@ -343,7 +343,7 @@ impl<T: SymbolicLeaf> NodeFunctions<T> for Node<T> {
                         _ => {}
                     };
                 }
-                operator = Op::ImplicitMul;
+                Op::ImplicitMul
             }
             MulType::OpDiv => {
                 let self_borrow = self.inner.borrow();
@@ -387,7 +387,7 @@ impl<T: SymbolicLeaf> NodeFunctions<T> for Node<T> {
                         _ => {}
                     };
                 }
-                operator = Op::Div;
+                Op::Div
             }
         };
         if let Some((left, right, op)) = {
@@ -524,14 +524,13 @@ impl<T: SymbolicLeaf> Node<T> {
                     Token::Function(Func::Log(base)) => base.clone(),
                     _ => unreachable!("{}", t),
                 };
-                if let NodeValue::Operator(inner_op_node) = &arg.inner.borrow().value {
-                    if matches!(inner_op_node.token, Token::Operator(Op::Pow)) {
+                if let NodeValue::Operator(inner_op_node) = &arg.inner.borrow().value
+                    && matches!(inner_op_node.token, Token::Operator(Op::Pow)) {
                         return inner_op_node.right.clone().mul(NodeInner::<T>::from_function(
                             Func::Log(base),
                             inner_op_node.left.clone(),
                         ));
                     }
-                }
                 NodeInner::<T>::from_function(Func::Log(base), arg)
             }
             // `sqrt(u^2)` is `|u|`, and `|u|` is `u` when `u` cannot be
@@ -656,12 +655,11 @@ impl<T: SymbolicLeaf> Node<T> {
                                 }
                                 drop(left_borrow);
                                 drop(right_borrow);
-                                if let Some(num_val) = left_const_val {
-                                    if let Some((den_const, den_rest)) =
+                                if let Some(num_val) = left_const_val
+                                    && let Some((den_const, den_rest)) =
                                         NodeInner::<T>::extract_constant_factor(&right)
-                                    {
-                                        if let Some(den_val) = den_const.inner.borrow().evaluate() {
-                                            if !den_val.is_zero() {
+                                        && let Some(den_val) = den_const.inner.borrow().evaluate()
+                                            && !den_val.is_zero() {
                                                 let result_val = num_val / den_val;
                                                 // Keep a non-integer quotient symbolic so it
                                                 // displays as an exact fraction (`1 / 3`)
@@ -685,9 +683,6 @@ impl<T: SymbolicLeaf> Node<T> {
                                                     .simplify(expand, combine_fns);
                                                 }
                                             }
-                                        }
-                                    }
-                                }
                                 return NodeInner::<T>::from_operation(Op::Div, left, right);
                             } else if op == Op::Pow {
                                 if right_borrow.is_zero() {
@@ -818,9 +813,9 @@ impl<T: SymbolicLeaf> Node<T> {
     fn rewrite_factorise(self) -> Self {
         {
             let node = self.inner.borrow();
-            if let NodeValue::Operator(op_node) = &node.value {
-                if let Token::Operator(op) = &op_node.token {
-                    if *op == Op::Mul || *op == Op::Div || *op == Op::ImplicitMul {
+            if let NodeValue::Operator(op_node) = &node.value
+                && let Token::Operator(op) = &op_node.token
+                    && (*op == Op::Mul || *op == Op::Div || *op == Op::ImplicitMul) {
                         let left = op_node.left.clone();
                         let right = op_node.right.clone();
                         let op_clone = op.clone();
@@ -830,16 +825,14 @@ impl<T: SymbolicLeaf> Node<T> {
                         return NodeInner::<T>::from_operation(op_clone, left_factored, right_factored)
                             .simplify(false, true);
                     }
-                }
-            }
         }
         fn collect_sum_terms<T>(node: Node<T>, sign: i8, acc: &mut Vec<(Node<T>, i8)>)
         where
             T: SymbolicLeaf,
         {
             let borrowed = node.inner.borrow();
-            if let NodeValue::Operator(op_node) = &borrowed.value {
-                if let Token::Operator(op) = &op_node.token {
+            if let NodeValue::Operator(op_node) = &borrowed.value
+                && let Token::Operator(op) = &op_node.token {
                     match op {
                         Op::Add => {
                             let left = op_node.left.clone();
@@ -860,7 +853,6 @@ impl<T: SymbolicLeaf> Node<T> {
                         _ => {}
                     }
                 }
-            }
             drop(borrowed);
             acc.push((node, sign));
         }
@@ -870,8 +862,8 @@ impl<T: SymbolicLeaf> Node<T> {
             T: SymbolicLeaf,
         {
             let borrowed = node.inner.borrow();
-            if let NodeValue::Operator(op_node) = &borrowed.value {
-                if let Token::Operator(op) = &op_node.token {
+            if let NodeValue::Operator(op_node) = &borrowed.value
+                && let Token::Operator(op) = &op_node.token {
                     if *op == Op::Mul || *op == Op::ImplicitMul {
                         let left = op_node.left.clone();
                         let right = op_node.right.clone();
@@ -892,7 +884,6 @@ impl<T: SymbolicLeaf> Node<T> {
                         return;
                     }
                 }
-            }
             drop(borrowed);
             acc.push(node);
         }
@@ -927,7 +918,7 @@ impl<T: SymbolicLeaf> Node<T> {
             acc
         }
 
-        fn sort_terms<T>(terms: &mut Vec<(usize, Node<T>)>)
+        fn sort_terms<T>(terms: &mut [(usize, Node<T>)])
         where
             T: SymbolicLeaf,
         {

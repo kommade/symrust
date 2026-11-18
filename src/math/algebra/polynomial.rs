@@ -271,9 +271,7 @@ impl Poly {
                 if den == 0 {
                     return None;
                 }
-                let scaled = num.checked_add(den)?;
-                let rounded = scaled.checked_add(den - 1)?.checked_div(den)?;
-                i128::try_from(rounded).ok()?
+                num.checked_add(den)?.checked_add(den - 1)?.checked_div(den)?
             }
             // A constant polynomial: any bound works, so use 1.
             None => 1,

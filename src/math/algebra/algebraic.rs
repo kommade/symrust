@@ -27,7 +27,8 @@ use crate::math::structs::expr::node::Node;
 /// roots — so the exact singular values of a matrix built from square roots are
 /// representable and print naturally in terms of square roots.
 ///
-/// It is `Copy` (fixed capacity) so it can be a [`Matrixable`] coefficient type
+/// It is `Copy` (fixed capacity) so it can be a
+/// [`Matrixable`](crate::math::numeric::Matrixable) coefficient type
 /// with no changes to the linear-algebra code.
 /// 
 /// Requires a const generic `N` for the maximum number of radicands, which is
@@ -84,9 +85,9 @@ impl <const N: usize> Multiquadratic<N> where [(); 1 << N]: Sized {
                 continue;
             }
             let mut factor = 1.0;
-            for bit in 0..self.count as usize {
+            for (bit, radicand) in self.radicands.iter().enumerate().take(self.count as usize) {
                 if mask & (1 << bit) != 0 {
-                    factor *= (self.radicands[bit] as f64).sqrt();
+                    factor *= (*radicand as f64).sqrt();
                 }
             }
             total += coefficient.to_f64() * factor;
@@ -105,9 +106,11 @@ impl <const N: usize> Multiquadratic<N> where [(); 1 << N]: Sized {
     /// Add two values, first merging their radicand lists.
     fn add(self, other: Self) -> Option<Self> {
         let (radicands, count) = combine_radicands(&self, &other)?;
-        let mut result = Self::default();
-        result.radicands = radicands;
-        result.count = count;
+        let mut result = Self {
+            radicands,
+            count,
+            ..Default::default()
+        };
         // Re-express each side in the merged basis and sum.
         let left = remap(&self, &result);
         let right = remap(&other, &result);
@@ -126,17 +129,19 @@ impl <const N: usize> Multiquadratic<N> where [(); 1 << N]: Sized {
     /// squares of the shared radicands.
     fn mul(self, other: Self) -> Option<Self> {
         let (radicands, count) = combine_radicands(&self, &other)?;
-        let mut result = Self::default();
-        result.radicands = radicands;
-        result.count = count;
+        let mut result = Self {
+            radicands,
+            count,
+            ..Default::default()
+        };
         let left = remap(&self, &result);
         let right = remap(&other, &result);
-        for left_mask in 0..(1 << N) {
-            if left.coeffs[left_mask].is_zero() {
+        for (left_mask, left_coefficient) in left.coeffs.iter().enumerate() {
+            if left_coefficient.is_zero() {
                 continue;
             }
-            for right_mask in 0..(1 << N) {
-                if right.coeffs[right_mask].is_zero() {
+            for (right_mask, right_coefficient) in right.coeffs.iter().enumerate() {
+                if right_coefficient.is_zero() {
                     continue;
                 }
                 // Product of monomials: symmetric difference for the radical
@@ -144,14 +149,14 @@ impl <const N: usize> Multiquadratic<N> where [(); 1 << N]: Sized {
                 // rational factor.
                 let shared = left_mask & right_mask;
                 let mut rational = Rat::ONE;
-                for bit in 0..result.count as usize {
+                for (bit, &radicand) in result.radicands.iter().enumerate().take(result.count as usize) {
                     if shared & (1 << bit) != 0 {
-                        rational = rational.mul(Rat::from_i64(result.radicands[bit]))?;
+                        rational = rational.mul(Rat::from_i64(radicand))?;
                     }
                 }
                 let target = left_mask ^ right_mask;
-                let term = left.coeffs[left_mask]
-                    .mul(right.coeffs[right_mask])?
+                let term = left_coefficient
+                    .mul(*right_coefficient)?
                     .mul(rational)?;
                 result.coeffs[target] = result.coeffs[target].add(term)?;
             }
@@ -211,8 +216,7 @@ fn combine_radicands<const N: usize>(
 ) -> Option<([i64; N], u8)> where [(); 1 << N]: Sized {
     let mut radicands: Vec<i64> = Vec::new();
     for value in [left, right] {
-        for bit in 0..value.count as usize {
-            let candidate = value.radicands[bit];
+        for &candidate in value.radicands.iter().take(value.count as usize) {
             // Skip if the candidate is already a subset product of the current
             // list (compare squarefree parts so e.g. 6 == 2*3 is detected).
             if subset_product_matches(&radicands, candidate) {
@@ -262,11 +266,10 @@ fn subset_product_matches(radicands: &[i64], candidate: i64) -> bool {
         if overflow {
             continue;
         }
-        if let Some((squarefree, _)) = super::surd::squarefree_part(product) {
-            if squarefree == target {
+        if let Some((squarefree, _)) = super::surd::squarefree_part(product)
+            && squarefree == target {
                 return true;
             }
-        }
     }
     false
 }
@@ -278,9 +281,11 @@ fn subset_product_matches(radicands: &[i64], candidate: i64) -> bool {
 /// is a product of target radicands (like `sqrt 6` over `{sqrt 2, sqrt 3}`) — to
 /// the combination of those bits.
 fn remap<const N: usize>(value: &Multiquadratic<N>, target: &Multiquadratic<N>) -> Multiquadratic<N> where [(); 1 << N]: Sized {
-    let mut result = Multiquadratic::default();
-    result.radicands = target.radicands;
-    result.count = target.count;
+    let mut result = Multiquadratic::<N> {
+        radicands: target.radicands,
+        count: target.count,
+        ..Default::default()
+    };
     let target_radicands = &target.radicands[..target.count as usize];
     for source_mask in 0..(1 << N) {
         if value.coeffs[source_mask].is_zero() {
@@ -289,11 +294,11 @@ fn remap<const N: usize>(value: &Multiquadratic<N>, target: &Multiquadratic<N>) 
         let mut target_mask = 0usize;
         let mut ok = true;
         let mut extra_rational = Rat::ONE;
-        for bit in 0..value.count as usize {
+        for (bit, &source_radicand) in value.radicands.iter().enumerate().take(value.count as usize) {
             if source_mask & (1 << bit) == 0 {
                 continue;
             }
-            match decompose_radicand(target_radicands, value.radicands[bit]) {
+            match decompose_radicand(target_radicands, source_radicand) {
                 Some((mask, rational)) => {
                     target_mask ^= mask;
                     extra_rational = extra_rational.mul(rational).unwrap_or(Rat::ZERO);
@@ -352,15 +357,14 @@ fn decompose_radicand(target_radicands: &[i64], radicand: i64) -> Option<(usize,
         if overflow {
             continue;
         }
-        if let Some((subset_squarefree, subset_rest)) = super::surd::squarefree_part(product) {
-            if subset_squarefree == squarefree {
+        if let Some((subset_squarefree, subset_rest)) = super::surd::squarefree_part(product)
+            && subset_squarefree == squarefree {
                 // sqrt(radicand) = rest * sqrt(squarefree)
                 //                = rest / subset_rest * sqrt(product)
                 let subset_rest = Rat::from_i64(subset_rest as i64);
                 let coefficient = rational.div(subset_rest)?;
                 return Some((mask as usize, coefficient));
             }
-        }
     }
     None
 }
@@ -369,9 +373,9 @@ fn decompose_radicand(target_radicands: &[i64], radicand: i64) -> Option<(usize,
 /// coefficients of every monomial that includes that radicand.
 fn conjugate_over<const N: usize>(value: &Multiquadratic<N>, bit: usize) -> Multiquadratic<N> where [(); 1 << N]: Sized {
     let mut result = *value;
-    for mask in 0..(1 << N) {
+    for (mask, coefficient) in result.coeffs.iter_mut().enumerate() {
         if mask & (1 << bit) != 0 {
-            result.coeffs[mask] = result.coeffs[mask].neg();
+            *coefficient = coefficient.neg();
         }
     }
     result
@@ -396,10 +400,12 @@ impl<const N: usize> PartialEq for Multiquadratic<N> where [(); 1 << N]: Sized {
         let Some((radicands, count)) = combine_radicands(self, other) else {
             return false;
         };
-        let mut target = Multiquadratic::default();
-        target.radicands = radicands;
-        target.count = count;
         // `remap` needs matching counts; rebuild with the target shape.
+        let target = Self {
+            radicands,
+            count,
+            ..Default::default()
+        };
         let left = remap(self, &target);
         let right = remap(other, &target);
         left.coeffs == right.coeffs
@@ -448,7 +454,7 @@ impl<const N: usize> crate::math::numeric::ExactField for Multiquadratic<N> wher
         Self::from_rat(Rat::ONE)
     }
 
-    fn as_f64(self) -> f64 {
+    fn as_f64(&self) -> f64 {
         self.to_f64()
     }
 
@@ -529,9 +535,9 @@ impl<const N: usize> Multiquadratic<N> where [(); 1 << N]: Sized {
                 continue;
             }
             let mut term = coefficient.to_node();
-            for bit in 0..self.count as usize {
+            for (bit, radicand) in self.radicands.iter().enumerate().take(self.count as usize) {
                 if mask & (1 << bit) != 0 {
-                    term = Node::mul(term, Node::sqrt(Node::number(self.radicands[bit])));
+                    term = Node::mul(term, Node::sqrt(Node::number(*radicand)));
                 }
             }
             terms.push(term);
@@ -554,9 +560,9 @@ impl<const N: usize> std::fmt::Display for Multiquadratic<N> where [(); 1 << N]:
                 write!(f, " + ")?;
             }
             let mut radical = String::new();
-            for bit in 0..self.count as usize {
+            for (bit, radicand) in self.radicands.iter().enumerate().take(self.count as usize) {
                 if mask & (1 << bit) != 0 {
-                    radical.push_str(&format!(" sqrt({})", self.radicands[bit]));
+                    radical.push_str(&format!(" sqrt({})", radicand));
                 }
             }
             write!(f, "{}{}", coefficient, radical)?;
@@ -618,6 +624,11 @@ impl RealAlgebraic {
     /// Two algebraic numbers that are roots of *different* polynomials are
     /// still ordered by comparing their isolating intervals and, when those
     /// overlap, bisecting the one with the wider interval until they separate.
+    ///
+    /// Deliberately an inherent method, not `Ord::cmp`, so that the fallible
+    /// refinement loop stays private to this type: the `Ord` impl below
+    /// delegates here.
+    #[allow(clippy::should_implement_trait)]
     pub fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         use std::cmp::Ordering;
         let mut left = self.clone();
@@ -686,9 +697,7 @@ impl PartialEq for RealAlgebraic {
 impl Eq for RealAlgebraic {}
 
 impl PartialOrd for RealAlgebraic {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { Some(std::cmp::Ord::cmp(self, other)) }
 }
 
 /// Roots are ordered by value, not by their defining polynomial, so

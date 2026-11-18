@@ -42,8 +42,8 @@ where
                                 let left = op_node.left.clone();
                                 let right = op_node.right.clone();
                                 drop(borrow);
-                                if Self::is_constant_node(&left) {
-                                    if let Some(mut inner) =
+                                if Self::is_constant_node(&left)
+                                    && let Some(mut inner) =
                                         Self::extract_pow_components(&right, extract_fns)
                                     {
                                         inner.coefficient = Self::from_operation(
@@ -54,9 +54,8 @@ where
                                         .simplify(false, extract_fns);
                                         return Some(inner);
                                     }
-                                }
-                                if Self::is_constant_node(&right) {
-                                    if let Some(mut inner) =
+                                if Self::is_constant_node(&right)
+                                    && let Some(mut inner) =
                                         Self::extract_pow_components(&left, extract_fns)
                                     {
                                         inner.coefficient = Self::from_operation(
@@ -67,7 +66,6 @@ where
                                         .simplify(false, extract_fns);
                                         return Some(inner);
                                     }
-                                }
                                 return None;
                             }
                             // A negation `0 - x` is `-1 * x`; treating it as a
@@ -77,8 +75,8 @@ where
                                 let left = op_node.left.clone();
                                 let right = op_node.right.clone();
                                 drop(borrow);
-                                if left.inner.borrow().is_zero() {
-                                    if let Some(mut inner) =
+                                if left.inner.borrow().is_zero()
+                                    && let Some(mut inner) =
                                         Self::extract_pow_components(&right, extract_fns)
                                     {
                                         inner.coefficient = Self::from_operation(
@@ -89,15 +87,14 @@ where
                                         .simplify(false, extract_fns);
                                         return Some(inner);
                                     }
-                                }
                                 return None;
                             }
                             if *op == Op::Div {
                                 let left = op_node.left.clone();
                                 let right = op_node.right.clone();
                                 drop(borrow);
-                                if Self::is_constant_node(&left) {
-                                    if let Some(mut inner) =
+                                if Self::is_constant_node(&left)
+                                    && let Some(mut inner) =
                                         Self::extract_pow_components(&right, extract_fns)
                                     {
                                         inner.coefficient = Self::from_operation(
@@ -109,7 +106,6 @@ where
                                         inner.exponent = inner.exponent.negate();
                                         return Some(inner);
                                     }
-                                }
                                 return None;
                             }
                         }
@@ -146,13 +142,11 @@ where
 
     fn extract_division(node: &Node<T>) -> Option<(Node<T>, Node<T>)> {
         let borrow = node.inner.borrow();
-        if let NodeValue::Operator(op_node) = &borrow.value {
-            if let Token::Operator(token_op) = &op_node.token {
-                if *token_op == Op::Div {
+        if let NodeValue::Operator(op_node) = &borrow.value
+            && let Token::Operator(token_op) = &op_node.token
+                && *token_op == Op::Div {
                     return Some((op_node.left.clone(), op_node.right.clone()));
                 }
-            }
-        }
         None
     }
 
@@ -162,9 +156,9 @@ where
             drop(borrow);
             return Some((node.clone(), Self::one()));
         }
-        if let NodeValue::Operator(op_node) = &borrow.value {
-            if let Token::Operator(op) = &op_node.token {
-                if op.is_mul() {
+        if let NodeValue::Operator(op_node) = &borrow.value
+            && let Token::Operator(op) = &op_node.token
+                && op.is_mul() {
                     let left = op_node.left.clone();
                     let right = op_node.right.clone();
                     drop(borrow);
@@ -181,16 +175,14 @@ where
                         _ => None,
                     };
                 }
-            }
-        }
         None
     }
 
     fn collect_mul_factors(node: &Node<T>, factors: &mut Vec<Node<T>>) {
         let borrow = node.inner.borrow();
-        if let NodeValue::Operator(op_node) = &borrow.value {
-            if let Token::Operator(op) = &op_node.token {
-                if op.is_mul() {
+        if let NodeValue::Operator(op_node) = &borrow.value
+            && let Token::Operator(op) = &op_node.token
+                && op.is_mul() {
                     let left = op_node.left.clone();
                     let right = op_node.right.clone();
                     drop(borrow);
@@ -198,8 +190,6 @@ where
                     Self::collect_mul_factors(&right, factors);
                     return;
                 }
-            }
-        }
         drop(borrow);
         factors.push(node.clone());
     }
@@ -376,8 +366,8 @@ where
 
     fn collect_sum_terms(node: &Node<T>, sign: i32, terms: &mut Vec<(Node<T>, i32)>) {
         let borrow = node.inner.borrow();
-        if let NodeValue::Operator(op_node) = &borrow.value {
-            if let Token::Operator(op) = &op_node.token {
+        if let NodeValue::Operator(op_node) = &borrow.value
+            && let Token::Operator(op) = &op_node.token {
                 match op {
                     Op::Add => {
                         let left = op_node.left.clone();
@@ -398,7 +388,6 @@ where
                     _ => {}
                 }
             }
-        }
         terms.push((node.clone(), sign));
     }
 
@@ -417,8 +406,8 @@ where
         let mut constant_index: Option<usize> = None;
 
         for (idx, (term, sign)) in terms.into_iter().enumerate() {
-            if let Some(comp) = Self::extract_pow_components(&term, combine_fns) {
-                if let Some(mut coeff_val) = comp.coefficient.inner.borrow().evaluate() {
+            if let Some(comp) = Self::extract_pow_components(&term, combine_fns)
+                && let Some(mut coeff_val) = comp.coefficient.inner.borrow().evaluate() {
                     if sign == -1 {
                         coeff_val = coeff_val.neg();
                     }
@@ -446,9 +435,8 @@ where
                     }
                     continue;
                 }
-            }
-            if !term.inner.borrow().has_indp {
-                if let Some(mut val) = term.inner.borrow().evaluate() {
+            if !term.inner.borrow().has_indp
+                && let Some(mut val) = term.inner.borrow().evaluate() {
                     if sign == -1 {
                         val = val.neg();
                     }
@@ -462,7 +450,6 @@ where
                     }
                     continue;
                 }
-            }
             let mut node = term;
             if sign == -1 {
                 node = node.negate();

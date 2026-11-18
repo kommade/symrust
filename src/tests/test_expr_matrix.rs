@@ -20,7 +20,7 @@ fn entries(expr: &Expr) -> Vec<Vec<f64>> {
                     simplified.evaluate(0.0_f64).value().unwrap_or_else(|| {
                         panic!(
                             "entry {row},{column} is not numeric: {}",
-                            simplified.to_string()
+                            simplified
                         )
                     })
                 })

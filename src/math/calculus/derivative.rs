@@ -134,7 +134,7 @@ where
                 let split = split_constant(&self);
                 if split.is_factored(&self) {
                     let split_node = Expr::from_node(self.clone());
-                    calc_step!(steps, "constant factor", format!("{borrow_str}"), split_node);
+                    calc_step!(steps, "constant factor", borrow_str.to_string(), split_node);
                     return match split.constant_literal() {
                         Some(k) => split
                             .dependent
@@ -184,13 +184,13 @@ where
                 }
             }
         };
-        calc_step!(steps, "differentiate", format!("{borrow_str}"), result.clone());
+        calc_step!(steps, "differentiate", borrow_str.to_string(), result.clone());
         result
     }
     fn chain_rule(self, steps: &mut R) -> Self {
         let borrowed = self.inner.borrow();
-        if let NodeValue::Operator(op_node) = &borrowed.value {
-            if let Token::Function(f) = &op_node.token {
+        if let NodeValue::Operator(op_node) = &borrowed.value
+            && let Token::Function(f) = &op_node.token {
                 let result = match f {
                     Func::Sin => {
                         let arg = op_node.right.clone();
@@ -297,13 +297,12 @@ where
                 );
                 return result;
             }
-        }
         panic!("fn_rule called on non-function node")
     }
     fn power_rule(self, steps: &mut R) -> Self {
         let borrowed = self.inner.borrow();
-        if let NodeValue::Operator(op_node) = &borrowed.value {
-            if matches!(op_node.token, Token::Operator(Op::Pow)) {
+        if let NodeValue::Operator(op_node) = &borrowed.value
+            && matches!(op_node.token, Token::Operator(Op::Pow)) {
                 let left = op_node.left.clone();
                 let right = op_node.right.clone();
                 debug_assert!(
@@ -332,13 +331,12 @@ where
                 );
                 return result;
             }
-        }
         panic!("power_rule called on non-power node")
     }
     fn exp_rule(self, steps: &mut R) -> Self {
         let borrowed = self.inner.borrow();
-        if let NodeValue::Operator(op_node) = &borrowed.value {
-            if matches!(op_node.token, Token::Operator(Op::Pow)) {
+        if let NodeValue::Operator(op_node) = &borrowed.value
+            && matches!(op_node.token, Token::Operator(Op::Pow)) {
                 debug_assert!(
                     op_node.right.inner.borrow().has_indp,
                     "exp_rule cannot be used for this node, try pow_rule"
@@ -362,13 +360,12 @@ where
                 );
                 return result;
             }
-        }
         panic!("exp_rule called on non-exp node")
     }
     fn product_rule(self, steps: &mut R) -> Self {
         let borrowed = self.inner.borrow();
-        if let NodeValue::Operator(op_node) = &borrowed.value {
-            if matches!(op_node.token, Token::Operator(Op::Mul | Op::ImplicitMul)) {
+        if let NodeValue::Operator(op_node) = &borrowed.value
+            && matches!(op_node.token, Token::Operator(Op::Mul | Op::ImplicitMul)) {
                 let left = op_node.left.clone();
                 let right = op_node.right.clone();
                 let result = add(
@@ -383,13 +380,12 @@ where
                 );
                 return result;
             }
-        }
         panic!("product_rule called on non-product node")
     }
     fn quotient_rule(self, steps: &mut R) -> Self {
         let borrowed = self.inner.borrow();
-        if let NodeValue::Operator(op_node) = &borrowed.value {
-            if matches!(op_node.token, Token::Operator(Op::Div)) {
+        if let NodeValue::Operator(op_node) = &borrowed.value
+            && matches!(op_node.token, Token::Operator(Op::Div)) {
                 let left = op_node.left.clone();
                 let right = op_node.right.clone();
                 let result = div(
@@ -407,7 +403,6 @@ where
                 );
                 return result;
             }
-        }
         panic!("quotient_rule called on non-quotient node")
     }
 }
