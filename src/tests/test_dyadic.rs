@@ -124,3 +124,27 @@ fn zero_is_exact() {
     assert_eq!(Rat::from_real_exact(&Real::zero()).unwrap(), z);
     assert_eq!(z.to_real_exact().unwrap().to_f64(), 0.0);
 }
+
+#[test]
+fn to_real_paths_prefer_the_exact_conversion() {
+    // 2^53 + 1 needs 54 significand bits: the old `num as f64 / den as f64`
+    // path rounded it down to 2^53; the exact-first `to_real` keeps every bit
+    // and the leaf-generic evaluate routes through `to_real`.
+    let fat = Rat::new((1_i128 << 53) + 1, 1).unwrap();
+    let real = fat.to_real();
+    assert_eq!(
+        real.to_f64(),
+        ((1_u128 << 53) + 1) as f64,
+        "odd integer above f64 precision survives"
+    );
+    // The exact engine round-trips as well.
+    assert_eq!(Rat::from_real_exact(&real).unwrap(), fat, "round-trip");
+    // And the same holds through `to_float` (arpfloat bridge) and the leaf
+    // bridge, which both delegate to the exact path when it exists.
+    assert_eq!(fat.to_float().as_f64(), ((1_u128 << 53) + 1) as f64);
+    assert_eq!(fat.to_leaf::<Real>().to_f64(), ((1_u128 << 53) + 1) as f64);
+    // Non-representable rationals still get the nearest approximation.
+    let third = Rat::new(1, 3).unwrap();
+    let approx = third.to_real().to_f64();
+    assert!((approx - 1.0 / 3.0).abs() < 1e-15, "1/3 approximated");
+}

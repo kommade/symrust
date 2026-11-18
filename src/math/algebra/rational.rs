@@ -428,12 +428,24 @@ impl Rat {
     }
 
     pub fn to_float(&self) -> arpfloat::Float {
-        arpfloat::Float::from_f64(self.to_f64()).cast(arpfloat::FP128)
+        // Exact when the rational fits a 113-bit significand over a power of
+        // two; the f64 route would round three times (numerator, denominator,
+        // quotient, plus the cast) before the value ever leaves `Rat`.
+        match self.to_real_exact() {
+            Some(exact) => exact.into(),
+            None => arpfloat::Float::from_f64(self.to_f64()).cast(arpfloat::FP128),
+        }
     }
 
     /// The value as the crate's [`Real`] float type.
+    ///
+    /// The exact dyadic conversion is preferred, so a `Rat` such as `5/1024`
+    /// lands in `Real` bit-for-bit; values that cannot be represented (the
+    /// huge or non-dyadic cases, see [`Self::to_real_exact`]) fall back to the
+    /// nearest `f64`-rounded approximation.
     pub fn to_real(&self) -> crate::math::numeric::Real {
-        crate::math::numeric::Real::from_f64(self.to_f64())
+        self.to_real_exact()
+            .unwrap_or_else(|| crate::math::numeric::Real::from_f64(self.to_f64()))
     }
 
     /// The value as a [`Real`] *exactly*, when the rational is representable.

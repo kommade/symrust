@@ -21,7 +21,7 @@ mod test_symbolic_eigen;
 mod test_eigen;
 mod test_vector;
 mod test_real;
-mod test_probe;
+mod test_dyadic;
 
 static INIT: std::sync::Once = std::sync::Once::new();
 
