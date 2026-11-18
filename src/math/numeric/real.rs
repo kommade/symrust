@@ -131,6 +131,51 @@ impl Real {
         self.0.to_i64()
     }
 
+    /// The value as an exact dyadic fraction, `num * 2^exp2`, when it fits the
+    /// [`i128`] arithmetic that [`Rat`][crate::math::algebra::Rat] uses.
+    ///
+    /// Every finite binary float is exactly a dyadic rational: the mantissa is
+    /// an integer and the exponent a power-of-two scale, so the conversion
+    /// loses nothing as long as the reduced numerator fits `i128` (≤ 126
+    /// significant bits after stripping trailing zeros — `arpfloat`'s FP128
+    /// mantissa is 113 bits, so this holds) and the denominator exponent stays
+    /// within 126. Values outside that window return `None`: the exact `Rat`
+    /// does not exist rather than being approximated.
+    #[must_use]
+    pub fn to_dyadic(&self) -> Option<(i128, i32)> {
+        if self.0.is_zero() {
+            return Some((0, 0));
+        }
+        if self.0.is_nan() || self.0.is_inf() {
+            return None;
+        }
+        // Observation-verified convention: value = m * 2^(exp - 112) with a
+        // normalized 113-bit mantissa (msb at bit 113); subnormals follow the
+        // same shape with a shorter mantissa.
+        let mantissa = self.0.get_mantissa().as_u128();
+        let exp = self.0.get_exp() as i64;
+        let zeros = mantissa.trailing_zeros() as i64; // 0 when already odd
+        let odd = (mantissa >> zeros) as i128; // ≤ 2^113, fits comfortably
+        let shift = exp - 112 + zeros; // value = ±odd * 2^shift
+        let signed = if self.0.get_sign() { -odd } else { odd };
+        if shift >= 0 {
+            // Numerator = odd * 2^shift must stay within i128 (127 bits). The
+            // leading-zero count of `odd` gives exactly how far it can shift.
+            let room = (odd.unsigned_abs() as u128).leading_zeros() as i64;
+            if shift > room - 1 {
+                return None;
+            }
+            Some((signed << shift, 0))
+        } else {
+            // Denominator = 2^(-shift) must stay within i128 (2^127 would
+            // overflow the sign bit), so at most 126.
+            if -shift > 126 {
+                return None;
+            }
+            Some((signed, shift as i32))
+        }
+    }
+
     // --- predicates -----------------------------------------------------
 
     #[must_use]

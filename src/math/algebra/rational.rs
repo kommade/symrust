@@ -205,12 +205,36 @@ impl Rat {
         if den == 0 {
             return None;
         }
-        let (num, den) = if den < 0 { (-num, -den) } else { (num, den) };
+        // `i128::MIN` cannot be negated, so such inputs give up as `None`
+        // instead of panicking; a negative denominator is normalized away
+        // when both sides negate.
+        let (num, den) = if den < 0 {
+            (num.checked_neg()?, den.checked_neg()?)
+        } else {
+            (num, den)
+        };
         let gcd = gcd_u128(num.unsigned_abs(), den.unsigned_abs());
         Some(Self {
             num: num / gcd as i128,
             den: den / gcd as i128,
         })
+    }
+
+    /// Recover the *exact* rational a [`Real`] represents, when one exists.
+    ///
+    /// Every finite binary float is a dyadic rational `num * 2^exp2`, so the
+    /// conversion is bit-exact whenever the numerator and denominator fit
+    /// `i128` (`None` otherwise — an exact `Rat` does not exist rather than
+    /// being approximated). This is the counterpart of
+    /// [`Self::from_float`], which deliberately quantizes through `f64` for
+    /// display purposes and is *not* exact for high bits.
+    pub fn from_real_exact(value: &crate::math::numeric::Real) -> Option<Self> {
+        let (num, exp2) = value.to_dyadic()?;
+        if exp2 >= 0 {
+            Some(Self { num, den: 1 })
+        } else {
+            Self::new(num, 1i128 << (-exp2))
+        }
     }
 
     /// Recover a rational from a floating point value.
@@ -410,6 +434,46 @@ impl Rat {
     /// The value as the crate's [`Real`] float type.
     pub fn to_real(&self) -> crate::math::numeric::Real {
         crate::math::numeric::Real::from_f64(self.to_f64())
+    }
+
+    /// The value as a [`Real`] *exactly*, when the rational is representable.
+    ///
+    /// A binary float carries a dyadic rational exactly only when the
+    /// denominator is a power of two and the numerator fits the float's
+    /// mantissa width (`arpfloat` FP128: 113 bits). Non-dyadic values such as
+    /// `1/3` have no finite binary expansion at any width, so they return
+    /// `None` here; use [`Self::to_real`] for the nearest approximation.
+    pub fn to_real_exact(&self) -> Option<crate::math::numeric::Real> {
+        use arpfloat::FP128;
+        if self.num == 0 {
+            return Some(crate::math::numeric::Real::zero());
+        }
+        // The denominator must be a power of two (the rational is reduced, so
+        // this decides dyadic-ness outright).
+        let den_pow = self.den.trailing_zeros() as i64;
+        if (self.den & (self.den - 1)) != 0 {
+            return None;
+        }
+        // What matters for the significand is the *odd* part of the numerator:
+        // trailing zeros slide into the exponent, so `(2^52 + 1) * 2^74` is
+        // exactly representable while a 114-bit odd integer is not. FP128
+        // carries a 113-bit significand.
+        let magnitude = self.num.unsigned_abs();
+        let zeros = magnitude.trailing_zeros() as i64;
+        let odd = magnitude >> zeros;
+        let msb = 128 - odd.leading_zeros() as i64; // 1-based position
+        if msb > 113 {
+            return None;
+        }
+        // Normalize: the mantissa is the 113-bit integer with the leading bit
+        // at position 113. From value = m * 2^(exp - 112) with
+        // m = odd * 2^(113 - msb) it follows that exp = (msb - 1) - den_pow
+        // plus the zeros lifted out of the numerator.
+        let mantissa = odd << (113 - msb);
+        let exp = (msb - 1) - den_pow + zeros;
+        let sign = self.num < 0;
+        let inner = arpfloat::Float::new(FP128, sign, exp, arpfloat::BigInt::from_u128(mantissa));
+        Some(crate::math::numeric::Real::from(inner))
     }
 
     /// The value in the caller's leaf float type.
