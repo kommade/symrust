@@ -1,6 +1,6 @@
 //! Step tracking for matrix operations.
 
-use crate::math::algebra::linear::{Matrix, SquareMatrixFns};
+use crate::math::algebra::linear::{Matrix, MatrixMul, SquareMatrixFns};
 use crate::create_expr;
 use crate::math::structs::expr::Expr;
 use crate::math::structs::solution::SolutionStep;
@@ -23,6 +23,30 @@ fn matrix_of_result(solution: &crate::math::structs::solution::Solution) -> Matr
         NodeValue::Operand(Token::Matrix(matrix)) => matrix.clone(),
         other => panic!("expected a matrix result, got {other:?}"),
     }
+}
+
+/// Read the factor matrices back out of a factorisation result: QR, LU and
+/// SVD answer with the product `A × B (× C)`, the factors nested to the left,
+/// so the operands of the product are the factors.
+fn factors_of_result(solution: &crate::math::structs::solution::Solution) -> Vec<Matrix<Expr>> {
+    use crate::math::parse::lexer::Token;
+    use crate::math::structs::expr::node::NodeValue;
+
+    fn gather(expr: &Expr, factors: &mut Vec<Matrix<Expr>>) {
+        let borrowed = expr.tree().inner.borrow();
+        match &borrowed.value {
+            NodeValue::Operand(Token::Matrix(matrix)) => factors.push(matrix.clone()),
+            NodeValue::Operator(op_node) => {
+                gather(&Expr::from_node(op_node.left.clone()), factors);
+                gather(&Expr::from_node(op_node.right.clone()), factors);
+            }
+            other => panic!("expected a product of matrix factors, got {other:?}"),
+        }
+    }
+
+    let mut factors = Vec::new();
+    gather(solution.result(), &mut factors);
+    factors
 }
 
 /// Every step must change the matrix, and the last one must be the result.
@@ -180,30 +204,41 @@ fn qr_records_elementary_steps() {
         "expected the assemble step, got {names:?}"
     );
 
-    // A factorisation has two factors and a solution result is one value, so
-    // the result is the augmented [Q | R]: `rows x 2*columns`, whose first
-    // `columns` columns are Q and whose remaining columns are R, zero-filled
-    // below R's own rows on a tall matrix like this 4x3 one.
-    let augmented = matrix_of_result(&solution);
-    assert_eq!(augmented.rows(), 4);
-    assert_eq!(augmented.columns(), 6);
-    // Q's entries are the normalised columns and R itself is upper triangular
-    // with textbook entries. Splitting the augmented matrix at column 3:
-    // `R = [[2, 1, 2], [0, sqrt(5), 8 sqrt(5) / 5], [0, 0, sqrt(30) / 5]]`,
-    // zero-filled on the last row because the matrix is tall.
-    assert_eq!(augmented[0][0].to_string(), "1 / 2");
-    assert_eq!(augmented[0][1].to_string(), "-3 sqrt(5) / 10");
-    assert_eq!(augmented[1][1].to_string(), "-sqrt(5) / 10");
-    for row in 1..4 {
-        assert_eq!(augmented[row][3].to_string(), "0");
+    // A factorisation has two factors, so the result is the product [[Q]] ×
+    // [[R]]: Q is the 4 x 3 orthonormal basis and R the 3 x 3 upper triangular
+    // with textbook entries `[[2, 1, 2], [0, sqrt(5), 8 sqrt(5) / 5],
+    // [0, 0, sqrt(30) / 5]]` — its diagonal from the normalise steps, its
+    // upper entries from the projections the orthogonalise steps subtracted.
+    let factors = factors_of_result(&solution);
+    assert_eq!(factors.len(), 2, "QR has exactly the two factors Q and R");
+    let q = &factors[0];
+    let r = &factors[1];
+    assert_eq!((q.rows(), q.columns()), (4, 3));
+    assert_eq!((r.rows(), r.columns()), (3, 3));
+    assert_eq!(q[0][0].to_string(), "1 / 2");
+    assert_eq!(q[0][1].to_string(), "-3 sqrt(5) / 10");
+    assert_eq!(q[1][1].to_string(), "-sqrt(5) / 10");
+    assert_eq!(r[0][0].to_string(), "2");
+    assert_eq!(r[1][1].to_string(), "sqrt(5)");
+    assert_eq!(r[1][2].to_string(), "8 sqrt(5) / 5");
+    assert_eq!(r[2][2].to_string(), "sqrt(30) / 5");
+
+    // The product reconstructs A: read two of its entries back numerically.
+    let product = q.mul_matrix(r);
+    for (row, column, want) in [(0, 0, 1.0), (3, 2, 4.0)] {
+        let value = product[row][column]
+            .evaluate(0.0_f64)
+            .value()
+            .unwrap_or_else(|| panic!("entry {row},{column} is not numeric"));
+        assert!(
+            (value - want).abs() < 1e-9,
+            "Q × R should reconstruct A: entry {row},{column} is {value}, want {want}"
+        );
     }
-    assert_eq!(augmented[0][3].to_string(), "2");
-    assert_eq!(augmented[1][4].to_string(), "sqrt(5)");
-    assert_eq!(augmented[2][5].to_string(), "sqrt(30) / 5");
 
     // No entry may still show the rationalised form `5 / sqrt(5)`; every
     // radial quantity must render as an exact `sqrt(5)` coefficient instead.
-    let result_text = augmented.to_string();
+    let result_text = solution.result().to_string();
     assert!(
         !result_text.contains("/ sqrt"),
         "result left a division by a radical: {result_text}"
@@ -287,6 +322,64 @@ fn qr_rejects_dependent_columns() {
     assert!(source.qr_solution().is_none());
 }
 
+/// LU records the eliminations with their multipliers and answers with the
+/// product [[L]] × [[U]], which makes the two triangles readable as factors.
+#[test]
+fn lu_records_the_elimination_and_shows_its_factors() {
+    let source = matrix(&[&["4", "3"], &["6", "3"]]);
+    let solution = source.lu_solution().expect("no zero pivot");
+    assert_eq!(solution.problem_type(), "LU factorisation");
+    assert_steps_progress(&solution);
+
+    let factors = factors_of_result(&solution);
+    assert_eq!(factors.len(), 2, "LU has exactly the two factors L and U");
+    let (l, u) = (&factors[0], &factors[1]);
+    // L is unit lower triangular holding the multipliers (6 / 4 = 3 / 2)…
+    assert_eq!(l[0][0].to_string(), "1");
+    assert_eq!(l[1][0].to_string(), "3 / 2");
+    assert_eq!(l[1][1].to_string(), "1");
+    // …and U is the eliminated matrix, which stays upper triangular.
+    assert_eq!(u[0][0].to_string(), "4");
+    assert_eq!(u[0][1].to_string(), "3");
+    assert_eq!(u[1][0].to_string(), "0");
+    assert_eq!(u[1][1].to_string(), "-3 / 2");
+
+    // The product reconstructs A: read two of its entries back numerically.
+    let product = l.mul_matrix(u);
+    for (row, column, want) in [(0, 0, 4.0), (1, 1, 3.0)] {
+        let value = product[row][column]
+            .evaluate(0.0_f64)
+            .value()
+            .unwrap_or_else(|| panic!("entry {row},{column} is not numeric"));
+        assert!(
+            (value - want).abs() < 1e-9,
+            "L × U should reconstruct A: entry {row},{column} is {value}, want {want}"
+        );
+    }
+
+    // The recorded elimination names the multiplier, which is L's entry, and
+    // the answer closes by presenting the two factors.
+    let text = solution.to_string();
+    assert!(
+        text.contains("row 2 -= 3 / 2 * row 1"),
+        "the elimination step should name its multiplier, got {text}"
+    );
+    assert!(
+        text.contains("read off L and U"),
+        "the solution should show the factors, got {text}"
+    );
+}
+
+/// A zero pivot leaves the no-pivoting LU stuck, so the solution reports None
+/// the same way the untracked factorisation does.
+#[test]
+fn lu_rejects_a_zero_pivot() {
+    let source = matrix(&[&["0", "1"], &["1", "0"]]);
+    assert!(source.lu_solution().is_none());
+    // The untracked factorisation declines the same pivot.
+    assert!(source.lu_factorisation().is_none());
+}
+
 /// The SVD is recorded through the route that `Matrix<Expr>` actually takes —
 /// the exact one, since `Expr` is not a floating type. That means `AᵀA` is
 /// formed, its eigen-decomposition is attached as a nested sub-solution, and the
@@ -330,9 +423,25 @@ fn svd_records_the_exact_route() {
         .count();
     assert_eq!(nested, 1, "expected one nested eigen sub-solution");
 
-    // The answer must be the reconstruction U Σ Vᵀ, which is A again — not just
-    // the singular-value matrix.
-    let reconstructed = matrix_of_result(&solution);
+    // The answer must be the factorisation itself: U × Σ × Vᵀ, three matrix
+    // factors — not just the singular-value matrix, and not only their
+    // collapsed product. Reading the factors back out and multiplying them
+    // must reconstruct A.
+    let factors = factors_of_result(&solution);
+    assert_eq!(
+        factors.len(),
+        3,
+        "SVD has exactly the three factors U, Σ and Vᵀ"
+    );
+    let (u, sigma, v_transposed) = (&factors[0], &factors[1], &factors[2]);
+    for (name, factor) in [("U", u), ("Σ", sigma), ("Vᵀ", v_transposed)] {
+        assert_eq!(
+            (factor.rows(), factor.columns()),
+            (2, 2),
+            "{name} should be square for the identity"
+        );
+    }
+    let reconstructed = u.mul_matrix(sigma).mul_matrix(v_transposed);
     for (row, want_row) in [[1.0, 0.0], [0.0, 1.0]].iter().enumerate() {
         for (column, want) in want_row.iter().enumerate() {
             let got = reconstructed[row][column]

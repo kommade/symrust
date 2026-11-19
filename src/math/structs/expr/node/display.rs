@@ -605,7 +605,26 @@ impl<T: SymbolicLeaf> Display for NodeInner<T> {
                                 } else if right_is_one {
                                     left_str
                                 } else {
-                                    format!("{left_str} {right_str}")
+                                    let left_is_matrix = matches!(
+                                        left.value,
+                                        NodeValue::Operand(Token::Matrix(_))
+                                    );
+                                    let right_is_matrix = matches!(
+                                        right.value,
+                                        NodeValue::Operand(Token::Matrix(_))
+                                    );
+                                    if left_is_matrix || right_is_matrix {
+                                        // Two bracketed groups glued by a space
+                                        // read as one matrix, so a product of
+                                        // matrices must carry a visible `*`:
+                                        // `[[L]] * [[U]]`, not a single box. The
+                                        // left factor's trailing newline is
+                                        // dropped so the break falls between the
+                                        // factors and not in front of the `*`.
+                                        format!("{} * {right_str}", left_str.trim_end())
+                                    } else {
+                                        format!("{left_str} {right_str}")
+                                    }
                                 }
                             }
                             Op::Div => {

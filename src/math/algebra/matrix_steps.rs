@@ -826,12 +826,23 @@ impl<T> Matrix<Expr<T>> where T: SymbolicLeaf {
 
     /// QR factorisation by Gram–Schmidt, recording the orthogonalisation steps.
     ///
-    /// The result is the augmented `[Q | R]`: the first `columns` columns are
-    /// `Q`, the remaining ones are `R`. Returns `None` when a column is
-    /// linearly dependent on the earlier ones.
+    /// The result is the factorisation itself, the product `Q × R`. Returns
+    /// `None` when a column is linearly dependent on the earlier ones.
     #[must_use]
     pub fn qr_solution(&self) -> Option<Solution<Expr<T>, Expr<T>>> {
         qr_tracked(self)
+    }
+
+    /// The LU factorisation by Gaussian elimination, recording the steps.
+    ///
+    /// The elimination multipliers make up `L` (unit lower triangular) and the
+    /// eliminated matrix is `U` (upper triangular); the result is the product
+    /// `L × U`, which reconstructs `A`. Returns `None` when a zero pivot is
+    /// reached — as in [`Matrix::lu_factorisation`], this elimination does not
+    /// pivot rows.
+    #[must_use]
+    pub fn lu_solution(&self) -> Option<Solution<Expr<T>, Expr<T>>> {
+        lu_tracked(self)
     }
 
     /// Singular value decomposition, recording the route actually taken.
@@ -1380,33 +1391,22 @@ where
             r_matrix[i][j] = total;
         }
     }
-    let mut augmented = Matrix::<Expr<T>>::new(rows, columns * 2);
-    for row in 0..rows {
-        for column in 0..columns {
-            augmented[row][column] = q_matrix[row][column].clone();
-            // R is only `columns x columns`; on a tall matrix the remaining
-            // rows contribute nothing to QᵀA, so they are written as zeros.
-            augmented[row][columns + column] = if row < columns {
-                r_matrix[row][column].clone()
-            } else {
-                Expr::from_f64(0.0)
-            };
-        }
-    }
 
-    let described = matrix_expr(&augmented);
+    let described = matrix_expr(&r_matrix);
     recorder.record(
         "assemble",
-        || format!(
-            "Q holds the orthonormal columns and R = QᵀA; written side by side, \
-             Q = the first {columns} columns and R = the remaining {columns}. \
-             R's diagonal holds the lengths the normalise steps divided by, and \
-             the entries above it are the projections the orthogonalise steps \
-             subtracted"
-        ),
+        || "Q holds the orthonormal columns and R = QᵀA: R's diagonal holds the \
+           lengths the normalise steps divided by, and the entries above it are \
+           the projections the orthogonalise steps subtracted. The result \
+           multiplies Q by R, which reconstructs A"
+            .to_string(),
         || described.clone(),
     );
-    Some(recorder.finish(described))
+    // The answer shows the factorisation itself: Q × R, each factor a matrix.
+    Some(recorder.finish(Expr::from_node(Node::mul(
+        Node::matrix(q_matrix),
+        Node::matrix(r_matrix),
+    ))))
 }
 
 /// A single column rendered as an `n x 1` matrix expression, for showing a
@@ -1445,10 +1445,9 @@ where
 ///    `U = AVΣ⁻¹`.
 ///
 /// Steps 1 and 3 are recorded here and step 2 is attached as a sub-solution, so
-/// the `Solution` accounts for the whole computation. The recorded result is the
-/// full `U Σ Vᵀ` reconstruction (as `Σ`), with `U` and `V` noted in the
-/// description; the step result stays a matrix because a `Solution` step holds a
-/// single expression.
+/// the `Solution` accounts for the whole computation. The assemble step carries
+/// the reconstruction `U Σ Vᵀ`, which is `A` again; the solution's result is
+/// the factorisation itself, `U × Σ × Vᵀ`, each factor a matrix.
 ///
 /// Returns `None` when [`Matrix::svd`][crate::math::algebra::linear::Matrix::svd] has
 /// no decomposition for these entries. See [`Matrix::svd_solution`].
@@ -1502,9 +1501,81 @@ where
         || matrix_expr(&reconstructed),
     );
 
-    // The answer is the reconstruction, which is A again — recording Σ as the
-    // result would lose U and V entirely.
-    Some(recorder.finish(matrix_expr(&reconstructed)))
+    // The answer shows the factorisation itself: U × Σ × Vᵀ, each factor a
+    // matrix. The assemble step above carries the reconstruction, which is A
+    // again, so the record both shows the factors and proves their product.
+    Some(recorder.finish(Expr::from_node(Node::mul(
+        Node::matrix(left),
+        Node::mul(Node::matrix(sigma), Node::matrix(right_transpose)),
+    ))))
+}
+
+/// The LU factorisation by Gaussian elimination, recording the steps.
+///
+/// Elimination runs column by column without row swaps: the multiplier of
+/// each `row -= pivot-row` is stored in `L`, and the resulting upper
+/// triangular matrix is `U`. A zero pivot means no decomposition of this
+/// no-pivoting form exists and the computation returns `None` — the same
+/// convention as [`Matrix::lu_factorisation`].
+///
+/// The recorded steps are the eliminations with their multipliers, then one
+/// step that presents `L` and `U`; the result is the product `L × U`, which
+/// multiplies back to `A`. See [`Matrix::lu_solution`].
+#[must_use]
+fn lu_tracked<T>(matrix: &Matrix<Expr<T>>) -> Option<Solution<Expr<T>, Expr<T>>>
+where
+    T: SymbolicLeaf,
+{
+    if matrix.rows() != matrix.columns() {
+        return None;
+    }
+    let size = matrix.rows();
+    let mut work = matrix.clone();
+    let mut recorder = StepRecorder::new(matrix_expr(matrix), "LU factorisation");
+
+    // L starts as the identity; every elimination below writes one
+    // sub-diagonal multiplier into it and U emerges from the elimination.
+    let mut lower = Matrix::<Expr<T>>::identity(size);
+
+    for column in 0..size {
+        if work[column][column].is_zero() {
+            return None;
+        }
+        let pivot = work[column][column].clone();
+        for row in (column + 1)..size {
+            let entry = work[row][column].clone();
+            if entry.is_zero() {
+                continue;
+            }
+            let multiple = entry / pivot.clone();
+            eliminate_row(
+                &mut work,
+                row,
+                column,
+                multiple.clone(),
+                &mut recorder,
+                "eliminate",
+            );
+            lower[row][column] = tidy(multiple);
+        }
+    }
+
+    // Present the two factors; the result is their product, which is A again.
+    let product = Expr::from_node(Node::mul(
+        Node::matrix(lower),
+        Node::matrix(work),
+    ));
+    recorder.record(
+        "read off L and U",
+        || {
+            "L is unit lower triangular and holds the elimination multipliers, \
+             and U is the remaining upper triangular matrix; the result is the \
+             product L × U, which reconstructs A"
+                .to_string()
+        },
+        || product.clone(),
+    );
+    Some(recorder.finish(product))
 }
 
 /// The product of two matrices of expressions, assuming the inner dimensions

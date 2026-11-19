@@ -377,6 +377,21 @@ where
         ))
     }
 
+    /// The LU factorisation, recording the elimination steps.
+    ///
+    /// The result is the factorisation itself, the product `L × U`.
+    ///
+    /// # Errors
+    ///
+    /// [`ExprError::NotAMatrix`] when the expression is not a matrix,
+    /// [`ExprError::NotSquare`] when it is not square, or
+    /// [`ExprError::Undefined`] when a zero pivot is reached.
+    pub fn lu_solution(&self) -> Result<Solution<Expr<T>, Expr<T>>, ExprError> {
+        self.square_or_error()?.lu_solution().ok_or(ExprError::Undefined(
+            "the matrix has a zero pivot, so it has no LU decomposition",
+        ))
+    }
+
     /// The singular value decomposition, recording the route taken.
     ///
     /// # Errors

@@ -221,7 +221,18 @@ impl<T, S> Solution<T, S> {
 
 impl<T: Display, S: Display> Display for Solution<T, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "{}: {}", self.problem_type, self.start)?;
+        // A multi-line opening value (a matrix, say) must not run its first
+        // row on behind the title: give it its own line, the way step results
+        // and the answer are handled.
+        let start = self.start.to_string();
+        if start.contains('\n') {
+            writeln!(f, "{}:", self.problem_type)?;
+            // The rendered matrix already ends in its own newline; trim it so
+            // exactly one line break separates the problem from the steps.
+            writeln!(f, "{}", start.trim_end())?;
+        } else {
+            writeln!(f, "{}: {}", self.problem_type, start)?;
+        }
         // Only elementary steps carry numbers; a nested sub-solution renders
         // as its own indented block between them, so the numbering of the
         // parent's rules stays contiguous.
