@@ -47,6 +47,32 @@ fn is_atom(rendered: &str) -> bool {
     !rendered.contains([' ', '+', '/'])
 }
 
+/// Join a finished left rendering with its right factor after a visible ` * `.
+///
+/// Matrices render as multi-line bracket blocks, so a product of matrices
+/// cannot sit on one line: the `*` is printed after the left factor's last row
+/// (that is where the left factor ends), and every following row of the right
+/// factor is indented to the column the right factor was started on, so the
+/// block reads as a multiplication rather than a run-on. A right factor that
+/// is itself a product keeps its internal alignment: its rows are all shifted
+/// by the same padding.
+fn join_with_star(left: &str, right: &str) -> String {
+    const JOINER: &str = " * ";
+    let left = left.trim_end();
+    let right = right.trim_end();
+    let align = left.rsplit('\n').next().unwrap_or("").chars().count() + JOINER.len();
+    let pad = " ".repeat(align);
+    let mut joined = format!("{left}{JOINER}");
+    for (index, line) in right.split('\n').enumerate() {
+        if index > 0 {
+            joined.push('\n');
+            joined.push_str(&pad);
+        }
+        joined.push_str(line);
+    }
+    joined
+}
+
 /// Render a matrix of expressions, pulling a factor shared by every entry out
 /// in front of the brackets.
 ///
@@ -618,10 +644,9 @@ impl<T: SymbolicLeaf> Display for NodeInner<T> {
                                         // read as one matrix, so a product of
                                         // matrices must carry a visible `*`:
                                         // `[[L]] * [[U]]`, not a single box. The
-                                        // left factor's trailing newline is
-                                        // dropped so the break falls between the
-                                        // factors and not in front of the `*`.
-                                        format!("{} * {right_str}", left_str.trim_end())
+                                        // right factor hangs below the `*`,
+                                        // aligned under the row it starts on.
+                                        join_with_star(&left_str, &right_str)
                                     } else {
                                         format!("{left_str} {right_str}")
                                     }

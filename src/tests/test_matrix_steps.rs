@@ -368,6 +368,7 @@ fn lu_records_the_elimination_and_shows_its_factors() {
         text.contains("read off L and U"),
         "the solution should show the factors, got {text}"
     );
+    println!("solution: {solution}");
 }
 
 /// A zero pivot leaves the no-pivoting LU stuck, so the solution reports None
@@ -427,6 +428,7 @@ fn svd_records_the_exact_route() {
     // factors — not just the singular-value matrix, and not only their
     // collapsed product. Reading the factors back out and multiplying them
     // must reconstruct A.
+    println!("solution: {solution}");
     let factors = factors_of_result(&solution);
     assert_eq!(
         factors.len(),

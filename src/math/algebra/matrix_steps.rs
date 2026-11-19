@@ -1432,6 +1432,24 @@ where
     total
 }
 
+/// Reduce every entry of a matrix to its most readable exact form.
+///
+/// The linear algebra layer computes with raw expression arithmetic; the
+/// tracked layer shows matrices, so the entries go through [`Expr::tidy`]
+/// like every other recorded entry does.
+fn tidy_matrix<T>(matrix: &Matrix<Expr<T>>) -> Matrix<Expr<T>>
+where
+    T: SymbolicLeaf,
+{
+    let mut result = Matrix::<Expr<T>>::new(matrix.rows(), matrix.columns());
+    for row in 0..matrix.rows() {
+        for (column, entry) in matrix[row].iter().enumerate() {
+            result[row][column] = tidy(entry.clone());
+        }
+    }
+    result
+}
+
 /// Singular value decomposition, recording the route actually taken.
 ///
 /// [`Matrix::svd`][crate::math::algebra::linear::Matrix::svd] tries two routes.
@@ -1457,9 +1475,13 @@ where
     T: SymbolicLeaf,
 {
     let decomposition = matrix.svd()?;
-    let sigma = decomposition.sigma().clone();
-    let left = decomposition.left_singular_vectors().clone();
-    let right = decomposition.right_singular_vectors().clone();
+    // The linear layer builds these matrices with its own arithmetic, which
+    // leaves entries such as `sqrt(0 + 1 + 0 0)`; folding each entry back
+    // through tidy keeps the factors readable wherever they appear — in the
+    // assemble step and in the product that is the answer.
+    let sigma = tidy_matrix(&decomposition.sigma().clone());
+    let left = tidy_matrix(&decomposition.left_singular_vectors().clone());
+    let right = tidy_matrix(&decomposition.right_singular_vectors().clone());
 
     let mut recorder = StepRecorder::new(matrix_expr(matrix), "singular value decomposition");
 
