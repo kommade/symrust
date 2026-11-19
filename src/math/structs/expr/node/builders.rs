@@ -170,10 +170,9 @@ impl<T: SymbolicLeaf> Node<T> {
 
     /// Whether two nodes have the same structure and leaf values.
     ///
-    /// This is a real structural comparison: the token kinds must match, the
-    /// operator and function must match, and both operands must be structurally
-    /// equal in the same order. `a + b` and `b + a` are therefore *not* equal —
-    /// this compares trees, not values.
+    /// This is a real structural comparison — a delegation to the
+    /// [`PartialEq`] on the node's payload, which walks both trees. `a + b`
+    /// and `b + a` are *not* equal: this compares trees, not values.
     ///
     /// Numeric leaves compare by value rather than by token kind, so a
     /// `Number(1)` and a `Float(1.0)` of the same value are equal. That is the
@@ -182,27 +181,18 @@ impl<T: SymbolicLeaf> Node<T> {
     /// freely produces either.
     #[must_use]
     pub fn same_tree(&self, other: &Self) -> bool {
-        let left = self.inner.borrow();
-        let right = other.inner.borrow();
-        match (&left.value, &right.value) {
-            (NodeValue::Empty, NodeValue::Empty) => true,
-            (NodeValue::Operand(a), NodeValue::Operand(b)) => tokens_equal(a, b),
-            (NodeValue::Operator(a), NodeValue::Operator(b)) => {
-                a.token.to_string() == b.token.to_string()
-                    && a.left.same_tree(&b.left)
-                    && a.right.same_tree(&b.right)
-            }
-            _ => false,
-        }
+        *self.inner.borrow() == *other.inner.borrow()
     }
 }
 
 /// Whether two operand tokens denote the same leaf.
 ///
-/// Numeric leaves compare by value, so `Number(1)` equals `Float(1.0)`. Every
-/// other token compares by its display form, which is exact for the token kinds
-/// that can appear as operands (variables, constants, root sums).
-fn tokens_equal<T>(left: &Token<T>, right: &Token<T>) -> bool
+/// Numeric leaves compare by value, so `Number(1)` equals `Float(1.0)`. A
+/// fraction leaf is canonical ([`Token::Rational`] carries reduced `Rat`), so
+/// equal values are literally equal fields. Every other token compares by its
+/// display form, which is exact for the token kinds that can appear as
+/// operands (variables, constants, root sums).
+pub(crate) fn tokens_equal<T>(left: &Token<T>, right: &Token<T>) -> bool
 where
     T: SymbolicLeaf,
 {

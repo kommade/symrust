@@ -741,10 +741,44 @@ impl<T: SymbolicLeaf> Display for NodeInner<T> {
         }
     }
 }
-/// Two node inners are equal when their LaTeX renderings match. The renderer
-/// is leaf-generic, so the comparison is too.
+/// Two node inners are equal when their *trees* match.
+///
+/// Structural comparison, iteration instead of recursion (the callers compare
+/// like-term candidates inside big sums, where recursion depth would follow
+/// the chain length). Operator tokens — including the function payload —
+/// compare as enums, operand leaves through
+/// [`tokens_equal`](super::builders::tokens_equal); the derived flags
+/// (`has_indp` etc.) are functions of the value, so equal values carry equal
+/// flags and need no separate check.
+///
+/// This replaces a LaTeX-rendering comparison, which was a stopgap the
+/// `Expr` equality had already outgrown: rendering conflated distinct trees
+/// that print alike (`2 * x` and `x * 2`, associativity variants) and paid a
+/// string build per side on one of the hottest predicates in the crate —
+/// the like-term matcher in the simplifier. Equal-under-rendering but
+/// structurally different trees are now correctly distinct; the simplifier
+/// rebuilds trees it wants canonicalised before comparing, as it always did
+/// for its own rewrite results.
 impl<T: SymbolicLeaf> PartialEq for NodeInner<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.to_latex().unwrap() == other.to_latex().unwrap()
+        use super::builders::tokens_equal;
+        match (&self.value, &other.value) {
+            (NodeValue::Empty, NodeValue::Empty) => true,
+            (NodeValue::Operand(a), NodeValue::Operand(b)) => tokens_equal(a, b),
+            (NodeValue::Operator(a), NodeValue::Operator(b)) => {
+                // Operator tokens — including the function payload — compare
+                // as enums; children recurse through their handles.
+                if a.token != b.token {
+                    return false;
+                }
+                let (left_left, right_left) = (a.left.inner.borrow(), b.left.inner.borrow());
+                if !(*left_left == *right_left) {
+                    return false;
+                }
+                let (left_right, right_right) = (a.right.inner.borrow(), b.right.inner.borrow());
+                *left_right == *right_right
+            }
+            _ => false,
+        }
     }
 }
