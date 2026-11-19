@@ -1,5 +1,7 @@
 #![cfg_attr(feature = "generic_const", feature(generic_const_exprs))]
 #![cfg_attr(feature = "generic_const", allow(incomplete_features))]
+// The built-in bench harness: `#[bench]` runs through `cargo bench --lib`.
+#![cfg_attr(test, feature(test))]
 #![allow(dead_code)]
 
 //! A symbolic math library.
@@ -31,6 +33,12 @@ macro_rules! calc_step {
 }
 
 pub mod math;
+
+#[cfg(test)]
+extern crate test;
+
+#[cfg(test)]
+mod benchmarks;
 
 #[cfg(test)]
 mod tests;
