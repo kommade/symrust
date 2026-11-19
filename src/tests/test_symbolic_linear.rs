@@ -28,7 +28,6 @@ fn sample(expr: &Expr, x: f64) -> Option<f64> {
 
 #[test]
 fn characteristic_polynomial_of_a_diagonal_matrix() {
-    super::setup();
     // A = [[x, 0], [0, y]] is not expressible, so use x and a constant.
     let source = matrix(&[&["x", "0"], &["0", "3"]]);
     let polynomial = source.characteristic_polynomial().expect("square matrix");
@@ -54,7 +53,6 @@ fn characteristic_polynomial_of_a_diagonal_matrix() {
 
 #[test]
 fn symbolic_eigenvalues_of_a_triangular_matrix() {
-    super::setup();
     // A = [[1, 0], [0, x]]  ->  eigenvalues 1 and x.
     let source = matrix(&[&["1", "0"], &["0", "x"]]);
     let found = source.symbolic_eigenvalues().expect("degree 2 has a closed form");
@@ -84,7 +82,6 @@ fn symbolic_eigenvalues_of_a_triangular_matrix() {
 
 #[test]
 fn symbolic_square_matrix_has_a_root_of_x() {
-    super::setup();
     // A = [[0, 1], [x, 0]]  ->  λ² = x, so λ = ±sqrt(x).
     let source = matrix(&[&["0", "1"], &["x", "0"]]);
     let found = source.symbolic_eigenvalues().expect("quadratic formula applies");
@@ -104,7 +101,6 @@ fn symbolic_square_matrix_has_a_root_of_x() {
 
 #[test]
 fn cubic_characteristic_polynomial_has_no_radical_roots() {
-    super::setup();
     // A 3x3 with a variable gives a cubic in λ, which this module declines.
     let source = matrix(&[&["x", "0", "0"], &["0", "1", "0"], &["0", "0", "2"]]);
     let Some(polynomial) = source.characteristic_polynomial() else {
@@ -119,7 +115,6 @@ fn cubic_characteristic_polynomial_has_no_radical_roots() {
 
 #[test]
 fn symbolic_eigenvalues_are_tidied() {
-    super::setup();
     // A = [[1, 0], [0, x]]: the discriminant x^2 - 2x + 1 is (x - 1)^2, so the
     // quadratic formula should collapse to the exact roots {1, x} rather than
     // leaving a sqrt behind.
@@ -139,7 +134,6 @@ fn symbolic_eigenvalues_are_tidied() {
 /// count also matches `n * null(Aᵗ)` / `m * null(A)` from the docs.
 #[test]
 fn general_left_inverse_particular_and_basis_verify() {
-    super::setup();
     // 3x2 tall, full column rank: L A = I₂; null(Aᵗ) is 1-dimensional
     // (3 rows, rank 2), so the family has n * 1 = 2 basis matrices.
     let source = matrix(&[&["1", "2"], &["3", "4"], &["5", "6"]]);
@@ -151,9 +145,9 @@ fn general_left_inverse_particular_and_basis_verify() {
     assert_eq!(product.rows(), 2);
     assert_eq!(product.columns(), 2);
     for row in 0..2 {
-        for column in 0..2 {
+        for (column, entry) in product[row].iter().enumerate() {
             let expected = if row == column { 1.0 } else { 0.0 };
-            let value = sample(&product[row][column], 0.0).unwrap_or(f64::NAN);
+            let value = sample(entry, 0.0).unwrap_or(f64::NAN);
             assert!(
                 (value - expected).abs() < 1e-9,
                 "L A should be the identity, got {value} at ({row}, {column})"
@@ -166,8 +160,8 @@ fn general_left_inverse_particular_and_basis_verify() {
         assert_eq!((basis.rows(), basis.columns()), (2, 3));
         let cancelled = basis.mul_matrix(&source);
         for row in 0..cancelled.rows() {
-            for column in 0..cancelled.columns() {
-                let value = sample(&cancelled[row][column], 0.0).unwrap_or(f64::NAN);
+            for (column, entry) in cancelled[row].iter().enumerate() {
+                let value = sample(entry, 0.0).unwrap_or(f64::NAN);
                 assert!(
                     value.abs() < 1e-9,
                     "a basis matrix must annihilate A, got {value} at ({row}, {column})"
@@ -177,9 +171,10 @@ fn general_left_inverse_particular_and_basis_verify() {
     }
 }
 
+/// The general right inverse verifies the same two ways: `A R = I` for the
+/// particular inverse, and every basis matrix is annihilated by `A`.
 #[test]
 fn general_right_inverse_particular_and_basis_verify() {
-    super::setup();
     // 2x3 wide, full row rank: A R = I₂ with R 3x2; null(A) is 1-dimensional
     // (3 columns, rank 2). The family of differences N has m_rows * nullity =
     // 2 * 1 = 2 free parameters, each basis a 3x2 matrix carrying one column
@@ -196,9 +191,9 @@ fn general_right_inverse_particular_and_basis_verify() {
 
     let product = source.mul_matrix(&particular);
     for row in 0..2 {
-        for column in 0..2 {
+        for (column, entry) in product[row].iter().enumerate() {
             let expected = if row == column { 1.0 } else { 0.0 };
-            let value = sample(&product[row][column], 0.0).unwrap_or(f64::NAN);
+            let value = sample(entry, 0.0).unwrap_or(f64::NAN);
             assert!(
                 (value - expected).abs() < 1e-9,
                 "A R should be the identity, got {value} at ({row}, {column})"
@@ -211,8 +206,8 @@ fn general_right_inverse_particular_and_basis_verify() {
         assert_eq!((basis.rows(), basis.columns()), (3, 2));
         let cancelled = source.mul_matrix(basis);
         for row in 0..cancelled.rows() {
-            for column in 0..cancelled.columns() {
-                let value = sample(&cancelled[row][column], 0.0).unwrap_or(f64::NAN);
+            for (column, entry) in cancelled[row].iter().enumerate() {
+                let value = sample(entry, 0.0).unwrap_or(f64::NAN);
                 assert!(
                     value.abs() < 1e-9,
                     "a basis matrix must be annihilated by A, got {value} at ({row}, {column})"
@@ -227,7 +222,6 @@ fn general_right_inverse_particular_and_basis_verify() {
 /// distinct but equally valid left inverses.
 #[test]
 fn general_right_inverse_parameter_substitution_stays_exact() {
-    super::setup();
     // 2x3 wide: pick two different parameter values and check A (R + t·B) = I
     // for both — the family really does cover valid inverses for any t.
     let source = matrix(&[&["1", "2", "3"], &["4", "5", "6"]]);
@@ -238,19 +232,18 @@ fn general_right_inverse_parameter_substitution_stays_exact() {
         let adjusted = {
             let mut sum = particular.clone();
             for row in 0..sum.rows() {
-                for column in 0..sum.columns() {
-                    sum[row][column] =
-                        (sum[row][column].clone() + parameter.clone() * basis[row][column].clone())
-                            .simplify(true);
+                for (column, entry) in sum[row].iter_mut().enumerate() {
+                    *entry = (entry.clone() + parameter.clone() * basis[row][column].clone())
+                        .simplify(true);
                 }
             }
             sum
         };
         let product = source.mul_matrix(&adjusted);
         for row in 0..2 {
-            for column in 0..2 {
+            for (column, entry) in product[row].iter().enumerate() {
                 let expected = if row == column { 1.0 } else { 0.0 };
-                let value = sample(&product[row][column], 0.0).unwrap_or(f64::NAN);
+                let value = sample(entry, 0.0).unwrap_or(f64::NAN);
                 assert!(
                     (value - expected).abs() < 1e-9,
                     "substituting the parameter must keep the identity, got {value} at ({row}, {column})"
@@ -262,7 +255,6 @@ fn general_right_inverse_parameter_substitution_stays_exact() {
 
 #[test]
 fn sqrt_of_a_perfect_square_polynomial_collapses() {
-    super::setup();
     // `sqrt(x^2 - 2x + 1)` is `|x - 1|`, which is `x - 1` on the non-negative
     // branch; the simplifier factors the radicand and drops the sqrt.
     let expr = create_expr!("sqrt(x^2 - 2x + 1)").unwrap().simplify(true);
@@ -281,7 +273,6 @@ fn sqrt_of_a_perfect_square_polynomial_collapses() {
 
 #[test]
 fn sqrt_of_a_non_square_stays() {
-    super::setup();
     // x^2 + 1 has no repeated factor, so the sqrt must remain.
     let expr = create_expr!("sqrt(x^2 + 1)").unwrap().simplify(true);
     assert!(
@@ -293,7 +284,6 @@ fn sqrt_of_a_non_square_stays() {
 
 #[test]
 fn eigen_solution_uses_symbolic_roots() {
-    super::setup();
     let source = matrix(&[&["1", "0"], &["0", "x"]]);
     let solution = source.eigen_solution().expect("symbolic eigenvalues available");
 
@@ -305,7 +295,6 @@ fn eigen_solution_uses_symbolic_roots() {
 
 #[test]
 fn eigen_solution_still_works_for_numeric_matrices() {
-    super::setup();
     let source = matrix(&[&["1", "0"], &["0", "2"]]);
     let solution = source.eigen_solution().expect("numeric path");
     assert_eq!(solution.problem_type(), "eigen-decomposition");

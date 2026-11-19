@@ -420,7 +420,7 @@ where
     /// (`m > n`, full column rank) every matrix `L' = L + N` with
     /// `N * self = 0` is also a left inverse, and those `N` are exactly the
     /// matrices whose *rows* lie in `null(selfᵗ)`. The result carries the
-    /// [`Matrix::left_inverse`][External:minimum] particular inverse (the
+    /// `Matrix::left_inverse` particular inverse (the
     /// minimum-norm one) plus one basis matrix per free parameter, each of
     /// shape `n x m`: basis `(i, j)` is `e_i c_jᵗ`, where `e_i` is the i-th
     /// standard row and `c_j` the j-th basis vector of `null(selfᵗ)`. Any

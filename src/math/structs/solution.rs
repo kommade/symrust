@@ -117,7 +117,7 @@ impl<T, S> SolutionStep<T, S> {
 /// The plain entry points return only the answer and record no steps.
 ///
 /// The type is a *finished record*: construction happens exclusively through
-/// [`StepRecorder`][crate::math::structs::solution::StepRecorder], which owns
+/// `StepRecorder`, which owns
 /// the fields while a computation runs and hands back a frozen `Solution` on
 /// `finish`. Nothing in the crate can mutate a `Solution` — not even through
 /// the crate's own code — so a caller can never observe steps appearing after

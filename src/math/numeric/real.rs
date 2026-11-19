@@ -132,7 +132,7 @@ impl Real {
     }
 
     /// The value as an exact dyadic fraction, `num * 2^exp2`, when it fits the
-    /// [`i128`] arithmetic that [`Rat`][crate::math::algebra::Rat] uses.
+    /// [`i128`] arithmetic that [`Rat`](crate::math::algebra::rational::Rat) uses.
     ///
     /// Every finite binary float is exactly a dyadic rational: the mantissa is
     /// an integer and the exponent a power-of-two scale, so the conversion
