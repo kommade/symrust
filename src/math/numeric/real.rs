@@ -153,7 +153,7 @@ impl Real {
         // normalized 113-bit mantissa (msb at bit 113); subnormals follow the
         // same shape with a shorter mantissa.
         let mantissa = self.0.get_mantissa().as_u128();
-        let exp = self.0.get_exp() as i64;
+        let exp = self.0.get_exp();
         let zeros = mantissa.trailing_zeros() as i64; // 0 when already odd
         let odd = (mantissa >> zeros) as i128; // ≤ 2^113, fits comfortably
         let shift = exp - 112 + zeros; // value = ±odd * 2^shift
@@ -161,7 +161,7 @@ impl Real {
         if shift >= 0 {
             // Numerator = odd * 2^shift must stay within i128 (127 bits). The
             // leading-zero count of `odd` gives exactly how far it can shift.
-            let room = (odd.unsigned_abs() as u128).leading_zeros() as i64;
+            let room = odd.unsigned_abs().leading_zeros() as i64;
             if shift > room - 1 {
                 return None;
             }

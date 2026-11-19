@@ -348,9 +348,12 @@ fn integrate_solution_matches_integrate_and_records_steps() {
         !solution.steps().is_empty(),
         "the solution should record the search steps"
     );
+    // A definite integral answers with a number the steps already explain, so
+    // it carries no result comment — and it must not inherit the antideriva-
+    // tive's (irrelevant) root-sum one either.
     assert!(
-        solution.result_comment().contains("definite integral"),
-        "the result should explain it is a definite integral, got: {}",
+        solution.result_comment().is_empty(),
+        "a definite integral needs no result comment, got: {}",
         solution.result_comment()
     );
 }

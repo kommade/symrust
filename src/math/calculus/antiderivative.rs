@@ -327,45 +327,20 @@ where
         upper: T,
         context: IntegratorContext,
     ) -> Result<Solution<Self, Self>, IntegrationError> {
-        // Format the comment before the bounds are moved into the evaluation.
-        let comment = format!(
-            "the antiderivative evaluated over [{}, {}]; the constant of \
-             integration cancels in a definite integral.",
-            lower, upper
-        );
-
-        // Run the search with the caller's context, then re-description of the
-        // finished antiderivative continues from the antiderivative's frozen
-        // solution by *reopening* it: the fields move into a recorder, steps
-        // are appended, and a new frozen record comes back at the end. The
-        // antiderivative itself is never mutated after `finish`.
-        let (antiderivative, mut antiderivative_recorder) = {
+        // One recorder carries the whole narrative: the search, the statement
+        // of the antiderivative and the bound substitutions. Finishing and
+        // reopening a solution here would round-trip the fields for nothing.
+        let (antiderivative, mut recorder) = {
             let mut recorder = StepRecorder::new(self.clone(), "antiderivative");
             let result = antiderivative_with_context(self, context, &mut recorder)?;
-            // A root-sum result carries an explanatory comment; the definite
-            // integral closes that story, so comment handling stays on the
-            // recorder that owns the fields.
-            if result.contains_root_sum() {
-                recorder.set_result_comment(
-                    "written as a formal sum over the roots Z of an irreducible factor; \
-                     the integrand has no antiderivative expressible in real radicals, \
-                     so the roots are left symbolic rather than expanded into \
-                     decimals. The constant of integration is omitted.",
-                );
-            }
             (result, recorder)
         };
         let antiderivative_text = antiderivative.to_string();
-        antiderivative_recorder.push_step(
+        recorder.push_step(
             "calculation complete",
             "the antiderivative is",
             antiderivative.clone(),
         );
-        let antiderivative_solution = antiderivative_recorder.finish(antiderivative.clone());
-
-        // Reopen the finished antiderivative record to write the bound
-        // substitutions as a continuation of the same story.
-        let mut recorder = StepRecorder::reopen(antiderivative_solution);
 
         // Record both substitutions: `F(bound) = value`, or the limit when
         // substituting would hit an indeterminate form (see [`bound_value`]).
@@ -400,7 +375,8 @@ where
                 behaviour: String::from("an indeterminate difference between the bounds"),
             });
         }
-        recorder.set_result_comment(comment);
+        // No result comment: a definite integral answers with a number, and
+        // the steps above already tell the user where it came from.
         Ok(recorder.finish(Expr::from_node(Node::<T>::float(value))))
     }
 }

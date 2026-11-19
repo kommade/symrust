@@ -122,10 +122,10 @@ impl<T, S> SolutionStep<T, S> {
 /// `finish`. Nothing in the crate can mutate a `Solution` — not even through
 /// the crate's own code — so a caller can never observe steps appearing after
 /// the fact or an answer changing under a shared reference. A computation that
-/// wants to *continue* an existing narrative calls
-/// [`StepRecorder::reopen`], which takes ownership of the fields and moves
-/// them back into a recorder; that is an explicit, visible ownership move,
-/// never a mutation behind someone's back.
+/// wants a multi-part narrative simply keeps its recorder running across all
+/// of them, the way the definite integral records the search, the statement of
+/// the antiderivative and the bound substitutions through one continuous
+/// recording session.
 ///
 /// The two type parameters are deliberately separate. `S` is what the steps
 /// record; it defaults to `T` so the common case needs one parameter. They come
@@ -459,9 +459,10 @@ impl<T> Recorder<T> for NoSteps {
 ///
 /// The recorder owns the solution's fields while the computation runs; it is
 /// the only thing in the crate that can append to them. `finish` consumes the
-/// recorder and hands back a frozen [`Solution`], and [`reopen`][Self::reopen]
-/// reverses that move explicitly when a computation must continue an existing
-/// narrative.
+/// recorder and hands back a frozen [`Solution`]. A multi-part narrative — a
+/// search, a statement of the result, the steps that use it — records through
+/// one continuous recorder and finishes once; a finished `Solution` itself has
+/// no mutator anywhere in the crate.
 #[derive(Debug, Clone)]
 pub(crate) struct StepRecorder<T = Expr, S = T> {
     solution: Solution<T, S>,
@@ -480,21 +481,6 @@ impl<T, S: Default> StepRecorder<T, S> {
                 result_comment: String::new(),
             },
         }
-    }
-
-    /// Take ownership of a finished solution's fields, continuing its
-    /// narrative.
-    ///
-    /// This is the only way to record into a [`Solution`] after `finish`, and
-    /// it is deliberately not an in-place mutation: the solution is consumed,
-    /// its fields move into the recorder, and a new frozen record comes back
-    /// from [`finish`][Self::finish]. The explicit round-trip makes "this
-    /// narrative is being extended" visible at the call site — the definite
-    /// integral, for instance, reopens the antiderivative's solution to add
-    /// the bound substitutions beneath its story.
-    #[must_use]
-    pub(crate) fn reopen(solution: Solution<T, S>) -> Self {
-        Self { solution }
     }
 
     /// Finish recording, storing `result` as the answer.
