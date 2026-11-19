@@ -273,8 +273,9 @@ fn factored_rendering_preserves_the_matrix_value() {
 }
 
 /// A product of matrices carries a visible `*` (two juxtaposed boxes read as
-/// one matrix), and the right factor's continuation rows hang aligned under
-/// the row the `*` is printed on, so the product reads as a multiplication.
+/// one matrix), and the two factors are interleaved row by row with the star
+/// on the first row: each factor keeps its block shape, the right factor's
+/// rows all in one column.
 #[test]
 fn matrix_products_render_with_an_aligned_right_factor() {
     let left = create_expr!("[[4, 3], [6, 3]]").unwrap();
@@ -283,16 +284,16 @@ fn matrix_products_render_with_an_aligned_right_factor() {
 
     assert_eq!(
         product.to_string(),
-        "[4 3]\n[6 3] * [2 1]\n        [0 3]"
+        "[4 3] * [2 1]\n[6 3]   [0 3]"
     );
 
-    // A scalar on the left keeps the product on the `*` line too; the matrix
-    // rows still align under the row the `*` is printed on.
+    // A scalar on the left: the matrix rows hang under the row the `*` is on.
     let scalar = create_expr!("2").unwrap();
     let scaled = scalar * create_expr!("[[4, 3], [6, 3]]").unwrap();
     assert_eq!(scaled.to_string(), "2 * [4 3]\n    [6 3]");
 
-    // A scalar on the right fits on the last row of the left factor.
+    // A scalar on the right sits on the first row; the left factor's other
+    // rows keep their place below.
     let reversed = create_expr!("[[4, 3], [6, 3]]").unwrap() * create_expr!("2").unwrap();
-    assert_eq!(reversed.to_string(), "[4 3]\n[6 3] * 2");
+    assert_eq!(reversed.to_string(), "[4 3] * 2\n[6 3]");
 }

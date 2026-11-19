@@ -47,28 +47,60 @@ fn is_atom(rendered: &str) -> bool {
     !rendered.contains([' ', '+', '/'])
 }
 
-/// Join a finished left rendering with its right factor after a visible ` * `.
+/// Join a finished left rendering with its right factor as a visible product.
 ///
 /// Matrices render as multi-line bracket blocks, so a product of matrices
-/// cannot sit on one line: the `*` is printed after the left factor's last row
-/// (that is where the left factor ends), and every following row of the right
-/// factor is indented to the column the right factor was started on, so the
-/// block reads as a multiplication rather than a run-on. A right factor that
-/// is itself a product keeps its internal alignment: its rows are all shifted
-/// by the same padding.
+/// cannot sit on one line. The two factors are interleaved row by row: the
+/// `*` sits on the first row between them
+///
+/// ```text
+/// [1 2 3] * [1 2 3]
+/// [4 5 6]   [1 2 3]
+/// [7 8 9]   [1 2 3]
+/// ```
+///
+/// and every following line pads the left factor's row out to the column the
+/// right factor started on, so each factor keeps its block shape and the
+/// product reads as one multiplication. Rows are the same width inside one
+/// matrix, so the alignment holds for every pair of rows; a right factor that
+/// is itself a product keeps its internal alignment because the whole
+/// sub-block shifts uniformly.
 fn join_with_star(left: &str, right: &str) -> String {
     const JOINER: &str = " * ";
     let left = left.trim_end();
     let right = right.trim_end();
-    let align = left.rsplit('\n').next().unwrap_or("").chars().count() + JOINER.len();
-    let pad = " ".repeat(align);
-    let mut joined = format!("{left}{JOINER}");
-    for (index, line) in right.split('\n').enumerate() {
+    let left_lines: Vec<&str> = left.split('\n').collect();
+    let right_lines: Vec<&str> = right.split('\n').collect();
+    // One column for the right factor: past the widest line of the left one,
+    // with the star sitting in the gap just before it on the first row.
+    let column = left_lines
+        .iter()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0)
+        + JOINER.len();
+    let mut joined = String::new();
+    let rows = left_lines.len().max(right_lines.len());
+    for index in 0..rows {
         if index > 0 {
             joined.push('\n');
-            joined.push_str(&pad);
         }
-        joined.push_str(line);
+        let left_line = left_lines.get(index).copied().unwrap_or("");
+        let left_width = left_line.chars().count();
+        joined.push_str(left_line);
+        // A left row with no right partner (a scalar factor, say) ends there.
+        let Some(right_line) = right_lines.get(index) else {
+            continue;
+        };
+        if index == 0 {
+            // The first row carries the star: pad to the star's column, then
+            // the star itself ends exactly where the right factor starts.
+            joined.push_str(&" ".repeat(column - JOINER.len() - left_width));
+            joined.push_str(JOINER);
+        } else {
+            joined.push_str(&" ".repeat(column - left_width));
+        }
+        joined.push_str(right_line);
     }
     joined
 }
