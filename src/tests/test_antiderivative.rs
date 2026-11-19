@@ -935,3 +935,89 @@ fn centred_integral_symmetry_applies_only_to_odd_integrands() {
         .expect("no symmetry: ordinary integration");
     assert_eq!(value, Real::from_f64(2.0));
 }
+
+/// Chebyshev binomial differentials whose substitution competitor fails:
+/// `x^3 sqrt(1 + x^2)` and `x^5 sqrt(1 + x^3)` decompose exactly through
+/// `t = sqrt(a + b x^n)`, where neither the substitution ratio test nor by
+/// parts can find the form. The answers are checked by evaluating the found
+/// antiderivative across the range the verifier samples.
+#[test]
+fn chebyshev_binomial_differentials_integrate_exactly() {
+    use crate::math::numeric::{FloatBridge, Real};
+
+    // ∫ x^3 sqrt(1 + x^2) dx = ((1+x²)^2.5)/5 − ((1+x²)^1.5)/3,
+    // from t² = 1 + x² with k = 1.
+    let expr = create_expr!("x^3 sqrt(1 + x^2)").unwrap();
+    let antiderivative = expr.get_antiderivative().expect("Chebyshev case");
+    for x in [-2.1177_f64, -0.9173, 0.0, 0.3721, 2.6329] {
+        let found = antiderivative
+            .evaluate(Real::from_f64(x))
+            .value()
+            .expect("the antiderivative evaluates")
+            .clone();
+        let base = 1.0 + x * x;
+        let expected = base.powf(2.5) / 5.0 - base.powf(1.5) / 3.0;
+        assert!(
+            (found.to_real().as_f64() - expected).abs() < 1e-6,
+            "x = {x}: found {found}, expected {expected}"
+        );
+    }
+
+    // ∫ x^5 sqrt(1 + x^3) dx: a deeper expansion (k = 1 again, n = 3).
+    let expr = create_expr!("x^5 sqrt(1 + x^3)").unwrap();
+    let antiderivative = expr.get_antiderivative().expect("Chebyshev case, n = 3");
+    for x in [-0.9173_f64, 0.3721, 1.2413] {
+        // t = sqrt(1 + x^3), k = 1: 2/(3) · [−t²·t^2/2·(−1) + t^4·... ] — the
+        // closed form is 2t^3/9 − 2t^5/15 with t = sqrt(1 + x^3); check the
+        // derivative numerically instead of re-deriving here.
+        let h = 1e-7;
+        let forward = antiderivative
+            .evaluate(Real::from_f64(x + h))
+            .value()
+            .expect("evaluates");
+        let backward = antiderivative
+            .evaluate(Real::from_f64(x - h))
+            .value()
+            .expect("evaluates");
+        let derivative = (forward.clone() - backward.clone()).to_real().as_f64() / (2.0 * h);
+        let integrand = x * x * x * x * x * (1.0 + x * x * x).sqrt();
+        assert!(
+            (derivative - integrand).abs() < 1e-5,
+            "x = {x}: derivative {derivative}, integrand {integrand}"
+        );
+    }
+
+    // The bare radical without a variable factor has (m+1)/n = 1/n ∉ Z for
+    // n ≥ 2, so it does not take this route.
+    let expr = create_expr!("sqrt(1 + x^3)").unwrap();
+    assert!(
+        expr.get_antiderivative().is_err(),
+        "1/sqrt case has no elementary form here and must not divert into Chebyshev"
+    );
+}
+
+/// The Chebyshev route also covers integral powers of the binomial when the
+/// substitution pattern does not apply — the expansion is exact and much
+/// shorter than the by-parts chain.
+#[test]
+fn chebyshev_covers_integral_binomial_powers() {
+    use crate::math::numeric::{FloatBridge, Real};
+
+    // ∫ x^2 (1 + x^2)^2 dx = x^3/3 + 2 x^5/5 + x^7/7: integral `p` expands.
+    let expr = create_expr!("x^2 (1 + x^2)^2").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("an integral binomial power is integrable");
+    for x in [-1.5_f64, 0.4, 2.2] {
+        let found: Real = antiderivative
+            .evaluate(Real::from_f64(x))
+            .value()
+            .expect("the antiderivative evaluates")
+            .clone();
+        let expected = x.powi(3) / 3.0 + 2.0 * x.powi(5) / 5.0 + x.powi(7) / 7.0;
+        assert!(
+            (found.to_real().as_f64() - expected).abs() < 1e-9,
+            "x = {x}: found {found}, expected {expected}"
+        );
+    }
+}

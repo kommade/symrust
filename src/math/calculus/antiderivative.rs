@@ -38,6 +38,7 @@
 //! println!("{} steps, answer {}", solution.len(), solution.result());
 //! ```
 
+mod binomial;
 mod helpers;
 mod rational;
 mod trig;
@@ -1007,6 +1008,17 @@ where
             self.step(
                 "u-substitution",
                 || format!("u-substitution with the linear base for {}", describe(node)),
+                || result.clone(),
+            );
+            return Ok(result);
+        }
+        // Chebyshev's binomial differentials: `x^m (a + b x^n)^p` with the
+        // half-integer route of the theorem. Placement after the linear case
+        // keeps the deg-one bases on the substitution that owns them.
+        if let Some(result) = binomial::try_binomial(node) {
+            self.step(
+                "Chebyshev substitution",
+                || format!("binomial differential {} with t = the binomial's square root", describe_signed(node)),
                 || result.clone(),
             );
             return Ok(result);
