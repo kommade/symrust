@@ -141,30 +141,94 @@ where
     numeric_evaluate(&substitute(node, value))
 }
 
-/// Numerically compare `product(factors) / product(divisors)` with `target`
-/// and return the constant ratio if the two are proportional.
-pub(super) fn proportional_to<T>(
-    factors: &[Node<T>],
-    divisors: &[Node<T>],
-    skip: Option<usize>,
-    target: &Node<T>,
+/// Pre-evaluated sample values of a product's factors.
+///
+/// The substitution search walks the *same* factors at the *same* sample
+/// points for every candidate it considers; evaluating each factor at each
+/// point once — `evaluate_at` is a substituted-tree rebuild plus an exact
+/// engine evaluation per probe — and reusing the numbers turns the per-
+/// candidate cost from "resample every factor" into "resample the one target
+/// the candidate proposes".
+///
+/// A `None` marks a probe the ratio test discards (unevaluable, NaN, or not
+/// normal — zero and infinity included), so a sample containing one is
+/// skipped exactly as the direct walk would skip it.
+pub(super) struct ProbeCache<T> {
+    /// `[sample][factor]` values for the numerator factors.
+    numer: Vec<Vec<Option<T>>>,
+    /// `[sample][factor]` values for the denominator factors.
+    denom: Vec<Vec<Option<T>>>,
+}
+
+impl<T: SymbolicLeaf> ProbeCache<T> {
+    pub(super) fn build(numer: &[Node<T>], denom: &[Node<T>]) -> Self {
+        let press = |nodes: &[Node<T>]| {
+            SAMPLES
+                .iter()
+                .map(|sample| {
+                    let point = float_from::<T>(*sample);
+                    nodes
+                        .iter()
+                        .map(|node| normal_probe(evaluate_at(node, &point)))
+                        .collect()
+                })
+                .collect()
+        };
+        Self {
+            numer: press(numer),
+            denom: press(denom),
+        }
+    }
+}
+
+/// Keep only values the ratio test accepts: finite, non-zero, non-NaN.
+fn normal_probe<T: SymbolicLeaf>(value: Option<T>) -> Option<T> {
+    value.filter(|value| value.is_normal())
+}
+
+/// A node's accepted value at every sample point, for use as a
+/// [`proportional_to_cached`] target.
+pub(super) fn sampled_values<T>(node: &Node<T>) -> Vec<Option<T>>
+where
+    T: SymbolicLeaf,
+{
+    SAMPLES
+        .iter()
+        .map(|sample| normal_probe(evaluate_at(node, &float_from::<T>(*sample))))
+        .collect()
+}
+
+/// Numerically compare `product(numer) / product(denom)` with `target` and
+/// return the constant ratio if the two are proportional.
+///
+/// The factor values come from the prebuilt [`ProbeCache`]; `numer_skip` /
+/// `denom_skip` mask the one factor a candidate excludes — previously the
+/// caller had to rebuild the factor list per candidate, which is what forced
+/// the resampling this cache removes. `target` carries the candidate's own
+/// values from [`sampled_values`]. The comparison itself is unchanged: the
+/// constant of proportionality must agree across at least two acceptable
+/// samples, and any disagreement rejects the candidate at once.
+pub(super) fn proportional_to_cached<T>(
+    cache: &ProbeCache<T>,
+    numer_skip: Option<usize>,
+    denom_skip: Option<usize>,
+    target: &[Option<T>],
 ) -> Option<T>
 where
     T: SymbolicLeaf,
 {
     let mut ratio: Option<T> = None;
     let mut agreements = 0;
-    for sample in SAMPLES {
-        let point = float_from::<T>(sample);
+    for (sample_index, _) in SAMPLES.iter().enumerate() {
         let mut value = T::one();
         let mut valid = true;
-        for (index, factor) in factors.iter().enumerate() {
-            if Some(index) == skip {
+        for (index, factor_value) in cache.numer[sample_index].iter().enumerate() {
+            if numer_skip == Some(index) {
                 continue;
             }
-            match evaluate_at(factor, &point) {
-                Some(result) if !result.is_nan() && result.is_normal() => value = value * result,
-                _ => {
+            match factor_value {
+                Some(result) => value = value * result.clone(),
+                None => {
                     valid = false;
                     break;
                 }
@@ -173,10 +237,13 @@ where
         if !valid {
             continue;
         }
-        for divisor in divisors {
-            match evaluate_at(divisor, &point) {
-                Some(result) if !result.is_nan() && result.is_normal() => value = value / result,
-                _ => {
+        for (index, divisor_value) in cache.denom[sample_index].iter().enumerate() {
+            if denom_skip == Some(index) {
+                continue;
+            }
+            match divisor_value {
+                Some(result) => value = value / result.clone(),
+                None => {
                     valid = false;
                     break;
                 }
@@ -185,11 +252,10 @@ where
         if !valid || !value.is_normal() {
             continue;
         }
-        let target_value = match evaluate_at(target, &point) {
-            Some(result) if !result.is_nan() && result.is_normal() => result,
-            _ => continue,
+        let Some(target_value) = &target[sample_index] else {
+            continue;
         };
-        let current = value / target_value;
+        let current = value / target_value.clone();
         if !current.is_normal() {
             continue;
         }
@@ -414,35 +480,37 @@ where
 /// check itself stays in `Real`: it re-types the trees and compares numbers,
 /// so it validates the mathematical claim regardless of the leaf the caller
 /// computes in.
+///
+/// The candidate's two boundary probes run through
+/// [`evaluate_two_point`](crate::math::calculus::expr::evaluate_two_point) —
+/// one traversal per sample instead of a substituted rebuild per point — so
+/// verification costs about half of its former tree walking. The integrand at
+/// the sample itself is unchanged.
 pub(super) fn verify<T>(integrand: &Node<T>, candidate: &Node<T>) -> bool
 where
     T: SymbolicLeaf,
 {
     use crate::math::numeric::Real;
-    type RealNode = Node<Real>;
-    let as_real = |node: &Node<T>| -> RealNode {
-        Node::from_typed(node)
-    };
-    let integrand = as_real(integrand);
-    let candidate = as_real(candidate);
+    let integrand = Node::from_typed(integrand);
+    let candidate = Node::from_typed(candidate);
     let step = float_from::<Real>(1e-4);
     let tolerance = float_from::<Real>(1e-5);
-    let mut checked = 0;
     for sample in SAMPLES {
         let point = float_from::<Real>(sample);
         let left = point.clone() - step.clone();
         let right = point.clone() + step.clone();
-        let (Some(plus), Some(minus), Some(expected)) = (
-            evaluate_at(&candidate, &right),
-            evaluate_at(&candidate, &left),
-            evaluate_at(&integrand, &point),
-        ) else {
+        let (Some(minus_value), Some(plus_value)) =
+            evaluate_two_point(&candidate, &left, &right)
+        else {
             continue;
         };
-        if plus.is_nan() || minus.is_nan() || expected.is_nan() {
+        let Some(expected) = evaluate_at(&integrand, &point) else {
+            continue;
+        };
+        if plus_value.is_nan() || minus_value.is_nan() || expected.is_nan() {
             continue;
         }
-        let derivative = (plus - minus) / (step.clone() + step.clone());
+        let derivative = (plus_value - minus_value) / (step.clone() + step.clone());
         if !derivative.is_normal() || !expected.is_normal() {
             continue;
         }
@@ -451,8 +519,6 @@ where
         if difference > tolerance.clone() * scale {
             return false;
         }
-        checked += 1;
     }
-    let _ = checked;
     true
 }

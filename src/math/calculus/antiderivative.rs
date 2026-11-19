@@ -1361,6 +1361,9 @@ where
     ) -> Option<SubstitutionCase<T>> {
         let u = Node::<T>::var('u');
         let product = helpers::flatten_product(node);
+        // Every candidate below probes the same factors at the same sample
+        // points; precompute the grid once for the whole search.
+        let cache = helpers::ProbeCache::build(&product.numer, &product.denom);
         // `f'(x) / f(x)` integrates to a logarithm.
         for (index, divisor) in product.denom.iter().enumerate() {
             if helpers::is_constant(divisor) {
@@ -1369,10 +1372,8 @@ where
             let Some(derivative) = helpers::differentiate(divisor) else {
                 continue;
             };
-            let mut divisors = product.denom.clone();
-            divisors.remove(index);
             if let Some(ratio) =
-                helpers::proportional_to(&product.numer, &divisors, None, &derivative)
+                helpers::proportional_to_cached(&cache, None, Some(index), &helpers::sampled_values(&derivative))
             {
                 // u = f(x): the integrand is `ratio · du / u`, i.e. `ratio/u` du.
                 let logarithm = helpers::function(Func::Ln, divisor.clone());
@@ -1392,7 +1393,12 @@ where
                 continue;
             }
             let ratio_of = |target: &Node<T>| {
-                helpers::proportional_to(&product.numer, &product.denom, Some(index), target)
+                helpers::proportional_to_cached(
+                    &cache,
+                    Some(index),
+                    None,
+                    &helpers::sampled_values(target),
+                )
             };
             match helpers::shape(factor) {
                 Shape::Operator(Token::Function(func), _, argument) => {

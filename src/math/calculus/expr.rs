@@ -303,6 +303,125 @@ pub(crate) fn constant_integer<T: SymbolicLeaf>(node: &Node<T>) -> Option<i64> {
     value.to_i64()
 }
 
+/// Evaluate `node` at two variable points in ONE traversal.
+///
+/// The verifier needs each candidate at `x − h` and `x + h`: two full
+/// substitute-then-evaluate walks over nearly identical trees. This evaluator
+/// carries both variable bindings through a single descent, so every node is
+/// visited once and the two values diverge only at the variable leaves — the
+/// substituted-tree rebuild disappears entirely.
+///
+/// The folding rules mirror [`numeric_evaluate`] exactly (operands, operator
+/// arithmetic via the leaf's own traits, functions via `ExpressionScalar`),
+/// with one deliberate difference: an independent-variable leaf takes its
+/// point's value, which is what `substitute` used to bake in before the
+/// numeric walk.
+pub(crate) fn evaluate_two_point<T: SymbolicLeaf>(
+    node: &Node<T>,
+    minus: &T,
+    plus: &T,
+) -> (Option<T>, Option<T>) {
+    evaluate_two_point_inner(node, minus, plus, 0)
+}
+
+fn evaluate_two_point_inner<T: SymbolicLeaf>(
+    node: &Node<T>,
+    minus: &T,
+    plus: &T,
+    depth: usize,
+) -> (Option<T>, Option<T>) {
+    if depth > 256 {
+        return (None, None);
+    }
+    match shape(node) {
+        Shape::Operand(token) => match token {
+            // The variable binding `substitute` used to perform: every
+            // independent-variable leaf takes its point's value.
+            Token::Indp(_) => (Some(minus.clone()), Some(plus.clone())),
+            Token::Number(value) => {
+                let value = T::from_i64(value);
+                (Some(value.clone()), Some(value))
+            }
+            Token::Float(value) => {
+                let value = value.clone();
+                (Some(value.clone()), Some(value))
+            }
+            Token::Rational(value) => {
+                let value = value.to_leaf::<T>();
+                (Some(value.clone()), Some(value))
+            }
+            Token::Constant(constant) => {
+                let value: T = constant.get_value();
+                (Some(value.clone()), Some(value))
+            }
+            _ => (None, None),
+        },
+        Shape::Operator(token, left, right) => match token {
+            Token::Operator(op) => {
+                let (Some(left_minus), Some(left_plus)) =
+                    evaluate_two_point_inner(&left, minus, plus, depth + 1)
+                else {
+                    return (None, None);
+                };
+                let (Some(right_minus), Some(right_plus)) =
+                    evaluate_two_point_inner(&right, minus, plus, depth + 1)
+                else {
+                    return (None, None);
+                };
+                let (at_minus, at_plus) = match op {
+                    Op::Add => (left_minus + right_minus, left_plus + right_plus),
+                    Op::Sub => (left_minus - right_minus, left_plus - right_plus),
+                    Op::Mul | Op::ImplicitMul => {
+                        (left_minus * right_minus, left_plus * right_plus)
+                    }
+                    Op::Div => (left_minus / right_minus, left_plus / right_plus),
+                    // Fully qualified for the same reason as above: `Real`'s
+                    // inherent pow takes references.
+                    Op::Pow => (
+                        <T as ExpressionScalar>::pow(left_minus, right_minus),
+                        <T as ExpressionScalar>::pow(left_plus, right_plus),
+                    ),
+                };
+                (Some(at_minus), Some(at_plus))
+            }
+            Token::Function(func) => {
+                let (Some(argument_minus), Some(argument_plus)) =
+                    evaluate_two_point_inner(&right, minus, plus, depth + 1)
+                else {
+                    return (None, None);
+                };
+                (
+                    apply_numeric_function(&func, argument_minus),
+                    apply_numeric_function(&func, argument_plus),
+                )
+            }
+            _ => (None, None),
+        },
+        Shape::Empty => (None, None),
+    }
+}
+
+/// The numeric value of a function application, the exact match
+/// [`numeric_evaluate_inner`] runs.
+fn apply_numeric_function<T: SymbolicLeaf>(func: &Func<T>, argument: T) -> Option<T> {
+    let one = T::one;
+    Some(match func {
+        Func::Sin => argument.sin(),
+        Func::Cos => argument.cos(),
+        Func::Tan => argument.tan(),
+        Func::Sec => one() / argument.cos(),
+        Func::Csc => one() / argument.sin(),
+        Func::Cot => one() / argument.tan(),
+        Func::Asin => argument.asin(),
+        Func::Acos => argument.acos(),
+        Func::Atan => argument.atan(),
+        Func::Sqrt => argument.sqrt(),
+        Func::Root(index) => argument.pow(one() / index.clone()),
+        Func::Ln => argument.ln(),
+        Func::Log(base) => argument.ln() / base.clone().ln(),
+    })
+}
+
 pub(crate) fn is_zero<T: SymbolicLeaf>(node: &Node<T>) -> bool {
     node.inner.borrow().is_zero()
 }
