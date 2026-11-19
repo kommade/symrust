@@ -136,6 +136,13 @@ impl <const N: usize> Multiquadratic<N> where [(); 1 << N]: Sized {
         };
         let left = remap(&self, &result);
         let right = remap(&other, &result);
+        // The shared-bits factor is a function of the mask pair only, so the
+        // per-pair recomputation (product of this pair's shared radicands,
+        // reduced) collapses to a lookup. The table is indexed by
+        // `left_mask | right_mask << patterns` and filled lazily: most pairs
+        // of masks share no bits, and Rat::ONE needs no table entry at all.
+        let patterns = 1usize << count;
+        let mut shared_cache: Vec<Option<Rat>> = vec![None; patterns * patterns];
         for (left_mask, left_coefficient) in left.coeffs.iter().enumerate() {
             if left_coefficient.is_zero() {
                 continue;
@@ -148,12 +155,24 @@ impl <const N: usize> Multiquadratic<N> where [(); 1 << N]: Sized {
                 // part, and the shared bits contribute their radicand as a
                 // rational factor.
                 let shared = left_mask & right_mask;
-                let mut rational = Rat::ONE;
-                for (bit, &radicand) in result.radicands.iter().enumerate().take(result.count as usize) {
-                    if shared & (1 << bit) != 0 {
-                        rational = rational.mul(Rat::from_i64(radicand))?;
+                let slot = left_mask + right_mask * patterns;
+                let rational = if shared == 0 {
+                    Rat::ONE
+                } else {
+                    match shared_cache[slot] {
+                        Some(cached) => cached,
+                        None => {
+                            let mut computed = Rat::ONE;
+                            for (bit, &radicand) in result.radicands.iter().enumerate().take(result.count as usize) {
+                                if shared & (1 << bit) != 0 {
+                                    computed = computed.mul(Rat::from_i64(radicand))?;
+                                }
+                            }
+                            shared_cache[slot] = Some(computed);
+                            computed
+                        }
                     }
-                }
+                };
                 let target = left_mask ^ right_mask;
                 let term = left_coefficient
                     .mul(*right_coefficient)?

@@ -295,10 +295,10 @@ where
         swap_rows(matrix, row, pivot);
 
         let pivot_value = matrix.entry(row, lead);
-        if !(pivot_value == T::multiplicative_identity()) {
+        if normalise && !(pivot_value == T::multiplicative_identity()) {
             for column in 0..columns {
-                let value = matrix.entry(row, column);
-                matrix.set_entry(row, column, if normalise { value / pivot_value.clone() } else { value });
+                let value = matrix.entry(row, column) / pivot_value.clone();
+                matrix.set_entry(row, column, value);
             }
         }
 

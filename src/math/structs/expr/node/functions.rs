@@ -6,7 +6,8 @@ use std::{cmp::Ordering, fmt::Display};
 
 
 
-use crate::{math::numeric::{FloatType, SymbolicLeaf},
+use crate::{math::algebra::rational::Rat,
+    math::numeric::{FloatType, SymbolicLeaf},
     math::parse::lexer::{Func, Op, Token},
 };
 
@@ -675,13 +676,24 @@ impl<T: SymbolicLeaf> Node<T> {
                                 } else if right_borrow.is_neg_one() {
                                     return left.negate();
                                 }
-                                let left_const_val = if !left_borrow.has_indp
-                                    && !NodeInner::<T>::contains_named_constant(&left)
-                                {
-                                    left_borrow.evaluate()
-                                } else {
-                                    None
-                                };
+                                // The exact reading of a closed constant: a
+                                // fraction leaf IS its Rat, and any other
+                                // closed tree without a named constant folds
+                                // through the float bridge and then recovers
+                                // to the nearest small rational. Avoided for
+                                // `pi` and friends, which must stay symbolic.
+                                let left_const_val = left
+                                    .rational_value()
+                                    .or_else(|| {
+                                        if !left_borrow.has_indp
+                                            && !NodeInner::<T>::contains_named_constant(&left)
+                                        {
+                                            left_borrow.evaluate()
+                                                .and_then(|value| Rat::from_leaf(&value))
+                                        } else {
+                                            None
+                                        }
+                                    });
                                 if (left_borrow.is_operator_type(Op::Sub)
                                     || left_borrow.is_operator_type(Op::Add)
                                     || right_borrow.is_operator_type(Op::Sub)
@@ -695,23 +707,42 @@ impl<T: SymbolicLeaf> Node<T> {
                                 if let Some(num_val) = left_const_val
                                     && let Some((den_const, den_rest)) =
                                         NodeInner::<T>::extract_constant_factor(&right)
-                                        && let Some(den_val) = den_const.inner.borrow().evaluate()
+                                        && let Some(den_val) = den_const.rational_value()
+                                            .or_else(|| {
+                                                den_const.inner.borrow().evaluate()
+                                                    .and_then(|value| Rat::from_leaf(&value))
+                                            })
                                             && !den_val.is_zero() {
-                                                let result_val = num_val / den_val;
-                                                // Keep a non-integer quotient symbolic so it
-                                                // displays as an exact fraction (`1 / 3`)
-                                                // instead of a long decimal (`.333…`). Only
-                                                // an integer quotient is folded to a float.
-                                                if !result_val.is_integer() {
-                                                    return NodeInner::<T>::from_operation(
-                                                        Op::Div, left, right,
-                                                    );
-                                                }
-                                                let new_numerator =
-                                                    NodeInner::<T>::from_float(result_val).wrap();
+                                                // The exact quotient in Rat. The
+                                                // display rules split on what is
+                                                // left of the denominator:
+                                                //
+                                                // * a pure constant denominator
+                                                //   folds to the canonical leaf —
+                                                //   `1 / 3` renders identically as
+                                                //   leaf or tree;
+                                                // * a mixed denominator
+                                                //   (`1 / (2 sqrt(x))`) only
+                                                //   absorbs an INTEGER quotient
+                                                //   (`4 / (2 x)` -> `2 / x`); a
+                                                //   proper fraction over a factor
+                                                //   reads worse than the division
+                                                //   (`(1 / 2) / sqrt(x)` loses to
+                                                //   `1 / (2 sqrt(x))`), so the
+                                                //   tree stays.
+                                                let quotient = num_val / den_val;
                                                 if den_rest.inner.borrow().is_one() {
-                                                    return new_numerator;
-                                                } else {
+                                                    return quotient.to_node();
+                                                }
+                                                let (numerator, denominator) = quotient.parts();
+                                                if denominator == 1
+                                                    && i64::try_from(numerator).is_ok()
+                                                {
+                                                    let new_numerator =
+                                                        NodeInner::<T>::from_float(
+                                                            T::from_i64(numerator as i64),
+                                                        )
+                                                        .wrap();
                                                     return NodeInner::<T>::from_operation(
                                                         Op::Div,
                                                         new_numerator,

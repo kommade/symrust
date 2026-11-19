@@ -140,6 +140,13 @@ impl<T: SymbolicLeaf> ExprPoly<T> {
         let mut result = vec![Expr::from_f64(0.0); length];
         for (i, left) in self.coefficients.iter().enumerate() {
             for (j, right) in other.coefficients.iter().enumerate() {
+                // The zero ring absorbs: accumulating `0 · anything` (or
+                // `anything · 0`) into a slot is the identity, so neither the
+                // product nor the tidy runs. Characteristic polynomials are
+                // sparse near the top degrees, so this skips most pairs.
+                if left.is_zero_value() || right.is_zero_value() {
+                    continue;
+                }
                 let product = left.clone() * right.clone();
                 result[i + j] = tidy(result[i + j].clone() + product);
             }
@@ -243,7 +250,9 @@ where
         return Some(ExprPoly::constant(Expr::from_f64(1.0)));
     }
 
-    // Build λI - A as a grid of constant-or-λ polynomials.
+// Build λI - A as a grid of constant-or-λ polynomials. A leaf cell
+    // simplifies to itself — `(-cell).simplify(true)` on a Number is a
+    // full walk that returns the same node — so only operators pay it.
     let mut entries: Vec<Vec<ExprPoly<T>>> = Vec::with_capacity(size);
     for row in 0..size {
         let mut values = Vec::with_capacity(size);
@@ -253,7 +262,12 @@ where
                 ExprPoly::lambda().sub(&ExprPoly::constant(cell.clone()))
             } else {
                 // -a_ij
-                ExprPoly::constant((-cell.clone()).simplify(true))
+                let negated = if cell.tree().inner.borrow().is_operand() {
+                    -cell.clone()
+                } else {
+                    (-cell.clone()).simplify(true)
+                };
+                ExprPoly::constant(negated)
             };
             values.push(entry);
         }
@@ -382,7 +396,8 @@ where
             return Some(ExprPoly::constant(Expr::from_f64(1.0)));
         }
 
-        // Build λI - A as a grid of constant-or-λ polynomials.
+        // Build λI - A as a grid of constant-or-λ polynomials. A leaf cell
+        // simplifies to itself, so only operator cells pay `simplify`.
         let mut entries: Vec<Vec<ExprPoly<T>>> = Vec::with_capacity(size);
         for row in 0..size {
             let mut values = Vec::with_capacity(size);
@@ -392,7 +407,12 @@ where
                     ExprPoly::lambda().sub(&ExprPoly::constant(cell.clone()))
                 } else {
                     // -a_ij
-                    ExprPoly::constant((-cell.clone()).simplify(true))
+                    let negated = if cell.tree().inner.borrow().is_operand() {
+                        -cell.clone()
+                    } else {
+                        (-cell.clone()).simplify(true)
+                    };
+                    ExprPoly::constant(negated)
                 };
                 values.push(entry);
             }

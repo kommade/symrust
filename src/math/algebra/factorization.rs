@@ -446,21 +446,54 @@ pub(crate) fn find_rational_root(poly: &Poly) -> Option<Rat> {
     None
 }
 
+/// Every divisor of `value`, as signed integers, smallest to largest.
+///
+/// Enumerated from the *prime factorization* rather than by trial-dividing up
+/// to `sqrt(value)` twice per root search: the rational-root test probes every
+/// (numerator, denominator) divisor pair, and a rejected candidate is far more
+/// common than an accepted one, so the enumeration itself is kept cheap.
+///
+/// Returns an empty list when `value` is 0 or above the same threshold the
+/// trial-division version used — such constants have no tractable candidate
+/// list anyway.
 fn divisors(value: u128) -> Vec<i128> {
     let mut result = Vec::new();
     if value == 0 || value > 10_000_000 {
         return result;
     }
-    let mut candidate = 1u128;
-    while candidate * candidate <= value {
-        if value.is_multiple_of(candidate) {
-            result.push(candidate as i128);
-            let other = value / candidate;
-            if other != candidate {
-                result.push(other as i128);
+    // Trial-divide by 2 then the odd numbers until the remainder is 1 or
+    // prime; every divisor is then a product of prime powers, built by
+    // expanding the factorization multiplicatively.
+    let mut prime_parts: Vec<(u128, u32)> = Vec::new(); // (prime, exponent)
+    let mut remaining = value;
+    let mut candidate = 2u128;
+    while candidate * candidate <= remaining {
+        if remaining.is_multiple_of(candidate) {
+            let mut exponent = 0u32;
+            while remaining.is_multiple_of(candidate) {
+                remaining /= candidate;
+                exponent += 1;
+            }
+            prime_parts.push((candidate, exponent));
+        }
+        candidate += if candidate == 2 { 1 } else { 2 };
+    }
+    if remaining > 1 {
+        prime_parts.push((remaining, 1));
+    }
+    // Expand into all divisors: for each (prime, exponent), grow the existing
+    // divisor set by the prime's successive powers.
+    result.push(1);
+    for (prime, exponent) in &prime_parts {
+        let previous = result.len();
+        let mut factor = 1u128;
+        for _ in 0..*exponent {
+            factor *= prime;
+            for index in 0..previous {
+                result.push((factor * result[index] as u128) as i128);
             }
         }
-        candidate += 1;
     }
+    result.sort_unstable();
     result
 }

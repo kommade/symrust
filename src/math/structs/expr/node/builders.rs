@@ -152,6 +152,22 @@ impl<T: SymbolicLeaf> Node<T> {
         }
     }
 
+    /// The exact rational this node's *operand leaf* names, when it holds one.
+    ///
+    /// A [`Token::Rational`] leaf IS a rational — reading it costs a field
+    /// copy. A plain number is one too (`n = n / 1`). Everything else
+    /// (`Float`, operations, variables, matrices) reports `None`: callers that
+    /// want a float from a *closed tree* keep using `evaluate` instead, since
+    /// only an operand leaf can answer without walking.
+    #[must_use]
+    pub fn rational_value(&self) -> Option<Rat> {
+        match &self.inner.borrow().value {
+            NodeValue::Operand(Token::Rational(value)) => Some(*value),
+            NodeValue::Operand(Token::Number(num)) => Some(Rat::from_i64(*num)),
+            _ => None,
+        }
+    }
+
     /// Whether two nodes have the same structure and leaf values.
     ///
     /// This is a real structural comparison: the token kinds must match, the

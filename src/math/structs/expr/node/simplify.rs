@@ -397,7 +397,18 @@ where
         let mut constant_index: Option<usize> = None;
 
         for (idx, (term, sign)) in terms.into_iter().enumerate() {
-            if let Some(comp) = Self::extract_pow_components(&term, combine_fns)
+            // A plain leaf cannot decompose into a numeric-coefficient power
+            // with an independent-variable base: skip the decomposition walk
+            // (which recurses) for the most common term kinds. The raw-eval
+            // constant branch below consumes these; a variable leaf yields a
+            // unit coefficient with itself as base, which the direct path
+            // reproduces without the recursion.
+            let decomposable = !matches!(
+                term.inner.borrow().value,
+                NodeValue::Operand(Token::Number(_)) | NodeValue::Operand(Token::Float(_)) | NodeValue::Operand(Token::Rational(_))
+            );
+            if decomposable
+                && let Some(comp) = Self::extract_pow_components(&term, combine_fns)
                 && let Some(mut coeff_val) = comp.coefficient.inner.borrow().evaluate() {
                     if sign == -1 {
                         coeff_val = coeff_val.neg();
@@ -479,16 +490,32 @@ where
             return None;
         }
 
-        ordered_terms.sort_by(|(idx_a, node_a), (idx_b, node_b)| {
-            let degree_a = Self::extract_pow_components(node_a, combine_fns)
-                .and_then(|comp| comp.exponent.inner.borrow().evaluate());
-            let degree_b = Self::extract_pow_components(node_b, combine_fns)
-                .and_then(|comp| comp.exponent.inner.borrow().evaluate());
-            match (degree_a, degree_b) {
-                (Some(a), Some(b)) => b.partial_cmp(&a).unwrap_or(Ordering::Equal),
+        // Degrees precomputed once, keyed by POSITION (the idx in the pairs
+        // is an ordering hint inherited from the source enumeration, not a
+        // position here). The comparator re-ran extract_pow_components — a
+        // recursion over the whole term — for each pairwise comparison.
+        let degrees: Vec<Option<T>> = ordered_terms
+            .iter()
+            .map(|(_, node)| {
+                Self::extract_pow_components(node, combine_fns)
+                    .and_then(|comp| comp.exponent.inner.borrow().evaluate())
+            })
+            .collect();
+        let order_by_degree = |position_a: usize, position_b: usize| -> Ordering {
+            match (&degrees[position_a], &degrees[position_b]) {
+                (Some(a), Some(b)) => b.partial_cmp(a).unwrap_or(Ordering::Equal),
                 (Some(_), None) => Ordering::Less,
                 (None, Some(_)) => Ordering::Greater,
-                (None, None) => {
+                (None, None) => Ordering::Equal,
+            }
+        };
+
+        let mut positions: Vec<usize> = (0..ordered_terms.len()).collect();
+        positions.sort_by(|&position_a, &position_b| {
+            let (idx_a, node_a) = &ordered_terms[position_a];
+            let (idx_b, node_b) = &ordered_terms[position_b];
+            match order_by_degree(position_a, position_b) {
+                Ordering::Equal => {
                     let a_has_indp = node_a.inner.borrow().has_indp;
                     let b_has_indp = node_b.inner.borrow().has_indp;
                     match (a_has_indp, b_has_indp) {
@@ -497,8 +524,17 @@ where
                         _ => idx_a.cmp(idx_b),
                     }
                 }
+                other => other,
             }
         });
+        // Apply the permutation: take ownership, pull each position's term
+        // out of an Option slot. No node clones, no index corruption.
+        let taken = std::mem::take(&mut ordered_terms);
+        let mut slots: Vec<Option<_>> = taken.into_iter().map(Some).collect();
+        ordered_terms = positions
+            .into_iter()
+            .map(|position| slots[position].take().unwrap())
+            .collect();
 
         if ordered_terms.is_empty() {
             return Some(Self::zero());
