@@ -256,6 +256,7 @@ fn numeric_evaluate_inner<T: SymbolicLeaf>(node: &Node<T>, depth: usize) -> Opti
         Shape::Operand(token) => match token {
             Token::Number(value) => T::from_i64(value),
             Token::Float(value) => value,
+            Token::Rational(value) => value.to_leaf(),
             Token::Constant(constant) => constant.get_value(),
             _ => return None,
         },

@@ -1,7 +1,8 @@
 use std::{error::Error, fmt::Display};
 
+use crate::math::algebra::rational::Rat;
 use crate::math::numeric::{FloatType, Real};
-use crate::math::structs::expr::node::{Node, NodeInner};
+use crate::math::structs::expr::node::{Node, NodeInner, NodeValue};
 
 use super::lexer::{Op, Token};
 
@@ -200,11 +201,49 @@ pub struct Parser<T = Real> {
 /// Whether a node is a literal zero (`0` or `0.0`), used for the division-by-zero
 /// guard without relying on any numeric evaluation (so it works for any `T`).
 fn right_is_literal_zero<T: FloatType + Display>(node: &Node<T>) -> bool {
-    use crate::math::structs::expr::node::NodeValue;
     match &node.inner.borrow().value {
         NodeValue::Operand(Token::Number(n)) => *n == 0,
         NodeValue::Operand(Token::Float(f)) => f.is_zero(),
+        NodeValue::Operand(Token::Rational(value)) => value.is_zero(),
         _ => false,
+    }
+}
+
+/// The literal constant a node holds, as an exact rational.
+///
+/// Only leaves the parser itself produces — plain numbers and fraction
+/// leaves — count, so `x / 2` or `sin(3) / 1` build trees as always and only
+/// genuine integer-over-integer writing collapses at parse time.
+fn literal_rational<T: FloatType + Display>(node: &Node<T>) -> Option<Rat> {
+    match &node.inner.borrow().value {
+        NodeValue::Operand(Token::Number(value)) => Some(Rat::from_i64(*value)),
+        NodeValue::Operand(Token::Rational(value)) => Some(*value),
+        _ => None,
+    }
+}
+
+/// Fold an integer-over-integer division into its canonical leaf.
+///
+/// `1 / 2` written in source means the rational one half, not a division
+/// waiting to happen, and `4 / 2` means the number two. Building the leaf at
+/// parse time gives every equivalent spelling one canonical form. A quotient
+/// that is a whole number out of `i64` range, or whose operands are more
+/// than bare literals, keeps the division tree exactly as before.
+fn fold_literal_division<T: FloatType + Display>(
+    left: &Node<T>,
+    right: &Node<T>,
+) -> Option<Node<T>> {
+    let quotient = literal_rational(left)?.div(literal_rational(right)?)?;
+    let (numerator, denominator) = quotient.parts();
+    if denominator > 1 {
+        // The canonical fraction leaf: equivalent spellings are one leaf.
+        return Some(NodeInner::operand(Token::Rational(quotient)).wrap());
+    }
+    if i64::try_from(numerator).is_ok() {
+        // A whole number in range: the plain number leaf.
+        Some(NodeInner::operand(Token::Number(numerator as i64)).wrap())
+    } else {
+        None
     }
 }
 
@@ -228,6 +267,7 @@ impl<T: FloatType + Display> Parser<T> {
             match token {
                 Token::Number(_)
                 | Token::Float(_)
+                | Token::Rational(_)
                 | Token::Constant(_)
                 | Token::Var(_)
                 | Token::RootSum(_)
@@ -238,7 +278,7 @@ impl<T: FloatType + Display> Parser<T> {
                 | Token::Indp(_) => {
                     output.push(token);
                     continue;
-                }                // Bracket and comma tokens are consumed by
+                }                        // Bracket and comma tokens are consumed by
                 // `collapse_matrix_literals`; reaching one here means an
                 // unbalanced literal.
                 Token::LBracket | Token::RBracket | Token::Comma => {
@@ -296,6 +336,7 @@ impl<T: FloatType + Display> Parser<T> {
             match token {
                 Token::Number(_)
                 | Token::Float(_)
+                | Token::Rational(_)
                 | Token::Constant(_)
                 | Token::Var(_)
                 | Token::RootSum(_)
@@ -320,8 +361,15 @@ impl<T: FloatType + Display> Parser<T> {
                     }
                     let right = tree.pop().unwrap();
                     let left = tree.pop().unwrap();
-                    if *op == Op::Div && right_is_literal_zero(&right) {
-                        return Err(ParseError::DivisionByZero);
+                    if *op == Op::Div {
+                        if right_is_literal_zero(&right) {
+                            return Err(ParseError::DivisionByZero);
+                        }
+                        // `1 / 2` is the rational one half from birth.
+                        if let Some(folded) = fold_literal_division(&left, &right) {
+                            tree.push(folded);
+                            continue;
+                        }
                     }
                     tree.push(NodeInner::from_operation(op.clone(), left, right));
                 }

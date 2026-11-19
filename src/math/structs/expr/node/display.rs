@@ -280,6 +280,12 @@ impl<T: SymbolicLeaf> NodeInner<T> {
         match &self.value {
             NodeValue::Operand(token) => match token {
                 Token::Number(num) => Ok(format!("{num}")),
+                // `\frac{p}{q}`: the fraction leaf renders as LaTeX renders
+                // fractions, one symbol where the tree had Div nodes.
+                Token::Rational(value) => {
+                    let (numerator, denominator) = value.parts();
+                    Ok(format!(r"\frac{{{numerator}}}{{{denominator}}}"))
+                }
                 Token::Float(num) => {
                     if num.is_zero() {
                         Ok("0".to_string())

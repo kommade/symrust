@@ -6,11 +6,12 @@
 
 //! A symbolic math library.
 //!
-//! The crate source is split into two trees:
+//! The crate source is split into:
 //!
 //! - [`math`] holds the library itself - everything a caller can reach.
 //! - `tests` holds the crate's own test suite, kept outside the library tree so
 //!   it only ever exercises the public surface.
+//! - `benchmarks` holds the hot-path benchmarks, compiled only in test builds.
 //!
 //! Start with [`math::structs::expr::Expr`] to build and evaluate an
 //! expression, and with the [`create_expr`] macro for the shortest path from a

@@ -147,6 +147,7 @@ impl<T: SymbolicLeaf> Node<T> {
         match &self.inner.borrow().value {
             NodeValue::Operand(Token::Number(num)) => *num == 0,
             NodeValue::Operand(Token::Float(num)) => num.is_zero(),
+            NodeValue::Operand(Token::Rational(value)) => value.is_zero(),
             _ => false,
         }
     }
@@ -194,6 +195,11 @@ where
         (Token::Float(a), Token::Float(b)) => a.to_string() == b.to_string(),
         (Token::Number(n), Token::Float(f)) | (Token::Float(f), Token::Number(n)) => {
             f.to_string() == n.to_string()
+        }
+        // A fraction and a whole number with the same value are the same leaf
+        // value (`1 / 1` never parses, but defend in depth anyway).
+        (Token::Number(n), Token::Rational(value)) | (Token::Rational(value), Token::Number(n)) => {
+            value.parts() == (i128::from(*n), 1)
         }
         _ => left.to_string() == right.to_string(),
     }

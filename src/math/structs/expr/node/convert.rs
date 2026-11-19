@@ -44,6 +44,9 @@ impl<T: FloatType + Display> Node<T> {
                 Token::Operator(op) => Token::Operator(op.clone()),
                 Token::Constant(c) => Token::Constant(c.clone()),
                 Token::Number(n) => Token::Number(*n),
+                // `Rat` is leaf-independent: an exact fraction means the same
+                // thing over every float type.
+                Token::Rational(value) => Token::Rational(*value),
                 Token::Float(value) => Token::Float(value.to_real()),
                 Token::Indp(c) => Token::Indp(*c),
                 Token::Var(c) => Token::Var(*c),

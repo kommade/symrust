@@ -206,6 +206,19 @@ pub enum Token<T = Real> {
     Constant(Const),
     Number(i64),
     Float(T),
+    /// An exact rational fraction, `numerator / denominator`, in canonical
+    /// reduced form with a denominator greater than one.
+    ///
+    /// A value is a `Number` when it fits `i64` and a `Rational` when a
+    /// fraction is the point: `1 / 2` and `2 / 4` is one leaf, so equivalent
+    /// fractions are equal without a simplification pass. Made by the parser
+    /// (integer divided by integer), the lexer (decimal literals — `0.1` is
+    /// *exactly* `1 / 10`, never the nearest binary float) and by
+    /// [`Rat::to_node`](crate::math::algebra::rational::Rat::to_node) wherever
+    /// exact rational arithmetic produces a fraction. Irrational values stay
+    /// where they are: a `Rational` never approximates a surd, `pi` or a
+    /// function value.
+    Rational(crate::math::algebra::rational::Rat),
     Indp(char),
     Var(char),
     /// A formal `Σ_{Z : p(Z) = 0}` root sum (see [`RootSumData`]).
@@ -261,6 +274,17 @@ impl<T: SymbolicLeaf> Display for Token<T> {
             Self::Constant(c) => write!(f, "{c}"),
             Self::Number(n) => write!(f, "{n}"),
             Self::Float(n) => write!(f, "{n}"),
+            // The tree's own spacing, so a fraction leaf renders exactly like
+            // the division tree it replaced. A whole number (possible only for
+            // magnitudes beyond `i64`) renders as the bare integer.
+            Self::Rational(value) => {
+                let (numerator, denominator) = value.parts();
+                if denominator == 1 {
+                    write!(f, "{numerator}")
+                } else {
+                    write!(f, "{numerator} / {denominator}")
+                }
+            }
             Self::Indp(c) | Self::Var(c) => write!(f, "{c}"),
             Self::RootSum(data) => write!(f, "{data}"),
             Self::Integral(inner, variable) => write!(f, "∫ {inner} d{variable}"),
@@ -335,6 +359,14 @@ impl<T> Token<T> {
     pub const fn from_float(n: T) -> Self {
         Self::Float(n)
     }
+    /// An exact fraction leaf. The caller — and every constructor in the
+    /// crate — only produces these with a denominator greater than one; a
+    /// whole number is a `Number` (or, out of `i64` range, a `Rational` with
+    /// the denominator kept as one).
+    #[must_use]
+    pub fn rational(value: crate::math::algebra::rational::Rat) -> Self {
+        Self::Rational(value)
+    }
     pub const fn from_var(c: char) -> Self {
         Self::Var(c)
     }
@@ -352,6 +384,7 @@ impl<T> Token<T> {
             Self::Var(_)
                 | Self::Constant(_)
                 | Self::Number(_)
+                | Self::Rational(_)
                 | Self::RPar
                 | Self::Indp(_)
                 | Self::Function(_)
@@ -451,23 +484,7 @@ impl<T: FloatType + Display> Lexer<T> {
                         break;
                     }
                 }
-                if is_float {
-                    match T::parse_decimal(&num) {
-                        Ok(n) => Ok(Token::from_float(n)),
-                        Err(e) => Err(LexError::ParseError(format!(
-                            "Error parsing Float {} at pos {}: {}",
-                            num, self.pos, e
-                        ))),
-                    }
-                } else {
-                    match num.parse() {
-                        Ok(n) => Ok(Token::from_num(n)),
-                        Err(_) => Err(LexError::ParseError(format!(
-                            "Error parsing number {} at pos {}",
-                            num, self.pos
-                        ))),
-                    }
-                }
+                Self::number_literal_token::<T>(&num, self.pos)
             }
             c if c.is_ascii_punctuation() => match c {
                 '(' => Ok(Token::LPar),
@@ -691,9 +708,15 @@ impl<T: FloatType + Display> Lexer<T> {
             if matches!(tokens[cursor], Token::Operator(Op::Pow))
                 && cursor + 2 < tokens.len()
                 && matches!(tokens[cursor + 1], Token::Operator(Op::Sub))
-                && let Token::Number(value) = tokens[cursor + 2] {
+                && (matches!(tokens[cursor + 2], Token::Number(_))
+                    || matches!(tokens[cursor + 2], Token::Rational(_)))
+                {
                     merged.push(tokens[cursor].clone());
-                    merged.push(Token::from_num(-value));
+                    merged.push(match &tokens[cursor + 2] {
+                        Token::Number(value) => Token::from_num(-value),
+                        Token::Rational(value) => Token::Rational(-*value),
+                        _ => unreachable!(),
+                    });
                     cursor += 3;
                     continue;
                 }
@@ -709,6 +732,7 @@ impl<T: FloatType + Display> Lexer<T> {
                         tokens[index - 1],
                         Token::Number(_)
                             | Token::Float(_)
+                            | Token::Rational(_)
                             | Token::Constant(_)
                             | Token::Indp(_)
                             | Token::Var(_)
@@ -742,6 +766,7 @@ impl<T: FloatType + Display> Lexer<T> {
                             tokens[index - 2],
                             Token::Number(_)
                                 | Token::Float(_)
+                                | Token::Rational(_)
                                 | Token::Constant(_)
                                 | Token::Indp(_)
                                 | Token::Var(_)
@@ -815,5 +840,45 @@ impl<T: FloatType + Display> Lexer<T> {
             index += 1;
         }
         index
+    }
+
+    /// The token a scanned numeric literal stands for, read exactly.
+    ///
+    /// An integer in `i64` range is a [`Token::Number`]. A decimal such as
+    /// `0.1` — and an integer too wide for `i64` — is the *exact* rational
+    /// its digits name, read through
+    /// [`Rat::from_decimal_literal`;](crate::math::algebra::rational::Rat::from_decimal_literal)
+    /// `0.1` is `1 / 10`, never the nearest binary float, so a literal keeps
+    /// the value its author wrote. A literal whose digits outrun `i128`
+    /// falls back to the leaf's own float parsing, the widest reading
+    /// available.
+    fn number_literal_token<Leaf: FloatType + Display>(
+        text: &str,
+        position: usize,
+    ) -> Result<Token<Leaf>, LexError> {
+        // Integers in range stay the plain number leaf they always were.
+        if let Ok(value) = text.parse::<i64>() {
+            return Ok(Token::from_num(value));
+        }
+        match crate::math::algebra::rational::Rat::from_decimal_literal(text) {
+            Some(value) => {
+                // A decimal with no fraction left over (`2.0`) is the integer
+                // it names; only a genuine fraction keeps the rational leaf.
+                let (numerator, denominator) = value.parts();
+                if denominator == 1
+                    && let Ok(number) = i64::try_from(numerator)
+                {
+                    return Ok(Token::from_num(number));
+                }
+                Ok(Token::Rational(value))
+            }
+            None => Leaf::parse_decimal(text)
+                .map(Token::from_float)
+                .map_err(|e| {
+                    LexError::ParseError(format!(
+                        "Error parsing number {text} at pos {position}: {e}"
+                    ))
+                }),
+        }
     }
 }

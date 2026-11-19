@@ -355,6 +355,7 @@ where
         let inner = self.tree.inner.borrow();
         match &inner.value {
             NodeValue::Operand(Token::Number(n)) => Some(Surd::rational(Rat::from_i64(*n))),
+            NodeValue::Operand(Token::Rational(value)) => Some(Surd::rational(*value)),
             NodeValue::Operand(Token::Float(f)) => Rat::from_leaf(f).map(Surd::rational),
             // `sqrt` of a rational is a single surd; sqrt of a surd may leave
             // the field, so only the rational case is folded.

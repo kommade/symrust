@@ -71,6 +71,7 @@ where
         match &borrow.value {
             NodeValue::Operand(Token::Indp(_)) => Some(Poly::variable()),
             NodeValue::Operand(Token::Number(value)) => Some(Poly::constant(Rat::from_i64(*value))),
+            NodeValue::Operand(Token::Rational(value)) => Some(Poly::constant(*value)),
             NodeValue::Operand(Token::Float(value)) => Some(Poly::constant(Rat::from_leaf(value)?)),
             NodeValue::Operand(_) => None,
             NodeValue::Operator(op_node) => match &op_node.token {
@@ -193,6 +194,7 @@ impl<T: SymbolicLeaf> NodeInner<T> {
         let borrow = node.inner.borrow();
         match &borrow.value {
             NodeValue::Operand(Token::Number(value)) => *value >= 0,
+            NodeValue::Operand(Token::Rational(value)) => !value.is_negative(),
             NodeValue::Operand(Token::Float(value)) => !value.is_negative(),
             NodeValue::Operand(Token::Constant(_)) | NodeValue::Operand(Token::Indp(_)) => true,
             NodeValue::Operator(op_node) => match &op_node.token {
@@ -312,6 +314,7 @@ impl<T: FloatType + Display> NodeInner<T> {
             NodeValue::Operand(token) => match token {
                 Token::Number(num) => *num == 1,
                 Token::Float(num) => num.is_one(),
+                Token::Rational(value) => value.is_one(),
                 _ => false,
             },
             _ => false,
@@ -322,6 +325,7 @@ impl<T: FloatType + Display> NodeInner<T> {
             NodeValue::Operand(token) => match token {
                 Token::Number(num) => *num == -1,
                 Token::Float(num) => num.is_neg_one(),
+                Token::Rational(value) => value.is_neg_one(),
                 _ => false,
             },
             _ => false,
@@ -332,6 +336,7 @@ impl<T: FloatType + Display> NodeInner<T> {
             NodeValue::Operand(token) => match token {
                 Token::Number(num) => *num == 0,
                 Token::Float(num) => num.is_zero(),
+                Token::Rational(value) => value.is_zero(),
                 _ => false,
             },
             _ => false,
@@ -342,6 +347,7 @@ impl<T: FloatType + Display> NodeInner<T> {
             NodeValue::Operand(token) => match token {
                 Token::Number(num) => *num < 0,
                 Token::Float(num) => num.is_negative(),
+                Token::Rational(value) => value.is_negative(),
                 _ => false,
             },
             NodeValue::Operator(op_node) => {
@@ -380,6 +386,7 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                 Token::Number(-1) => Some(T::neg_one()),
                 Token::Number(num) => Some(T::from_i64(*num)),
                 Token::Float(num) => Some(num.clone()),
+                Token::Rational(value) => Some(value.to_leaf()),
                 Token::Constant(k) => Some(k.get_value()),
                 // Narrative tokens (`∫ f dx`, `d f/dx`) never evaluate.
                 Token::Integral(..) | Token::DerivativeOf(..) => None,

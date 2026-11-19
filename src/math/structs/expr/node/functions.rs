@@ -141,12 +141,27 @@ impl<T: FloatType + Display> NodeOperations<i64> for Node<T> {
     }
 }
 
+/// The constant `value` as its most readable leaf: the exact rational when a
+/// small one recovers from the float, or the float itself.
+///
+/// `tidy` carries this policy for whole expressions; folding inside the
+/// simplifier produces the same constants, so they go through the same
+/// recovery. A float like `0.5` becomes `1 / 2`; a value with no small
+/// rational form stays a float, unaudited.
+pub(crate) fn exact_constant_leaf<T: SymbolicLeaf>(value: T) -> Node<T> {
+    match crate::math::algebra::rational::Rat::from_leaf(&value) {
+        Some(rational) => rational.to_node(),
+        None => NodeInner::<T>::from_float(value).wrap(),
+    }
+}
+
 impl<T: SymbolicLeaf> NodeFunctions<T> for Node<T> {
     fn negate(self) -> Self {
         match &self.inner.borrow().value {
             NodeValue::Operand(token) => match token {
                 Token::Number(num) => NodeInner::<T>::from_number(-*num).wrap(),
                 Token::Float(num) => NodeInner::<T>::from_float(-num.clone()).wrap(),
+                Token::Rational(value) => (-*value).to_node(),
                 _ => NodeInner::<T>::zero().sub(self.clone()),
             },
             NodeValue::Operator(op_node) => match &op_node.token {
@@ -187,6 +202,12 @@ impl<T: SymbolicLeaf> NodeFunctions<T> for Node<T> {
                 }
                 Token::Float(num) => {
                     NodeInner::<T>::from_float(T::one() / num.clone()).wrap()
+                }
+                // `1 / (3 / 4)` is the canonical fraction leaf `4 / 3`; the
+                // reciprocal of `±1 / n` is the whole number it names.
+                Token::Rational(value) => match value.recip() {
+                    Some(reciprocal) => reciprocal.to_node(),
+                    None => NodeInner::<T>::one().div(self.clone()),
                 }
                 _ => NodeInner::<T>::one().div(self.clone()),
             },
@@ -281,6 +302,32 @@ impl<T: SymbolicLeaf> NodeFunctions<T> for Node<T> {
                     MulType::OpMul => NodeInner::<T>::operand(Token::Float(num.clone() * k)).wrap(),
                     MulType::OpDiv => NodeInner::<T>::operand(Token::Float(num.clone() / k)).wrap(),
                 },
+                // Scaling an exact fraction by an exact factor keeps the leaf
+                // exact (`3 / 4 * 2` is `3 / 2`); an irreducible factor — any
+                // float that is not exactly dyadic — degrades to a float leaf,
+                // the same trade the numeric constants make.
+                Token::Rational(value) => {
+                    let scaled = crate::math::algebra::rational::Rat::from_real_exact(&k.to_real())
+                        .and_then(|factor| match mul_type {
+                            MulType::OpMul => value.mul(factor),
+                            MulType::OpDiv => value.div(factor),
+                        });
+                    match scaled {
+                        Some(scaled) => scaled.to_node(),
+                        None => match mul_type {
+                            MulType::OpMul => NodeInner::<T>::from_operation(
+                                Op::ImplicitMul,
+                                NodeInner::<T>::from_float(value.to_leaf::<T>()).wrap(),
+                                self.clone(),
+                            ),
+                            MulType::OpDiv => NodeInner::<T>::from_operation(
+                                Op::Div,
+                                self.clone(),
+                                NodeInner::<T>::from_float(value.to_leaf::<T>()).wrap(),
+                            ),
+                        },
+                    }
+                }
                 Token::Indp(_) | Token::Var(_) | Token::Constant(_) => match mul_type {
                     MulType::OpMul => {
                         NodeInner::<T>::from_operation(Op::ImplicitMul, constant, self.clone())
@@ -452,6 +499,7 @@ impl<T: SymbolicLeaf> NodeFunctions<T> for Node<T> {
             NodeValue::Operand(token) => match token {
                 Token::Constant(_) => T::neg_one(),
                 Token::Number(value) => T::from_i64(value),
+                Token::Rational(value) => value.to_leaf(),
                 Token::Float(value) => value,
                 Token::Indp(_) | Token::Var(_) => T::neg_one(),
                 _ => unreachable!(),

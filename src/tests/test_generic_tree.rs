@@ -42,18 +42,20 @@ fn build_f32_tree_from_string_matches_real_structure() {
 
 #[test]
 fn string_literals_parse_directly_into_t() {
-    // The lexer/parser build `Node<T>` straight from text, so a decimal literal
-    // becomes a `Token::Float(T)` of the *chosen* type — no Real round-trip.
+    // The lexer/parser build `Node<T>` straight from text. A decimal literal
+    // is the exact rational its digits name — the same `Rational` leaf over
+    // every leaf type (the fraction needs no float bridge at all) — so
+    // `0.1` is one tenth in an `Expr<f64>` exactly as in an `Expr<Real>`,
+    // never either type's nearest binary float.
     use crate::math::structs::expr::node::NodeValue;
 
     let expr: Expr<f64> = create_expr!("0.1"; f64).unwrap();
     let inner = expr.tree().inner.borrow();
     match &inner.value {
-        NodeValue::Operand(Token::Float(v)) => {
-            // Parsed natively as f64, i.e. exactly the f64 literal 0.1.
-            assert_eq!(*v, 0.1_f64);
+        NodeValue::Operand(Token::Rational(value)) => {
+            assert_eq!(value.parts(), (1, 10));
         }
-        other => panic!("expected a float leaf, got {other:?}"),
+        other => panic!("expected a rational leaf, got {other:?}"),
     }
 }
 

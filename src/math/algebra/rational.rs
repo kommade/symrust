@@ -418,7 +418,12 @@ impl Rat {
     pub fn is_one(&self) -> bool {
         self.num == 1 && self.den == 1
     }
+    /// `true` when the value is exactly `-1`.
+    pub fn is_neg_one(&self) -> bool {
+        self.num == -self.den
+    }
 
+    /// `true` when the value is negative.
     pub fn is_negative(&self) -> bool {
         self.num < 0
     }
@@ -540,8 +545,51 @@ impl Rat {
         (self.num, self.den)
     }
 
+    /// The exact rational a decimal literal stands for.
+    ///
+    /// `"0.1"` is the rational `1 / 10` — a decimal literal names a rational
+    /// number, and every finite decimal *is* one, so reading it exactly is
+    /// strictly more faithful than rounding to the nearest binary float. The
+    /// Euler-folded value keeps full precision; a literal whose digits do not
+    /// fit `i128` returns `None` (the caller falls back to the leaf's own
+    /// float parsing).
+    #[must_use]
+    pub fn from_decimal_literal(literal: &str) -> Option<Self> {
+        let (integer, fraction) = match literal.split_once('.') {
+            Some((integer, fraction)) => (integer, fraction),
+            None => (literal, ""),
+        };
+        if integer.is_empty() || fraction.len() > 38 {
+            return None;
+        }
+        // No sign ever reaches here: the lexer scans bare digit runs and
+        // handles the minus as a separate unary operator.
+        if !integer.bytes().all(|b| b.is_ascii_digit())
+            || !fraction.bytes().all(|b| b.is_ascii_digit())
+        {
+            return None;
+        }
+        let mut numerator: i128 = 0;
+        for digit in literal.bytes().filter(|b| *b != b'.') {
+            numerator = numerator
+                .checked_mul(10)
+                .and_then(|value| value.checked_add(i128::from(digit - b'0')))?;
+        }
+        let denominator = 10i128.checked_pow(fraction.len() as u32)?;
+        Self::new(numerator, denominator)
+    }
+
     /// This rational as an expression leaf: a trailing division, so the value
     /// stays exact.
+    ///
+    /// Deliberately a division *tree*, even though the parser now folds
+    /// integer-over-integer literals into single [`Token::Rational`] leaves:
+    /// the simplifier's constant rules are written against division trees
+    /// (`extract_division` and the numerator/denominator folds), and the
+    /// algorithmic code multiplies these trees into products whose factors it
+    /// then combines. A leaf here would sit in those products unfolded. The
+    /// token leaf remains the canonical form for what a user *writes*
+    /// (`1 / 2`, `0.25`); generated constants keep the tree shape.
     pub fn to_node<T>(self) -> Node<T>
     where
         T: crate::math::numeric::FloatType + std::fmt::Display,

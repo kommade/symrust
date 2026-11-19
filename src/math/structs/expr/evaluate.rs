@@ -98,7 +98,11 @@ struct Step<L, T> {
 ///
 /// `lookup` returns the concrete value for a one-letter variable, or `None`
 /// when that variable should be left symbolic.
-fn evaluate_node<L, T>(node: &Node<L>, lookup: &dyn Fn(char) -> Option<T>) -> Step<L, T>
+fn evaluate_node<L, T>(
+    node: &Node<L>,
+    lookup: &dyn Fn(char) -> Option<T>,
+    keep_irrationals: bool,
+) -> Step<L, T>
 where
     L: FloatType + Display,
     T: Evaluable,
@@ -109,12 +113,18 @@ where
             value: None,
             node: node.clone(),
         },
-        Shape::Operand(token) => evaluate_operand(&token, lookup),
-        Shape::Operator(token, left, right) => evaluate_operator(&token, &left, &right, lookup),
+        Shape::Operand(token) => evaluate_operand(&token, lookup, keep_irrationals),
+        Shape::Operator(token, left, right) => {
+            evaluate_operator(&token, &left, &right, lookup, keep_irrationals)
+        }
     }
 }
 
-fn evaluate_operand<L, T>(token: &Token<L>, lookup: &dyn Fn(char) -> Option<T>) -> Step<L, T>
+fn evaluate_operand<L, T>(
+    token: &Token<L>,
+    lookup: &dyn Fn(char) -> Option<T>,
+    keep_irrationals: bool,
+) -> Step<L, T>
 where
     L: FloatType + Display,
     T: Evaluable,
@@ -124,21 +134,42 @@ where
             value: Some(T::from_i64(*number)),
             node: NodeInner::from_number(*number).wrap(),
         },
+        // A fraction evaluates to the chosen type exactly when its denominator
+        // fits the type's exponent range; `1 / 2` in any float is exact.
+        Token::Rational(value) => Step {
+            value: Some(value.to_leaf()),
+            node: node_for_token(token),
+        },
         Token::Float(float) => Step {
             value: Some(T::from_real(float.to_real())),
             node: NodeInner::from_float(float.clone()).wrap(),
         },
-        Token::Constant(constant) => Step {
+        // A named constant stays symbolic in the exact mode: the point of
+        // `evaluate_exact` is an answer in terms of `pi` and `e`, not their
+        // float values.
+        Token::Constant(constant) if !keep_irrationals => Step {
             value: Some(constant_value(constant)),
+            node: node_for_token(token),
+        },
+        Token::Constant(_) => Step {
+            value: None,
             node: node_for_token(token),
         },
         Token::Indp(letter) | Token::Var(letter) => match lookup(*letter) {
             Some(value) => {
                 // Embed the concrete value as a float leaf in the substituted
-                // node so a partial result stays a valid expression.
+                // node so a partial result stays a valid expression. In exact
+                // mode the rational the value names is preferred (`1.5` reads
+                // `3 / 2`), falling back to the float when the value has no
+                // small exact rational form.
+                let node = if keep_irrationals {
+                    embed_value::<L, T>(&value)
+                } else {
+                    NodeInner::from_float(L::from_real(value.to_real())).wrap()
+                };
                 Step {
                     value: Some(value.clone()),
-                    node: NodeInner::from_float(L::from_real(value.to_real())).wrap(),
+                    node,
                 }
             }
             None => Step {
@@ -164,26 +195,62 @@ fn node_for_token<T: FloatType + Display>(token: &Token<T>) -> Node<T> {
     NodeInner::operand(token.clone()).wrap()
 }
 
+/// The substituted or folded value as a leaf of the tree's own type.
+///
+/// The exact rational the value names is preferred when it is *small* — the
+/// same bound everywhere in the crate treats as a readable fraction — so
+/// `1.5` reads `3 / 2` and `4.0` reads `4`. A value without one (`0.1` as an
+/// `f64` is a 53-bit dyadic) falls back to the float leaf, which is exactly
+/// what it is.
+fn embed_value<L: FloatType + Display, T: Evaluable>(value: &T) -> Node<L> {
+    const READABLE_DENOMINATOR: i128 = 1_000_000;
+    let exact = crate::math::algebra::rational::Rat::from_real_exact(&value.to_real())
+        .filter(|rational| rational.parts().1 <= READABLE_DENOMINATOR);
+    match exact {
+        Some(rational) => rational.to_node(),
+        None => NodeInner::from_float(L::from_real(value.to_real())).wrap(),
+    }
+}
+
 fn evaluate_operator<L, T>(
     token: &Token<L>,
     left: &Node<L>,
     right: &Node<L>,
     lookup: &dyn Fn(char) -> Option<T>,
+    keep_irrationals: bool,
 ) -> Step<L, T>
 where
     L: FloatType + Display,
     T: Evaluable,
 {
-    let left_step = evaluate_node(left, lookup);
-    let right_step = evaluate_node(right, lookup);
+    let left_step = evaluate_node(left, lookup, keep_irrationals);
+    let right_step = evaluate_node(right, lookup, keep_irrationals);
 
-    // Rebuild the substituted node first, keeping the exact same structure.
+    // Rebuild the substituted node. In exact mode a branch that *folded*
+    // collapses to a leaf carrying that value — otherwise the printed
+    // remainder would still show the unfolded multiplication beside the
+    // folded parts.
     let node = match token {
-        Token::Operator(op) => NodeInner::from_operation(
-            op.clone(),
-            left_step.node.clone(),
-            right_step.node.clone(),
-        ),
+        Token::Operator(op) => {
+            if keep_irrationals
+                && let (Some(left_value), Some(right_value)) =
+                    (left_step.value.as_ref(), right_step.value.as_ref())
+            {
+                let folded = apply_operator(
+                    op,
+                    left_value.clone(),
+                    &right_step,
+                    right_value.clone(),
+                );
+                embed_value::<L, T>(&folded)
+            } else {
+                NodeInner::from_operation(
+                    op.clone(),
+                    left_step.node.clone(),
+                    right_step.node.clone(),
+                )
+            }
+        }
         Token::Function(func) => {
             NodeInner::from_function(func.clone(), right_step.node.clone())
         }
@@ -197,6 +264,10 @@ where
             }
             _ => None,
         },
+        // Function values stay symbolic in the exact mode: `sin(pi / 6)`
+        // keeps its closed form instead of a decimal approximation, and the
+        // substituted parts around it are still folded.
+        Token::Function(_) if keep_irrationals => None,
         Token::Function(func) => right_step
             .value
             .clone()
@@ -222,6 +293,9 @@ where
             // is literally a number, so exact types keep their precision.
             NodeValue::Operand(Token::Number(exponent)) => {
                 left.pow_i64(*exponent)
+            }
+            NodeValue::Operand(Token::Rational(exponent)) => {
+                left.pow_float(exponent.to_real())
             }
             NodeValue::Operand(Token::Float(exponent)) => {
                 left.pow_float(exponent.to_real())
@@ -287,7 +361,72 @@ impl<T: FloatType + Display> Expr<T> {
                 None
             }
         };
-        finish(evaluate_node(&self.tree, &lookup))
+        finish(evaluate_node(&self.tree, &lookup, false))
+    }
+
+    /// Substitute the independent variable with `value`, keeping irrationals.
+    ///
+    /// The evaluation is *exact-first*: named constants (`pi`, `e`) and
+    /// function applications (`sin`, `sqrt`, `ln`, …) are never folded to
+    /// their float values, so an expression containing one — or a root — is
+    /// answered with the partially evaluated [`Evaluated::Expression`] in
+    /// terms of them, with every rational part already folded around them:
+    /// `2x + pi / 2` at `x = 3` is `6 + pi / 2`, not `7.570796…`. An
+    /// expression with no irrational leaves folds exactly like
+    /// [`Self::evaluate`].
+    ///
+    /// # Examples
+    /// ```
+    /// use rust_calculus::create_expr;
+    /// use rust_calculus::math::structs::expr::evaluate::Evaluated;
+    /// use rust_calculus::math::structs::expr::Expr;
+    ///
+    /// // No irrationals: the usual full evaluation.
+    /// let expr = create_expr!("2x + 1").unwrap();
+    /// assert_eq!(expr.evaluate_exact(3.0_f64).value(), Some(7.0));
+    ///
+    /// // `pi` survives: the answer is exact, not a decimal.
+    /// let exact = create_expr!("2x + pi / 2").unwrap();
+    /// let result = exact.evaluate_exact(3.0_f64);
+    /// assert_eq!(result.to_string(), "6 + pi / 2");
+    /// ```
+    #[must_use]
+    pub fn evaluate_exact<E: Evaluable>(&self, value: E) -> Evaluated<E, T> {
+        let indp = independent_variable(&self.tree);
+        let lookup = move |letter: char| {
+            if letter == indp {
+                Some(value.clone())
+            } else {
+                None
+            }
+        };
+        finish(evaluate_node(&self.tree, &lookup, true))
+    }
+
+    /// Substitute the given variables with their values, keeping irrationals.
+    ///
+    /// The exact-mode counterpart of [`Self::evaluate_with`]: variables not
+    /// in `values` stay symbolic, and so do `pi`, `e` and every function
+    /// application — the result is in terms of whatever remains.Variables
+    /// that *are* provided are substituted and their rational surroundings
+    /// folded.
+    ///
+    /// # Examples
+    /// ```
+    /// use std::collections::HashMap;
+    /// use rust_calculus::create_expr;
+    ///
+    /// let expr = create_expr!("a + sqrt(a)").unwrap();
+    /// let mut values = HashMap::new();
+    /// values.insert('a', 4.0_f64);
+    /// // The square root stays a root: `sqrt(4)` is not folded to `2`.
+    /// let result = expr.evaluate_exact_with(&values);
+    /// assert_eq!(result.to_string(), "4 + sqrt(4)");
+    /// ```
+    #[must_use]
+    pub fn evaluate_exact_with<E: Evaluable>(&self, values: &HashMap<char, E>) -> Evaluated<E, T> {
+        let lookup = move |letter: char| values.get(&letter).cloned();
+        finish(evaluate_node(&self.tree, &lookup, true))
     }
 
     /// Substitute the given variables with their values and evaluate.
@@ -311,7 +450,7 @@ impl<T: FloatType + Display> Expr<T> {
     #[must_use]
     pub fn evaluate_with<E: Evaluable>(&self, values: &HashMap<char, E>) -> Evaluated<E, T> {
         let lookup = move |letter: char| values.get(&letter).cloned();
-        finish(evaluate_node(&self.tree, &lookup))
+        finish(evaluate_node(&self.tree, &lookup, false))
     }
 }
 

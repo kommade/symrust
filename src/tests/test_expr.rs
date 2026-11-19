@@ -166,3 +166,104 @@ fn tidy_folds_single_radicals() {
         "sqrt(2) + sqrt(3)"
     );
 }
+
+/// An integer-over-integer division is the canonical fraction leaf from
+/// birth: equivalent spellings are the same leaf, not trees waiting for a
+/// simplification pass to notice.
+#[test]
+fn literal_fractions_are_canonical_leaves() {
+    // Simplest spelling first.
+    assert_eq!(create_expr!("1 / 2").unwrap().to_string(), "1 / 2");
+    // A reducible spelling parses to the SAME leaf, by value.
+    let half = create_expr!("1 / 2").unwrap();
+    let two_quarters = create_expr!("2 / 4").unwrap();
+    assert_eq!(half.to_string(), two_quarters.to_string());
+    // An integral quotient stays a plain number.
+    assert_eq!(create_expr!("4 / 2").unwrap().to_string(), "2");
+    // Nested literal fractions fold through the same rule: `(1/2)/(1/4)` is 2.
+    assert_eq!(
+        create_expr!("(1 / 2) / (1 / 4)").unwrap().to_string(),
+        "2"
+    );
+    // The leaf participates in arithmetic like any operand: fold `1/2 + 1/2`.
+    let sum = create_expr!("1/2 + 1/2").unwrap().simplify(true);
+    assert_eq!(sum.to_string(), "1");
+    // A symbolic denominator is NOT a literal fraction: it stays a division.
+    assert_eq!(
+        create_expr!("2 / x").unwrap().simplify(true).to_string(),
+        "2 / x"
+    );
+}
+
+/// A decimal literal names an exact rational. `0.1` is the fraction one
+/// tenth — the nearest binary float is only an approximation, and the tree
+/// now keeps what the author wrote.
+#[test]
+fn decimal_literals_are_exact_rationals() {
+    assert_eq!(create_expr!("0.1").unwrap().to_string(), "1 / 10");
+    // Trailing zeros and reducible decimals normalise.
+    assert_eq!(create_expr!("0.50").unwrap().to_string(), "1 / 2");
+    // Exact decimal arithmetic: the float “0.1 + 0.2” rounding trap does not
+    // exist for rationals, so the answer is exactly three tenths.
+    assert_eq!(
+        create_expr!("0.1 + 0.2").unwrap().simplify(true).to_string(),
+        "3 / 10"
+    );
+    // A terminating decimal with no fraction part stays a number.
+    assert_eq!(create_expr!("2.0").unwrap().to_string(), "2");
+    // An integer too wide for i64 keeps its exact digits.
+    let big = create_expr!("12345678901234567890123456789").unwrap();
+    assert_eq!(
+        big.to_string(),
+        "12345678901234567890123456789"
+    );
+}
+
+/// `evaluate_exact` substitutes and folds rational parts but keeps named
+/// constants and function applications symbolic, so answers stay in closed
+/// form instead of decaying to decimals.
+#[test]
+fn evaluate_exact_keeps_irrationals() {
+    // No irrational anywhere: the usual full evaluation still happens.
+    let plain = create_expr!("2x + 1").unwrap();
+    assert_eq!(plain.evaluate_exact(3.0_f64).value(), Some(7.0));
+
+    // `pi` survives, and the rational coefficient around it is folded.
+    let with_pi = create_expr!("2x + pi / 2").unwrap();
+    let result = with_pi.evaluate_exact(3.0_f64);
+    assert!(!result.is_value(), "pi must keep the answer symbolic");
+    assert_eq!(
+        result.to_string(),
+        "6 + pi / 2"
+    );
+
+    // The same expression WITHOUT the constant evaluates completely.
+    assert_eq!(create_expr!("2x + 1").unwrap().evaluate_exact(2.0).value(), Some(5.0));
+
+    // A function application also stays symbolic, with its argument evaluated.
+    let with_sqrt = create_expr!("x + sqrt(0.25)").unwrap();
+    assert_eq!(
+        with_sqrt.evaluate_exact(2.0_f64).to_string(),
+        "2 + sqrt(1 / 4)"
+    );
+
+    // `evaluate_with`'s exact counterpart over a map of values.
+    use std::collections::HashMap;
+    let two_var = create_expr!("a + b").unwrap();
+    let mut values = HashMap::new();
+    values.insert('a', 1.5_f64);
+    let result = two_var.evaluate_exact_with(&values);
+    // `a` folded (3 / 2), `b` left symbolic.
+    assert_eq!(result.to_string(), "3 / 2 + b");
+}
+
+/// The ordinary evaluator is unchanged: constants and functions fold.
+#[test]
+fn evaluate_still_folds_everything() {
+    let expr = create_expr!("0.5 + x").unwrap();
+    assert_eq!(expr.evaluate(0.5_f64).value(), Some(1.0));
+    // `pi / 2` folds to its float value here — that is what ordinary means.
+    let exact = create_expr!("pi / 2").unwrap();
+    let value = exact.evaluate(0.0_f64).value().expect("pi folds");
+    assert!((value - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+}

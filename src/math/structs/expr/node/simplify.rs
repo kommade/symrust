@@ -454,7 +454,7 @@ where
                 combined_like_terms = true;
                 continue;
             }
-            let coeff_node = Self::from_float(coeff).wrap();
+            let coeff_node = super::functions::exact_constant_leaf(coeff);
             let pow_node =
                 Self::from_operation(Op::Pow, comp.base.clone(), comp.exponent.clone())
                     .simplify(false, false);
@@ -471,7 +471,7 @@ where
         if has_constant && !constant_value.is_zero() {
             ordered_terms.push((
                 constant_index.unwrap_or(ordered_terms.len()),
-                Self::from_float(constant_value).wrap(),
+                super::functions::exact_constant_leaf(constant_value),
             ));
         }
 
