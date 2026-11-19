@@ -249,6 +249,41 @@ impl <T, const N: usize, const M: usize> StaticMatrix<T, N, M> where T: Matrixab
     pub fn nullity(&self) -> usize {
         M - self.rank()
     }
+
+    /// The minimum-norm left inverse `L` with `L * self = I_M`.
+    ///
+    /// Requires `N >= M` (`tall`) and full column rank: `selfᵗ self` is then
+    /// invertible and `L = (selfᵗ self)⁻¹ selfᵗ` satisfies `L * self = I_M`,
+    /// the Moore–Penrose pseudoinverse of a full-rank matrix. Returns `None`
+    /// when the columns are linearly dependent. See the runtime
+    /// [`Matrix::left_inverse`][super::Matrix::left_inverse] for the details.
+    pub fn left_inverse(&self) -> Option<StaticMatrix<T, M, N>> {
+        assert!(
+            N >= M,
+            "left_inverse: matrix must be tall or square, got {N}x{M}"
+        );
+        let transpose = self.transpose();
+        let gram: StaticMatrix<T, M, M> = transpose.mul_matrix(self);
+        let gram_inverse = gram.inv()?;
+        Some(gram_inverse.mul_matrix(&transpose))
+    }
+
+    /// The minimum-norm right inverse `R` with `self * R = I_N`.
+    ///
+    /// Requires `M >= N` (`wide`) and full row rank: `self selfᵗ` is then
+    /// invertible and `R = selfᵗ (self selfᵗ)⁻¹` satisfies `self * R = I_N`.
+    /// Returns `None` when the rows are linearly dependent. See the runtime
+    /// [`Matrix::right_inverse`][super::Matrix::right_inverse] for the details.
+    pub fn right_inverse(&self) -> Option<StaticMatrix<T, M, N>> {
+        assert!(
+            M >= N,
+            "right_inverse: matrix must be wide or square, got {N}x{M}"
+        );
+        let transpose = self.transpose();
+        let gram: StaticMatrix<T, N, N> = self.mul_matrix(&transpose);
+        let gram_inverse = gram.inv()?;
+        Some(transpose.mul_matrix(&gram_inverse))
+    }
 }
 
 impl <T, const N: usize> StaticMatrix<T, N, N> where T: Matrixable {

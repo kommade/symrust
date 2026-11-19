@@ -196,6 +196,51 @@ impl <T> Matrix<T> where T: Matrixable {
         let (left, sigma, singular_values, right) = svd_of(self)?;
         Some(Svd { left, sigma, singular_values, right })
     }
+
+    /// The minimum-norm left inverse `L` with `L * self = I_columns`.
+    ///
+    /// For an `m x n` matrix with `m >= n` (`tall`) and full column rank,
+    /// `selfᵗ self` is invertible and `L = (selfᵗ self)⁻¹ selfᵗ` satisfies
+    /// `L * self = I_n`. Left inverses are not unique once `m > n`; this is
+    /// the one with the smallest Frobenius norm, which for full-rank `self`
+    /// is its Moore–Penrose pseudoinverse. Returns `None` when the columns
+    /// are linearly dependent. A `wide` matrix (`m < n`) can never have one;
+    /// use [`Matrix::right_inverse`] there. Over a float leaf the normal
+    /// equations square the condition number — over the crate's exact leaves
+    /// the computation is exact.
+    pub fn left_inverse(&self) -> Option<Self> {
+        assert!(
+            self.rows >= self.columns,
+            "left_inverse: matrix must be tall or square, got {}x{}",
+            self.rows,
+            self.columns
+        );
+        let transpose = self.transpose();
+        let gram = transpose.mul_matrix(self);
+        let gram_inverse = gram.inv()?;
+        Some(gram_inverse.mul_matrix(&transpose))
+    }
+
+    /// The minimum-norm right inverse `R` with `self * R = I_rows`.
+    ///
+    /// For an `m x n` matrix with `n >= m` (`wide`) and full row rank,
+    /// `self selfᵗ` is invertible and `R = selfᵗ (self selfᵗ)⁻¹` satisfies
+    /// `self * R = I_m`; as with [`Matrix::left_inverse`] this is the
+    /// Moore–Penrose pseudoinverse for a full-rank matrix. Returns `None`
+    /// when the rows are linearly dependent. A `tall` matrix (`n < m`) can
+    /// never have one; use [`Matrix::left_inverse`] there.
+    pub fn right_inverse(&self) -> Option<Self> {
+        assert!(
+            self.columns >= self.rows,
+            "right_inverse: matrix must be wide or square, got {}x{}",
+            self.rows,
+            self.columns
+        );
+        let transpose = self.transpose();
+        let gram = self.mul_matrix(&transpose);
+        let gram_inverse = gram.inv()?;
+        Some(transpose.mul_matrix(&gram_inverse))
+    }
 }
 
 impl <T> SquareMatrixOps<T> for Matrix<T> where T: Matrixable {

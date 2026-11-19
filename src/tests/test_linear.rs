@@ -35,6 +35,52 @@ fn singular_matrix_has_no_inverse() {
 }
 
 #[test]
+fn left_inverse_multiplies_back_to_identity() {
+    // 3x2 tall, full column rank: L = (AᵗA)⁻¹Aᵗ, L·A = I₂ exactly over Rat.
+    let matrix = RatMatrix::<3, 2>::new([
+        [rat(1), rat(2)],
+        [rat(3), rat(4)],
+        [rat(5), rat(6)],
+    ]);
+    let left = matrix.left_inverse().unwrap();
+    let product: RatMatrix<2, 2> = left.mul_matrix(&matrix);
+    assert_eq!(product, StaticMatrix::<Rat, 2, 2>::identity());
+}
+
+#[test]
+fn right_inverse_multiplies_back_to_identity() {
+    // 2x3 wide, full row rank: R = Aᵗ(AAᵗ)⁻¹, A·R = I₂ exactly over Rat.
+    let matrix = RatMatrix::<2, 3>::new([
+        [rat(1), rat(2), rat(3)],
+        [rat(4), rat(5), rat(6)],
+    ]);
+    let right = matrix.right_inverse().unwrap();
+    let product: RatMatrix<2, 2> = matrix.mul_matrix(&right);
+    assert_eq!(product, StaticMatrix::<Rat, 2, 2>::identity());
+}
+
+#[test]
+fn dependent_columns_have_no_left_inverse() {
+    // Second column is twice the first, so AᵗA is singular.
+    let matrix = RatMatrix::<3, 2>::new([
+        [rat(1), rat(2)],
+        [rat(2), rat(4)],
+        [rat(3), rat(6)],
+    ]);
+    assert!(matrix.left_inverse().is_none());
+}
+
+#[test]
+fn dependent_rows_have_no_right_inverse() {
+    // Second row is twice the first, so AAᵗ is singular.
+    let matrix = RatMatrix::<2, 3>::new([
+        [rat(1), rat(2), rat(3)],
+        [rat(2), rat(4), rat(6)],
+    ]);
+    assert!(matrix.right_inverse().is_none());
+}
+
+#[test]
 fn determinant_matches_known_values() {
     let matrix = RatMatrix::<3, 3>::new([
         [rat(6), rat(1), rat(1)],

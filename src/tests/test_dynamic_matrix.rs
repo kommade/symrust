@@ -63,6 +63,50 @@ fn dynamic_inverse_matches_static() {
 }
 
 #[test]
+fn left_inverse_multiplies_back_to_identity() {
+    // 3x2, full column rank: L = (AᵗA)⁻¹Aᵗ satisfies L·A = I₂ exactly over Rat.
+    let matrix = dynamic(3, 2, &[1, 2, 3, 4, 5, 6]);
+    let left = matrix.left_inverse().unwrap();
+    let product = left.mul_matrix(&matrix);
+    assert_eq!(product, Matrix::<Rat>::identity(2));
+}
+
+#[test]
+fn right_inverse_multiplies_back_to_identity() {
+    // 2x3, full row rank: R = Aᵗ(AAᵗ)⁻¹ satisfies A·R = I₂ exactly over Rat.
+    let matrix = dynamic(2, 3, &[1, 2, 3, 4, 5, 6]);
+    let right = matrix.right_inverse().unwrap();
+    let product = matrix.mul_matrix(&right);
+    assert_eq!(product, Matrix::<Rat>::identity(2));
+}
+
+#[test]
+fn dependent_columns_have_no_left_inverse() {
+    // Second column is twice the first, so AᵗA is singular.
+    let matrix = dynamic(3, 2, &[1, 2, 2, 4, 3, 6]);
+    assert!(matrix.left_inverse().is_none());
+}
+
+#[test]
+fn dependent_rows_have_no_right_inverse() {
+    // Second row is twice the first, so AAᵗ is singular.
+    let matrix = dynamic(2, 3, &[1, 2, 3, 2, 4, 6]);
+    assert!(matrix.right_inverse().is_none());
+}
+
+#[test]
+#[should_panic(expected = "left_inverse: matrix must be tall or square")]
+fn left_inverse_rejects_a_wide_matrix() {
+    dynamic(2, 3, &[1, 2, 3, 4, 5, 6]).left_inverse();
+}
+
+#[test]
+#[should_panic(expected = "right_inverse: matrix must be wide or square")]
+fn right_inverse_rejects_a_tall_matrix() {
+    dynamic(3, 2, &[1, 2, 3, 4, 5, 6]).right_inverse();
+}
+
+#[test]
 fn dynamic_cofactors_match_static() {
     let dynamic = dynamic(3, 3, &[1, 2, 3, 0, 4, 5, 1, 0, 6]);
     let expected_cofactors = [
