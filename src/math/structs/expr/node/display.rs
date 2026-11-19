@@ -743,10 +743,9 @@ impl<T: SymbolicLeaf> Display for NodeInner<T> {
 }
 /// Two node inners are equal when their *trees* match.
 ///
-/// Structural comparison, iteration instead of recursion (the callers compare
-/// like-term candidates inside big sums, where recursion depth would follow
-/// the chain length). Operator tokens — including the function payload —
-/// compare as enums, operand leaves through
+/// Structural comparison, recursive like the rewrites that produce the trees.
+/// Operator tokens — including the function payload — compare as enums,
+/// operand leaves through
 /// [`tokens_equal`](super::builders::tokens_equal); the derived flags
 /// (`has_indp` etc.) are functions of the value, so equal values carry equal
 /// flags and need no separate check.
@@ -767,16 +766,17 @@ impl<T: SymbolicLeaf> PartialEq for NodeInner<T> {
             (NodeValue::Operand(a), NodeValue::Operand(b)) => tokens_equal(a, b),
             (NodeValue::Operator(a), NodeValue::Operator(b)) => {
                 // Operator tokens — including the function payload — compare
-                // as enums; children recurse through their handles.
+                // as enums; children recurse through their handles. `borrow`
+                // hands out a plain reference, so the comparison needs no
+                // guard management.
                 if a.token != b.token {
                     return false;
                 }
-                let (left_left, right_left) = (a.left.inner.borrow(), b.left.inner.borrow());
-                if !(*left_left == *right_left) {
-                    return false;
+                if *a.left.inner.borrow() == *b.left.inner.borrow() {
+                    *a.right.inner.borrow() == *b.right.inner.borrow()
+                } else {
+                    false
                 }
-                let (left_right, right_right) = (a.right.inner.borrow(), b.right.inner.borrow());
-                *left_right == *right_right
             }
             _ => false,
         }
