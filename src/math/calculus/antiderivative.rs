@@ -317,6 +317,9 @@ where
         upper: T,
         context: IntegratorContext,
     ) -> Result<T, IntegrationError> {
+        if odd_symmetric_zero(self, &lower, &upper).is_some() {
+            return Ok(T::zero());
+        }
         let antiderivative = self.get_antiderivative_with_context(context)?;
         evaluate_definite_integral(&antiderivative, lower, upper)
     }
@@ -327,14 +330,25 @@ where
         upper: T,
         context: IntegratorContext,
     ) -> Result<Solution<Self, Self>, IntegrationError> {
+        let mut recorder = StepRecorder::new(self.clone(), "antiderivative");
+        // An odd integrand over centred bounds is exactly zero, and the
+        // narrative says so in one step: no search runs, so there is no
+        // antiderivative statement and no bound substitutions to record.
+        if odd_symmetric_zero(self, &lower, &upper).is_some() {
+            recorder.push_step(
+                "symmetry",
+                format!(
+                    "f(-x) = -f(x), so ∫_{{{}}}^{{{}}} f(x) dx = 0",
+                    lower, upper
+                ),
+                Expr::from_node(Node::<T>::float(T::zero())),
+            );
+            return Ok(recorder.finish(Expr::from_node(Node::<T>::float(T::zero()))));
+        }
         // One recorder carries the whole narrative: the search, the statement
         // of the antiderivative and the bound substitutions. Finishing and
         // reopening a solution here would round-trip the fields for nothing.
-        let (antiderivative, mut recorder) = {
-            let mut recorder = StepRecorder::new(self.clone(), "antiderivative");
-            let result = antiderivative_with_context(self, context, &mut recorder)?;
-            (result, recorder)
-        };
+        let antiderivative = antiderivative_with_context(self, context, &mut recorder)?;
         let antiderivative_text = antiderivative.to_string();
         recorder.push_step(
             "calculation complete",
@@ -477,6 +491,84 @@ where
         });
     }
     Ok(result)
+}
+
+/// The parity an integrand's numeric probes agree on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Parity {
+    /// `f(-x) = -f(x)`: the integrand cancels itself over centred bounds.
+    Odd,
+    /// `f(-x) = f(x)`: one half of a centred interval determines the whole.
+    Even,
+}
+
+/// Whether `f(-x) = -f(x)` (odd) or `f(-x) = f(x)` (even), probed numerically.
+///
+/// Every sample where the integrand and its mirror are both evaluable, and
+/// neither value is zero, must support the same parity — and it must support it
+/// exactly: the crate's arithmetic flips signs bit-for-bit (a negated leaf
+/// feeding the same operations produces the negated result), so a function that
+/// is merely close to odd cannot pass. Samples that fail to evaluate (a
+/// logarithm at a negative argument, say) say nothing and are skipped, a zero
+/// value agrees with both parities and is skipped too, and the two parities can
+/// never both gather evidence. With no evidence at all the probe stays silent
+/// and the caller runs the ordinary search.
+fn probe_parity<T: SymbolicLeaf>(node: &Node<T>) -> Option<Parity> {
+    let mut odd = false;
+    let mut even = false;
+    for sample in helpers::SAMPLES {
+        let Some(value) = helpers::evaluate_at(node, &float_from::<T>(sample)) else {
+            continue;
+        };
+        let Some(mirror) = helpers::evaluate_at(node, &float_from::<T>(-sample)) else {
+            continue;
+        };
+        if value.is_nan() || mirror.is_nan() {
+            continue;
+        }
+        // Compare the f64 projections: exact, and the same mathematical value
+        // projects identically from both evaluations.
+        let value = value.to_real().as_f64();
+        let mirror = mirror.to_real().as_f64();
+        if value == 0.0 || mirror == 0.0 || !value.is_finite() || !mirror.is_finite() {
+            continue;
+        }
+        if mirror == -value {
+            odd = true;
+        } else if mirror == value {
+            even = true;
+        } else {
+            return None;
+        }
+    }
+    if odd && !even {
+        Some(Parity::Odd)
+    } else if even && !odd {
+        Some(Parity::Even)
+    } else {
+        None
+    }
+}
+
+/// The exact zero an odd integrand answers with over centred bounds, or
+/// `None` when the bounds are not `[-a, a]` or the parity probe stays silent.
+///
+/// ∫ f dx over `[-a, a]` vanishes for odd `f` without any integration running;
+/// the probe is exact, so the answer is exact too. The returned value is typed
+/// for the caller's leaf.
+fn odd_symmetric_zero<T: SymbolicLeaf>(integrand: &Expr<T>, lower: &T, upper: &T) -> Option<T> {
+    if lower.is_infinite() || upper.is_infinite() {
+        return None;
+    }
+    // Centred bounds: `-a + a = 0`, read in the caller's arithmetic so the
+    // check costs nothing when the bounds are not centred.
+    if !(lower.clone() + upper.clone()).is_zero() {
+        return None;
+    }
+    if probe_parity(&integrand.tree)? != Parity::Odd {
+        return None;
+    }
+    Some(T::zero())
 }
 
 /// A single integration run can be configured with a context that sets the

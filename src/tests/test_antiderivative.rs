@@ -874,3 +874,64 @@ fn an_improper_integral_converges_via_the_limit() {
         "an infinite bound is always a limit, got: {upper_step}"
     );
 }
+
+/// An odd integrand over centred bounds is exactly zero, found before the
+/// search starts: `integrate` answers without an antiderivative, and the
+/// solution carries a single symmetry step instead of the search narrative.
+#[test]
+fn an_odd_integral_over_centred_bounds_is_zero_without_a_search() {
+    use crate::math::numeric::Real;
+    use crate::math::structs::solution::SolutionStep;
+
+    // ∫_{-2}^{2} x^{3} dx = 0 (odd); no technique runs.
+    let value = create_expr!("x^3")
+        .unwrap()
+        .integrate(Real::from_i64(-2), Real::from_i64(2))
+        .expect("an odd integrand over centred bounds");
+    assert!(value.is_zero());
+
+    let solution = create_expr!("x^3")
+        .unwrap()
+        .integrate_solution(Real::from_i64(-2), Real::from_i64(2))
+        .unwrap();
+    assert_eq!(solution.len(), 1, "only the symmetry step runs: {solution}");
+    let step = solution.steps().first().expect("the symmetry step");
+    let SolutionStep::Elementary(step) = step else {
+        panic!("expected an elementary step, got {step:?}");
+    };
+    assert_eq!(step.step_name, "symmetry");
+    assert!(
+        step.description.contains("f(-x) = -f(x)"),
+        "the step should name the parity, got: {}",
+        step.description
+    );
+}
+
+/// A centred integral whose integrand is odd *and* transcendental takes the
+/// same shortcut (the sign flip registers on the probe), while a non-odd
+/// integrand over the same bounds still integrates through the search.
+#[test]
+fn centred_integral_symmetry_applies_only_to_odd_integrands() {
+    use crate::math::numeric::Real;
+
+    // Odd through a transcendental: ∫_{-1}^{1} x e^{x²} dx = 0 without a search.
+    let value = create_expr!("x e^(x^2)")
+        .unwrap()
+        .integrate(Real::from_i64(-1), Real::from_i64(1))
+        .expect("odd transcendental integrand");
+    assert!(value.is_zero());
+
+    // ∫_{-1}^{1} x^2 dx = 2/3: even, so the ordinary path produces it.
+    let value = create_expr!("x^2")
+        .unwrap()
+        .integrate(Real::from_i64(-1), Real::from_i64(1))
+        .expect("an even integrand takes the ordinary path");
+    assert_eq!(value, Real::from_f64(2.0 / 3.0));
+
+    // ∫_{-1}^{1} (x^3 + 1) dx = 2: neither parity survives the probe.
+    let value = create_expr!("x^3 + 1")
+        .unwrap()
+        .integrate(Real::from_i64(-1), Real::from_i64(1))
+        .expect("no symmetry: ordinary integration");
+    assert_eq!(value, Real::from_f64(2.0));
+}
