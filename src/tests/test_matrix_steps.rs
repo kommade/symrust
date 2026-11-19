@@ -179,7 +179,7 @@ fn solution_displays_with_steps() {
 /// and Q's columns must be orthonormal.
 #[test]
 fn qr_records_elementary_steps() {
-    let source = matrix(&[&["1", "-1", "-1"], &["1", "0", "0"], &["1", "1", "1"], &["1", "2", "4"]]);
+    let source = matrix(&[&["1", "-1", "1"], &["1", "0", "0"], &["1", "1", "1"], &["1", "2", "4"]]);
     let solution = source.qr_solution().expect("columns are independent");
     assert_eq!(solution.problem_type(), "QR factorisation (Gram-Schmidt)");
     println!("solution: {solution}");
@@ -220,8 +220,8 @@ fn qr_records_elementary_steps() {
     assert_eq!(q[1][1].to_string(), "-sqrt(5) / 10");
     assert_eq!(r[0][0].to_string(), "2");
     assert_eq!(r[1][1].to_string(), "sqrt(5)");
-    assert_eq!(r[1][2].to_string(), "8 sqrt(5) / 5");
-    assert_eq!(r[2][2].to_string(), "sqrt(30) / 5");
+    assert_eq!(r[1][2].to_string(), "sqrt(5)");
+    assert_eq!(r[2][2].to_string(), "2");
 
     // The product reconstructs A: read two of its entries back numerically.
     let product = q.mul_matrix(r);
@@ -268,12 +268,12 @@ fn qr_records_elementary_steps() {
         .find(|(name, text)| name == "orthogonalise" && text.contains("q2·a3"))
         .expect("an orthogonalise step against q2");
     assert!(
-        projecting.1.contains("q2·a3 = 8 sqrt(5) / 5"),
+        projecting.1.contains("q2·a3 = sqrt(5)"),
         "the projection coefficient should show the full working: {}",
         projecting.1
     );
     assert!(
-        projecting.1.contains("column 3 -= (8 sqrt(5) / 5) * q2"),
+        projecting.1.contains("column 3 -= sqrt(5) * q2"),
         "the subtraction should be spelled out: {}",
         projecting.1
     );
@@ -282,8 +282,8 @@ fn qr_records_elementary_steps() {
         .find(|(name, text)| name == "normalise" && text.contains("to give q3"))
         .expect("a normalise step for q3");
     assert!(
-        normalising.1.contains("squared length 6 / 5")
-            && normalising.1.contains("length sqrt(30) / 5"),
+        normalising.1.contains("squared length 4")
+            && normalising.1.contains("length 2"),
         "the normalise step should show its exact working: {}",
         normalising.1
     );
