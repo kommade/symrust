@@ -3,7 +3,6 @@ use crate::create_expr;
 
 #[test]
 fn create_expr() {
-    super::setup();
     for example in &EXAMPLE_FUNCTIONS {
         let expr = create_expr!(example.input).unwrap();
         assert_eq!(expr.to_latex().unwrap(), example.latex);
@@ -12,49 +11,42 @@ fn create_expr() {
 
 #[test]
 fn fail_unexpected_end() {
-    super::setup();
     let expr = create_expr!("2 *");
     assert!(expr.is_err());
 }
 
 #[test]
 fn fail_mismatched_parentheses() {
-    super::setup();
     let expr = create_expr!("2 * (x + 2");
     assert!(expr.is_err());
 }
 
 #[test]
 fn fail_invalid_character() {
-    super::setup();
     let expr = create_expr!("!");
     assert!(expr.is_err());
 }
 
 #[test]
 fn fail_division_by_zero() {
-    super::setup();
     let expr = create_expr!("2x / 0");
     assert!(expr.is_err());
 }
 
 #[test]
 fn fail_invalid_expression() {
-    super::setup();
     let expr = create_expr!("+ 2x");
     assert!(expr.is_err());
 }
 
 #[test]
 fn expr_implicit_mul() {
-    super::setup();
     let expr = create_expr!("2x^2").unwrap();
     assert_eq!(expr.to_string(), "2 x ^ 2");
 }
 
 #[test]
 fn expr_simplify() {
-    super::setup();
     let expr = create_expr!("2x^2 + 0").unwrap();
     assert_eq!(expr.simplify(true).to_string(), "2 x ^ 2");
     let expr = create_expr!("2x^2 * 0").unwrap();
@@ -95,7 +87,6 @@ fn expr_simplify() {
 /// `a^(-n)` rather than as a subtraction.
 #[test]
 fn surd_powers_collapse() {
-    super::setup();
     // A minus directly after `^` is part of the exponent.
     assert_eq!(create_expr!("2^-2").unwrap().simplify(true).to_string(), "2 ^ -2");
     assert_eq!(create_expr!("x^-2").unwrap().simplify(true).to_string(), "x ^ -2");
@@ -123,4 +114,55 @@ fn expr_linearise() {
     let expr = create_expr!("-2 * sin(x) / cos(x)").unwrap();
     let split = crate::math::calculus::expr::split_constant(&expr.tree);
     println!("{split}");
+}
+
+/// `tidy` structurally folds rational arithmetic over a single radical into
+/// one exact surd. The numeric evaluator cannot do this (`sqrt` blocks it),
+/// which is what left `5 / sqrt(5)` unfolded in QR results.
+#[test]
+fn tidy_folds_single_radicals() {
+    // `5 / sqrt(5)` rationalises to `sqrt(5)`.
+    assert_eq!(
+        create_expr!("5 / sqrt(5)").unwrap().tidy().to_string(),
+        "sqrt(5)"
+    );
+    // The QR leak: several radical terms with rational coefficients combine
+    // into one exact coefficient over the shared radical.
+    assert_eq!(
+        create_expr!("6 / sqrt(5) - (3 / 2) / sqrt(5) - (1 / 2) / sqrt(5)")
+            .unwrap()
+            .tidy()
+            .to_string(),
+        "4 sqrt(5) / 5"
+    );
+    // `sqrt(r)` itself reduces to its simplest form `n sqrt(k)`, where
+    // `r = n^2 k` and `k` is squarefree.
+    assert_eq!(
+        create_expr!("sqrt(8)").unwrap().tidy().to_string(),
+        "2 sqrt(2)"
+    );
+    assert_eq!(
+        create_expr!("sqrt(45)").unwrap().tidy().to_string(),
+        "3 sqrt(5)"
+    );
+    // `r / sqrt(r)` becomes `sqrt(r)` — again in simplest form.
+    assert_eq!(
+        create_expr!("8 / sqrt(8)").unwrap().tidy().to_string(),
+        "2 sqrt(2)"
+    );
+    // Dividing by `n sqrt(k)` rationalises to the simplest form too.
+    assert_eq!(
+        create_expr!("6 / (2 sqrt(2))").unwrap().tidy().to_string(),
+        "3 sqrt(2) / 2"
+    );
+    // Products of radicals over the same field collapse exactly.
+    assert_eq!(
+        create_expr!("sqrt(2) * sqrt(8)").unwrap().tidy().to_string(),
+        "4"
+    );
+    // Unrelated radicands leave the single quadratic field: no folding.
+    assert_eq!(
+        create_expr!("sqrt(2) + sqrt(3)").unwrap().tidy().to_string(),
+        "sqrt(2) + sqrt(3)"
+    );
 }

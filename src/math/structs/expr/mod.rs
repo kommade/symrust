@@ -2,7 +2,9 @@ use std::fmt::Display;
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
 use crate::math::algebra::rational::Rat;
+use crate::math::algebra::surd::{self, Surd};
 use crate::math::numeric::{ExactField, FloatType, Real, SymbolicLeaf};
+use crate::math::parse::lexer::{Op, Token};
 use crate::math::parse::{lexer::Lexer, parser::Parser};
 
 pub mod error;
@@ -11,7 +13,7 @@ pub mod evaluate;
 pub mod limit;
 mod matrix;
 
-use node::{MulType, Node, NodeInner, NodeFunctions, NodeOperations};
+use node::{MulType, Node, NodeInner, NodeFunctions, NodeOperations, NodeValue};
 pub use error::ExprError;
 pub use evaluate::{Evaluable, Evaluated};
 pub use limit::Limit;
@@ -311,6 +313,18 @@ where
         if simplified.has_independent() {
             return simplified;
         }
+        // A `sqrt` blocks `evaluate` (functions stay symbolic), but a closed
+        // tree of rational arithmetic over `sqrt` of rationals still has an
+        // exact single-field form `a + b sqrt(k)`. Folding it replaces unread
+        // quotient trees — `5 / sqrt(5)`, or the long radical sums a
+        // Gram-Schmidt elimination produces — with one readable surd, and the
+        // field arithmetic of `Surd` is exact. The `contains_function` flag
+        // skips the walk for trees with no function at all.
+        if simplified.tree.inner.borrow().has_func
+            && let Some(surd) = simplified.as_surd()
+        {
+            return Self::from_node(surd.to_node());
+        }
         let Some(value) = simplified.tree().inner.borrow().evaluate() else {
             return simplified;
         };
@@ -324,6 +338,60 @@ where
             // happens for a float leaf that was already decimal, so keep the
             // decimal.
             None => Self::from_node(Node::float(value)),
+        }
+    }
+
+    /// The expression as an exact surd `a + b sqrt(k)`, when it is purely
+    /// rational arithmetic over `sqrt` of rationals.
+    ///
+    /// The structural counterpart of the evaluator's function blind spot:
+    /// `5 / sqrt(5)` and `6 / sqrt(5) - (3/2) / sqrt(5) - (1/2) / sqrt(5)`
+    /// cannot evaluate to a leaf, but both are exact members of a single
+    /// quadratic field. Returns `None` when the expression leaves that world —
+    /// another function (`ln`, `sin`), two unrelated radicands
+    /// (`sqrt(2) + sqrt(3)`), a surd whose square root has no closed form, or
+    /// of course any variable (checked by the caller).
+    fn as_surd(&self) -> Option<Surd> {
+        let inner = self.tree.inner.borrow();
+        match &inner.value {
+            NodeValue::Operand(Token::Number(n)) => Some(Surd::rational(Rat::from_i64(*n))),
+            NodeValue::Operand(Token::Float(f)) => Rat::from_leaf(f).map(Surd::rational),
+            // `sqrt` of a rational is a single surd; sqrt of a surd may leave
+            // the field, so only the rational case is folded.
+            NodeValue::Operator(_) if inner.is_sqrt() => {
+                let argument = match &inner.value {
+                    NodeValue::Operator(op_node) => Expr::from_node(op_node.right.clone()),
+                    _ => return None,
+                };
+                // The recursion walks freshly cloned trees, so the borrow on
+                // this node does not need to be released here; the `Ref` guard
+                // simply outlives the recursive calls harmlessly.
+                let value = argument.as_surd()?;
+                if !value.is_rational() {
+                    return None;
+                }
+                surd::sqrt_rational(value.rational_part())
+            }
+            NodeValue::Operator(op_node) => match &op_node.token {
+                Token::Operator(op) => {
+                    let left = Expr::from_node(op_node.left.clone());
+                    let right = Expr::from_node(op_node.right.clone());
+                    let left = left.as_surd()?;
+                    let right = right.as_surd()?;
+                    match op {
+                        Op::Add => left.add(right),
+                        Op::Sub => left.sub(right),
+                        Op::Mul | Op::ImplicitMul => left.mul(right),
+                        Op::Div => left.div(right),
+                        // Fractional powers stay symbolic: `2^(1/3)` is not a
+                        // quadratic surd and a general one is unreadable.
+                        Op::Pow => None,
+                    }
+                }
+                // Any other function keeps its symbolic form.
+                _ => None,
+            },
+            _ => None,
         }
     }
 }

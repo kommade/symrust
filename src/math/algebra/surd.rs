@@ -148,6 +148,20 @@ impl Surd {
         self.a.is_zero() && self.b.is_zero()
     }
 
+    /// `true` when this surd is an ordinary rational (no radical part).
+    pub fn is_rational(&self) -> bool {
+        self.b.is_zero()
+    }
+
+    /// The rational coefficient, i.e. the `a` part of `a + b sqrt(k)`.
+    ///
+    /// The radical part, when there is one, stays where it is; this accessor
+    /// exists so callers folding expressions into surds can read the rational
+    /// back out for a `sqrt` of a pure rational.
+    pub fn rational_part(&self) -> Rat {
+        self.a
+    }
+
     pub fn is_one(&self) -> bool {
         self.k == 0 && self.a.is_one()
     }

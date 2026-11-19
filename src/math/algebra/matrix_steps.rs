@@ -151,10 +151,10 @@ where
     /// QR factorisation by Gram-Schmidt, recording the orthogonalisation and
     /// normalisation steps.
     ///
-    /// Returns the solution whose answer is the `Q` matrix; the description of
-    /// the final step records `R`. Returns `None` when a column is linearly
-    /// dependent on the earlier ones, which is detected exactly (a zero squared
-    /// norm) rather than by a tolerance.
+    /// The result is the augmented `[Q | R]`: the first `columns` columns are
+    /// `Q`, the remaining ones are `R`. Returns `None` when a column is
+    /// linearly dependent on the earlier ones, which is detected exactly (a
+    /// zero squared norm) rather than by a tolerance.
     ///
     /// # Examples
     /// ```
@@ -443,7 +443,9 @@ where
         q.push(vector);
     }
 
-    // Assemble Q and compute R = Qᵀ A.
+    // Assemble Q and compute R = Qᵀ A. As in the `Expr` path, the result is
+    // the augmented [Q | R]: the first `columns` columns are Q, the remaining
+    // are R.
     let mut q_matrix = Matrix::<T>::new(rows, columns);
     for (column, entries) in q.iter().enumerate() {
         for (row, value) in entries.iter().enumerate() {
@@ -464,12 +466,28 @@ where
             r_matrix[i][j] = total;
         }
     }
+    let mut augmented = Matrix::<T>::new(rows, columns * 2);
+    for row in 0..rows {
+        for column in 0..columns {
+            augmented[row][column] = q_matrix[row][column].clone();
+            // R is only `columns x columns`; on a tall matrix the remaining
+            // rows contribute nothing to QᵀA, so they are written as zeros.
+            augmented[row][columns + column] = if row < columns {
+                r_matrix[row][column].clone()
+            } else {
+                T::additive_identity()
+            };
+        }
+    }
 
     recorder.record_decision(
         "assemble",
-        || format!("Q holds the orthonormal columns and R = QᵀA, giving R = {r_matrix}"),
+        || format!(
+            "Q holds the orthonormal columns and R = QᵀA; written side by side, \
+             Q = the first {columns} columns and R = the remaining {columns}"
+        ),
     );
-    Some(recorder.finish(q_matrix))
+    Some(recorder.finish(augmented))
 }
 
 /// The dot product of two entry slices over any coefficient type.
@@ -773,7 +791,9 @@ impl<T> Matrix<Expr<T>> where T: SymbolicLeaf {
 
     /// QR factorisation by Gram–Schmidt, recording the orthogonalisation steps.
     ///
-    /// Returns `None` when a column is linearly dependent on the earlier ones.
+    /// The result is the augmented `[Q | R]`: the first `columns` columns are
+    /// `Q`, the remaining ones are `R`. Returns `None` when a column is
+    /// linearly dependent on the earlier ones.
     #[must_use]
     pub fn qr_solution(&self) -> Option<Solution<Expr<T>, Expr<T>>> {
         qr_tracked(self)
@@ -1221,7 +1241,11 @@ where
         q.push(vector);
     }
 
-    // Assemble Q and compute R = Qᵀ A.
+    // Assemble Q and compute R = Qᵀ A. A solution's result is one value but a
+    // factorisation has two factors, so both are written side by side: the
+    // result is the augmented [Q | R], whose first `columns` columns are Q and
+    // whose remaining columns are R (zero-filled below R's own rows when the
+    // matrix is tall).
     let mut q_matrix = Matrix::<Expr<T>>::new(rows, columns);
     for (column, entries) in q.iter().enumerate() {
         for (row, value) in entries.iter().enumerate() {
@@ -1242,13 +1266,30 @@ where
             r_matrix[i][j] = total;
         }
     }
+    let mut augmented = Matrix::<Expr<T>>::new(rows, columns * 2);
+    for row in 0..rows {
+        for column in 0..columns {
+            augmented[row][column] = q_matrix[row][column].clone();
+            // R is only `columns x columns`; on a tall matrix the remaining
+            // rows contribute nothing to QᵀA, so they are written as zeros.
+            augmented[row][columns + column] = if row < columns {
+                r_matrix[row][column].clone()
+            } else {
+                Expr::from_f64(0.0)
+            };
+        }
+    }
 
+    let described = matrix_expr(&augmented);
     recorder.record(
         "assemble",
-        || String::from("Q holds the orthonormal columns and R = QᵀA"),
-        || matrix_expr(&q_matrix),
+        || format!(
+            "Q holds the orthonormal columns and R = QᵀA; written side by side, \
+             Q = the first {columns} columns and R = the remaining {columns}"
+        ),
+        || described.clone(),
     );
-    Some(recorder.finish(matrix_expr(&r_matrix)))
+    Some(recorder.finish(described))
 }
 
 /// A single column rendered as an `n x 1` matrix expression, for showing a

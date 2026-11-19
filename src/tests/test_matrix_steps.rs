@@ -50,7 +50,6 @@ fn assert_steps_progress(solution: &crate::math::structs::solution::Solution) {
 
 #[test]
 fn rref_records_steps() {
-    super::setup();
     let source = matrix(&[&["1", "2"], &["3", "4"]]);
     let solution = source.row_reduce_solution(true);
 
@@ -76,7 +75,6 @@ fn rref_records_steps() {
 
 #[test]
 fn rref_symbolic_records_steps() {
-    super::setup();
     let source = matrix(&[&["x", "1"], &["2", "3"]]);
     let solution = source.row_reduce_solution(true);
     assert_steps_progress(&solution);
@@ -85,7 +83,6 @@ fn rref_symbolic_records_steps() {
 
 #[test]
 fn determinant_records_steps_and_matches() {
-    super::setup();
     let source = matrix(&[&["1", "2"], &["3", "4"]]);
     let solution = source.determinant_solution().expect("square matrix");
 
@@ -98,7 +95,6 @@ fn determinant_records_steps_and_matches() {
 
 #[test]
 fn determinant_of_singular_matrix_is_zero() {
-    super::setup();
     let source = matrix(&[&["1", "2"], &["2", "4"]]);
     let solution = source.determinant_solution().expect("square matrix");
     assert_eq!(solution.result().to_string(), "0");
@@ -106,7 +102,6 @@ fn determinant_of_singular_matrix_is_zero() {
 
 #[test]
 fn inverse_records_steps_and_matches() {
-    super::setup();
     let source = matrix(&[&["1", "2"], &["3", "4"]]);
     let solution = source.inverse_solution().expect("invertible");
 
@@ -136,14 +131,12 @@ fn inverse_records_steps_and_matches() {
 
 #[test]
 fn singular_matrix_has_no_inverse_solution() {
-    super::setup();
     let source = matrix(&[&["1", "2"], &["2", "4"]]);
     assert!(source.inverse_solution().is_none());
 }
 
 #[test]
 fn non_square_matrices_are_rejected() {
-    super::setup();
     let source = matrix(&[&["1", "2", "3"], &["4", "5", "6"]]);
     assert!(source.determinant_solution().is_none());
     assert!(source.inverse_solution().is_none());
@@ -152,7 +145,6 @@ fn non_square_matrices_are_rejected() {
 /// The solution renders as text with its steps, without panicking.
 #[test]
 fn solution_displays_with_steps() {
-    super::setup();
     let source = matrix(&[&["1", "2"], &["3", "4"]]);
     let text = source.row_reduce_solution(true).to_string();
     assert!(text.contains("reduced row echelon form"), "got {text}");
@@ -163,8 +155,7 @@ fn solution_displays_with_steps() {
 /// and Q's columns must be orthonormal.
 #[test]
 fn qr_records_elementary_steps() {
-    super::setup();
-    let source = matrix(&[&["1", "-2", "-1"], &["2", "0", "1"], &["2", "-4", "2"], &["4", "0", "0"]]);
+    let source = matrix(&[&["1", "-1", "1"], &["1", "0", "0"], &["1", "1", "1"], &["1", "2", "4"]]);
     let solution = source.qr_solution().expect("columns are independent");
     assert_eq!(solution.problem_type(), "QR factorisation (Gram-Schmidt)");
     println!("solution: {solution}");
@@ -183,6 +174,43 @@ fn qr_records_elementary_steps() {
     assert!(
         names.contains(&"normalise"),
         "expected normalise steps, got {names:?}"
+    );
+    assert!(
+        names.contains(&"assemble"),
+        "expected the assemble step, got {names:?}"
+    );
+
+    // A factorisation has two factors and a solution result is one value, so
+    // the result is the augmented [Q | R]: `rows x 2*columns`, whose first
+    // `columns` columns are Q and whose remaining columns are R, zero-filled
+    // below R's own rows on a tall matrix like this 4x3 one.
+    let augmented = matrix_of_result(&solution);
+    assert_eq!(augmented.rows(), 4);
+    assert_eq!(augmented.columns(), 6);
+    // Q's entries are the normalised columns and R itself is upper triangular
+    // with textbook entries. Splitting the augmented matrix at column 3:
+    // `R = [[2, 1, 3], [0, sqrt(5), sqrt(5)], [0, 0, 2]]`, zero-filled on the
+    // last row because the matrix is tall.
+    assert_eq!(augmented[0][0].to_string(), "1 / 2");
+    assert_eq!(augmented[0][1].to_string(), "-3 sqrt(5) / 10");
+    assert_eq!(augmented[1][1].to_string(), "-sqrt(5) / 10");
+    for row in 1..4 {
+        assert_eq!(augmented[row][3].to_string(), "0");
+    }
+    assert_eq!(augmented[0][3].to_string(), "2");
+    assert_eq!(augmented[1][4].to_string(), "sqrt(5)");
+    assert_eq!(augmented[2][5].to_string(), "2");
+
+    // No entry may still show the rationalised form `5 / sqrt(5)`; every
+    // radial quantity must render as an exact `sqrt(5)` coefficient instead.
+    let result_text = augmented.to_string();
+    assert!(
+        !result_text.contains("/ sqrt"),
+        "result left a division by a radical: {result_text}"
+    );
+    assert!(
+        result_text.contains("sqrt(5)"),
+        "result lost its exact radical: {result_text}"
     );
 
     // The steps must stay exact. No step may contain a long
@@ -215,7 +243,6 @@ fn qr_records_elementary_steps() {
 /// A dependent column makes the QR decomposition fail rather than divide by zero.
 #[test]
 fn qr_rejects_dependent_columns() {
-    super::setup();
     let source = matrix(&[&["1", "2"], &["2", "4"]]);
     assert!(source.qr_solution().is_none());
 }
@@ -227,7 +254,6 @@ fn qr_rejects_dependent_columns() {
 /// "Jacobi rotations" step.
 #[test]
 fn svd_records_the_exact_route() {
-    super::setup();
     let source = matrix(&[&["1", "0"], &["0", "1"]]);
     let solution = source
         .svd_solution()
@@ -284,7 +310,6 @@ fn svd_records_the_exact_route() {
 /// Whatever `svd()` decides, `svd_tracked` agrees.
 #[test]
 fn svd_agrees_with_untracked() {
-    super::setup();
     for source in [
         matrix(&[&["1", "0"], &["0", "1"]]),
         matrix(&[&["4", "0"], &["0", "9"]]),
@@ -308,7 +333,6 @@ fn svd_agrees_with_untracked() {
 /// comparing structurally.
 #[test]
 fn symbolic_diagonalization_of_the_identity() {
-    super::setup();
     let identity = matrix(&[&["1", "0"], &["0", "1"]]);
     assert!(identity.eigenvalues().is_some(), "eigenvalues work");
 
@@ -331,7 +355,6 @@ fn symbolic_diagonalization_of_the_identity() {
 /// numerically.
 #[test]
 fn variable_matrix_diagonalization_is_unavailable() {
-    super::setup();
     let symbolic = matrix(&[&["x", "0"], &["0", "x"]]);
     assert!(symbolic.eigenvalues().is_none() || symbolic.diagonalize().is_none());
 }
@@ -339,7 +362,6 @@ fn variable_matrix_diagonalization_is_unavailable() {
 /// Eigen-decomposition composes shifted-matrix steps with nested row reductions.
 #[test]
 fn eigen_composes_shift_and_null_space_steps() {
-    super::setup();
     // A diagonal matrix has clean eigenvalues, so the steps must appear.
     let source = matrix(&[&["1", "0"], &["0", "2"]]);
     let Some(solution) = source.eigen_solution() else {
