@@ -32,6 +32,25 @@ fn powers_and_sqrt() {
     ));
 }
 
+/// A negative base with an integer exponent is exact repeated multiplication
+/// with the parity sign; `arpfloat`'s exp-log formulation answers NaN there.
+/// A non-integer exponent at a negative base stays undefined.
+#[test]
+fn negative_base_integer_powers_have_a_sign() {
+    assert!(close(&Real::from_f64(-2.0).pow(&Real::from_i64(3)), -8.0));
+    assert!(close(&Real::from_f64(-2.0).pow(&Real::from_i64(4)), 16.0));
+    assert!(close(&Real::from_f64(-2.0).pow(&Real::from_f64(4.0)), 16.0));
+    assert!(close(&Real::from_f64(-2.0).pow(&Real::from_f64(-1.0)), -0.5));
+    assert!(close(&Real::from_f64(-2.0).pow(&Real::from_f64(-3.0)), -0.125));
+    // The odd-exponent sign flows through `powi`-style repeated multiplication.
+    assert!(close(&Real::from_f64(-2.0).powi(3), -8.0));
+
+    // Exponents of a negative base that are not integers remain undefined.
+    assert!(Real::from_f64(-2.0).pow(&Real::from_f64(0.5)).is_nan());
+    assert!(Real::nan().pow(&Real::from_i64(2)).is_nan());
+    assert!(Real::from_f64(2.0).pow(&Real::nan()).is_nan());
+}
+
 #[test]
 fn display() {
     assert_eq!(Real::from_i64(5).to_string(), "5");

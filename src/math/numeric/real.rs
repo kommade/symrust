@@ -15,6 +15,8 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 
 use arpfloat::{FP128, Float};
 
+use super::FloatBridge;
+
 /// The tolerance used when comparing two [`Real`] values for "equality".
 ///
 /// `arpfloat` carries far more precision than the calculus heuristics need, so
@@ -293,7 +295,22 @@ impl Real {
 
     #[must_use]
     pub fn pow(self, exponent: &Self) -> Self {
-        Self(self.0.pow(&exponent.0))
+        // `arpfloat`'s `pow` is `exp(exponent · log(self))`, which is NaN at a
+        // negative base. An integer exponent is well defined there — repeated
+        // multiplication, the sign set by the exponent's parity — so take that
+        // branch before handing the work to the engine. Non-integer exponents
+        // at a negative base stay NaN: the result is not real.
+        if self.is_negative() && !self.is_nan() && !exponent.is_nan() && exponent.is_integer() {
+            let magnitude = self.neg().pow(exponent);
+            let parity = exponent.to_real().as_f64() % 2.0;
+            if parity == 0.0 {
+                magnitude
+            } else {
+                -magnitude
+            }
+        } else {
+            Self(self.0.pow(&exponent.0))
+        }
     }
 
     /// `self ^ n` for a non-negative exponent, via `arpfloat`'s `powi`.
