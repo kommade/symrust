@@ -1446,7 +1446,7 @@ where
 }
 
 /// Render a polynomial in `λ` as a readable string, e.g. `λ^2 - 2 λ + 1`.
-fn describe_polynomial<T>(polynomial: &super::symbolic_eigen::ExprPoly<T>) -> String
+fn describe_polynomial<T>(polynomial: &super::symbolic_linear::ExprPoly<T>) -> String
 where
     T: SymbolicLeaf,
 {

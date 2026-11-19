@@ -1,7 +1,9 @@
-//! Symbolic eigenvalues: the characteristic polynomial over `Expr` and its
-//! radical roots.
+//! Symbolic matrix algebra over `Expr`: characteristic polynomials with
+//! radical eigenvalues, and the general one-sided inverses with free
+//! parameters.
 
 use crate::math::algebra::linear::Matrix;
+use crate::math::algebra::linear::MatrixMul;
 use crate::create_expr;
 use crate::math::structs::expr::Expr;
 
@@ -128,6 +130,134 @@ fn symbolic_eigenvalues_are_tidied() {
         !rendered.iter().any(|root| root.contains("sqrt")),
         "expected the square discriminant to collapse, got {rendered:?}"
     );
+}
+
+/// A generic one-sided inverse family verifies two ways: the particular
+/// inverse satisfies its defining identity exactly, and every basis matrix
+/// satisfies the homogeneous equation (`B A = 0` for left, `A B = 0` for
+/// right), so adding any amount of any basis keeps the identity. The basis
+/// count also matches `n * null(Aᵗ)` / `m * null(A)` from the docs.
+#[test]
+fn general_left_inverse_particular_and_basis_verify() {
+    super::setup();
+    // 3x2 tall, full column rank: L A = I₂; null(Aᵗ) is 1-dimensional
+    // (3 rows, rank 2), so the family has n * 1 = 2 basis matrices.
+    let source = matrix(&[&["1", "2"], &["3", "4"], &["5", "6"]]);
+    let (particular, bases) = source.symbolic_left_inverse().expect("full column rank");
+
+    assert_eq!(bases.len(), 2, "n rows x null(Aᵗ) of dimension 1");
+
+    let product = particular.mul_matrix(&source);
+    assert_eq!(product.rows(), 2);
+    assert_eq!(product.columns(), 2);
+    for row in 0..2 {
+        for column in 0..2 {
+            let expected = if row == column { 1.0 } else { 0.0 };
+            let value = sample(&product[row][column], 0.0).unwrap_or(f64::NAN);
+            assert!(
+                (value - expected).abs() < 1e-9,
+                "L A should be the identity, got {value} at ({row}, {column})"
+            );
+        }
+    }
+
+    for basis in &bases {
+        // Shape n x m = 2 x 3.
+        assert_eq!((basis.rows(), basis.columns()), (2, 3));
+        let cancelled = basis.mul_matrix(&source);
+        for row in 0..cancelled.rows() {
+            for column in 0..cancelled.columns() {
+                let value = sample(&cancelled[row][column], 0.0).unwrap_or(f64::NAN);
+                assert!(
+                    value.abs() < 1e-9,
+                    "a basis matrix must annihilate A, got {value} at ({row}, {column})"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn general_right_inverse_particular_and_basis_verify() {
+    super::setup();
+    // 2x3 wide, full row rank: A R = I₂ with R 3x2; null(A) is 1-dimensional
+    // (3 columns, rank 2). The family of differences N has m_rows * nullity =
+    // 2 * 1 = 2 free parameters, each basis a 3x2 matrix carrying one column
+    // of the kernel.
+    let source = matrix(&[&["1", "2", "3"], &["4", "5", "6"]]);
+    let (particular, bases) = source.symbolic_right_inverse().expect("full row rank");
+
+    assert_eq!(bases.len(), 2, "m_rows x null(A) of dimension 1");
+    assert_eq!(
+        (particular.rows(), particular.columns()),
+        (3, 2),
+        "R is 3x2 for a 2x3 A"
+    );
+
+    let product = source.mul_matrix(&particular);
+    for row in 0..2 {
+        for column in 0..2 {
+            let expected = if row == column { 1.0 } else { 0.0 };
+            let value = sample(&product[row][column], 0.0).unwrap_or(f64::NAN);
+            assert!(
+                (value - expected).abs() < 1e-9,
+                "A R should be the identity, got {value} at ({row}, {column})"
+            );
+        }
+    }
+
+    for basis in &bases {
+        // Shape m x n = 3 x 2.
+        assert_eq!((basis.rows(), basis.columns()), (3, 2));
+        let cancelled = source.mul_matrix(basis);
+        for row in 0..cancelled.rows() {
+            for column in 0..cancelled.columns() {
+                let value = sample(&cancelled[row][column], 0.0).unwrap_or(f64::NAN);
+                assert!(
+                    value.abs() < 1e-9,
+                    "a basis matrix must be annihilated by A, got {value} at ({row}, {column})"
+                );
+            }
+        }
+    }
+}
+
+/// The general inverse with a symbolic parameter stays valid: substituting
+/// any two different parameter values into `particular + t * basis` gives two
+/// distinct but equally valid left inverses.
+#[test]
+fn general_right_inverse_parameter_substitution_stays_exact() {
+    super::setup();
+    // 2x3 wide: pick two different parameter values and check A (R + t·B) = I
+    // for both — the family really does cover valid inverses for any t.
+    let source = matrix(&[&["1", "2", "3"], &["4", "5", "6"]]);
+    let (particular, bases) = source.symbolic_right_inverse().expect("full row rank");
+    let basis = &bases[0];
+
+    for parameter in [create_expr!("0").unwrap(), create_expr!("5x").unwrap()] {
+        let adjusted = {
+            let mut sum = particular.clone();
+            for row in 0..sum.rows() {
+                for column in 0..sum.columns() {
+                    sum[row][column] =
+                        (sum[row][column].clone() + parameter.clone() * basis[row][column].clone())
+                            .simplify(true);
+                }
+            }
+            sum
+        };
+        let product = source.mul_matrix(&adjusted);
+        for row in 0..2 {
+            for column in 0..2 {
+                let expected = if row == column { 1.0 } else { 0.0 };
+                let value = sample(&product[row][column], 0.0).unwrap_or(f64::NAN);
+                assert!(
+                    (value - expected).abs() < 1e-9,
+                    "substituting the parameter must keep the identity, got {value} at ({row}, {column})"
+                );
+            }
+        }
+    }
 }
 
 #[test]

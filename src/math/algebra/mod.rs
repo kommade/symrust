@@ -17,7 +17,10 @@ pub mod polynomial;
 pub mod rational;
 /// Real root counting and isolation by Sturm sequences.
 pub mod sturm;
-pub mod symbolic_eigen;
+/// Symbolic matrix algebra over `Expr`: the characteristic polynomial, its
+/// radical eigenvalues, and the general one-sided inverses with free
+/// parameters.
+pub mod symbolic_linear;
 /// Arithmetic in a quadratic extension `Q(sqrt(k))`: the `Surd` coefficient type.
 pub mod surd;
 

@@ -1,5 +1,6 @@
-//! Symbolic eigenvalues: the characteristic polynomial over [`Expr`], and its
-//! roots when they can be written in radicals.
+//! Symbolic matrix algebra over `Expr`: characteristic polynomials with
+//! radical eigenvalues, and the general one-sided inverses with free
+//! parameters.
 //!
 //! The general eigenvalue path in [`crate::math::algebra::linear`] is numeric: it
 //! samples `det(xI - A)` at integers and interpolates, which requires every
@@ -21,7 +22,7 @@
 
 use crate::math::algebra::linear::Matrix;
 use crate::math::numeric::{ExactField, Real, SymbolicLeaf};
-use crate::math::structs::expr::Expr;
+use crate::math::structs::expr::{Expr, ExprError};
 
 /// A polynomial in `λ` with [`Expr<T>`] coefficients, stored low-to-high.
 ///
@@ -308,7 +309,7 @@ impl<T: SymbolicLeaf> ExprPoly<T> {
     ///
     /// # Examples
     /// ```
-    /// use rust_calculus::math::algebra::symbolic_eigen::ExprPoly;
+    /// use rust_calculus::math::algebra::symbolic_linear::ExprPoly;
     /// use rust_calculus::math::numeric::{ExactField, Real};
     /// use rust_calculus::math::structs::expr::Expr;
     ///
@@ -410,5 +411,92 @@ where
     #[must_use]
     pub fn symbolic_eigenvalues(&self) -> Option<Vec<Expr<T>>> {
         self.characteristic_polynomial()?.roots()
+    }
+
+    /// The general left inverse `L` with `L * self = I`, expressed with free
+    /// parameters.
+    ///
+    /// One-sided inverses are not unique. For a tall `m x n` matrix
+    /// (`m > n`, full column rank) every matrix `L' = L + N` with
+    /// `N * self = 0` is also a left inverse, and those `N` are exactly the
+    /// matrices whose *rows* lie in `null(selfᵗ)`. The result carries the
+    /// [`Matrix::left_inverse`][External:minimum] particular inverse (the
+    /// minimum-norm one) plus one basis matrix per free parameter, each of
+    /// shape `n x m`: basis `(i, j)` is `e_i c_jᵗ`, where `e_i` is the i-th
+    /// standard row and `c_j` the j-th basis vector of `null(selfᵗ)`. Any
+    /// substitution of the parameters (single letters `t`, `u`, `v`, … in
+    /// order, `n * (#kernel)` of them) yields a valid left inverse.
+    ///
+    /// # Errors
+    ///
+    /// [`ExprError::Undefined`] when the matrix is wide or rank-deficient,
+    /// mirroring [`Matrix::left_inverse`].
+    #[allow(clippy::type_complexity)]
+    pub fn symbolic_left_inverse(
+        &self,
+    ) -> Result<(Matrix<Expr<T>>, Vec<Matrix<Expr<T>>>), ExprError> {
+        let particular = self.left_inverse().ok_or(ExprError::Undefined(
+            "the matrix has no left inverse: it must be tall and of full column rank",
+        ))?;
+        // Rows of the difference N lie in null(Aᵗ). N has the shape of L:
+        // n x m where n is A's column count (L A = I_n) and m A's row count.
+        let inverse_rows = self.columns();
+        let kernel = self.transpose().null_space();
+        let width = kernel.vector_length().unwrap_or(0);
+        let mut bases = Vec::new();
+        for basis_vector in kernel.iter() {
+            for row in 0..inverse_rows {
+                // e_i c_jᵗ: an n x m matrix whose i-th row is c_j and the rest
+                // are zero.
+                let mut matrix = Matrix::<Expr<T>>::new(inverse_rows, width);
+                for (column, cell) in basis_vector.iter().enumerate() {
+                    matrix[row][column] = cell.clone();
+                }
+                bases.push(matrix);
+            }
+        }
+        Ok((particular, bases))
+    }
+
+    /// The general right inverse `R` with `self * R = I`, expressed with free
+    /// parameters.
+    ///
+    /// The mirror image of [`Matrix::symbolic_left_inverse`]: solutions of
+    /// `self * R' = I` are `R + N` where `self * N = 0`, so the *columns* of
+    /// `N` lie in `null(self)`. Basis `(j, i)` is `c_j e_iᵗ` — an `m x n`
+    /// matrix whose i-th column is the kernel vector `c_j` — again one basis
+    /// matrix per free parameter (`(#kernel) * m` of them); substituting
+    /// single-letter parameters `t`, `u`, `v`, … yields a valid right inverse.
+    ///
+    /// # Errors
+    ///
+    /// [`ExprError::Undefined`] when the matrix is tall or rank-deficient,
+    /// mirroring [`Matrix::right_inverse`].
+    #[allow(clippy::type_complexity)]
+    pub fn symbolic_right_inverse(
+        &self,
+    ) -> Result<(Matrix<Expr<T>>, Vec<Matrix<Expr<T>>>), ExprError> {
+        let particular = self.right_inverse().ok_or(ExprError::Undefined(
+            "the matrix has no right inverse: it must be wide and of full row rank",
+        ))?;
+        // Columns of the difference N lie in null(A). N has the shape of R:
+        // n x m where n is A's column count (kernel vectors live there) and
+        // m is A's row count.
+        let kernel = self.null_space();
+        let height = kernel.vector_length().unwrap_or(0);
+        let width = self.rows();
+        let mut bases = Vec::new();
+        for basis_vector in kernel.iter() {
+            for column in 0..width {
+                // c_j e_iᵗ: an n x m matrix whose i-th column is c_j and the
+                // rest are zero.
+                let mut matrix = Matrix::<Expr<T>>::new(height, width);
+                for (row, cell) in basis_vector.iter().enumerate() {
+                    matrix[row][column] = cell.clone();
+                }
+                bases.push(matrix);
+            }
+        }
+        Ok((particular, bases))
     }
 }

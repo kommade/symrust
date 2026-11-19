@@ -157,6 +157,58 @@ where
         Ok(Expr::from_node(Node::matrix(inverse)))
     }
 
+    /// The general left inverse of this matrix, with free parameters.
+    ///
+    /// Returns the minimum-norm particular inverse `L` with `L * A = I` and
+    /// one basis matrix per free parameter; substituting the parameters
+    /// (single-letter variables, in order) into `L + Σ t_i · basis_i` yields
+    /// every left inverse `A` has. See
+    /// [`Matrix::symbolic_left_inverse`][crate::math::algebra::linear::Matrix::symbolic_left_inverse]
+    /// for the parameter layout.
+    ///
+    /// # Errors
+    ///
+    /// [`ExprError::NotAMatrix`] when the expression is not a matrix, or
+    /// [`ExprError::Undefined`] when it is wide or rank-deficient.
+    pub fn symbolic_left_inverse(
+        &self,
+    ) -> Result<(Self, Vec<Self>), ExprError> {
+        let (particular, bases) =
+            crate::math::algebra::linear::Matrix::symbolic_left_inverse(&self.matrix_or_error()?)?;
+        Ok((
+            Expr::from_node(Node::matrix(particular)),
+            bases
+                .into_iter()
+                .map(|matrix| Expr::from_node(Node::matrix(matrix)))
+                .collect(),
+        ))
+    }
+
+    /// The general right inverse of this matrix, with free parameters.
+    ///
+    /// Returns the minimum-norm particular inverse `R` with `A * R = I` and
+    /// one basis matrix per free parameter; the full family is
+    /// `R + Σ t_i · basis_i`. See
+    /// [`Matrix::symbolic_right_inverse`][crate::math::algebra::linear::Matrix::symbolic_right_inverse].
+    ///
+    /// # Errors
+    ///
+    /// [`ExprError::NotAMatrix`] when the expression is not a matrix, or
+    /// [`ExprError::Undefined`] when it is tall or rank-deficient.
+    pub fn symbolic_right_inverse(
+        &self,
+    ) -> Result<(Self, Vec<Self>), ExprError> {
+        let (particular, bases) =
+            crate::math::algebra::linear::Matrix::symbolic_right_inverse(&self.matrix_or_error()?)?;
+        Ok((
+            Expr::from_node(Node::matrix(particular)),
+            bases
+                .into_iter()
+                .map(|matrix| Expr::from_node(Node::matrix(matrix)))
+                .collect(),
+        ))
+    }
+
     /// The eigenvalues of this matrix, repeated with multiplicity.
     ///
     /// # Errors
