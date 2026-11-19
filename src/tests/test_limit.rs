@@ -14,7 +14,6 @@ fn approx<T: FloatType>(limit: Limit<T>, expected: f64) -> bool {
 
 #[test]
 fn limits_resolved_by_direct_substitution() {
-    super::setup();
     // A polynomial is continuous: direct substitution works.
     let expr = create_expr!("x^2 + 1").unwrap();
     assert_eq!(expr.limit('x', &Real::from_i64(2)), Limit::Finite(Real::from_i64(5)));
@@ -22,7 +21,6 @@ fn limits_resolved_by_direct_substitution() {
 
 #[test]
 fn limits_zero_over_zero_need_lhopital() {
-    super::setup();
     // lim_{x->0} sin(x)/x = 1 (L'Hôpital).
     let expr = create_expr!("sin(x)/x"; f64).unwrap();
     assert!(approx(expr.limit('x', &0.0), 1.0));
@@ -30,7 +28,6 @@ fn limits_zero_over_zero_need_lhopital() {
 
 #[test]
 fn limit_of_one_minus_cos_over_x_squared() {
-    super::setup();
     // lim_{x->0} (1 - cos(x)) / x^2 = 1/2.
     let expr = create_expr!("(1 - cos(x))/x^2").unwrap();
     assert!(approx(expr.limit('x', &Real::from_i64(0)), 0.5));
@@ -38,7 +35,6 @@ fn limit_of_one_minus_cos_over_x_squared() {
 
 #[test]
 fn limit_at_infinity_of_rational() {
-    super::setup();
     // lim_{x->inf} 1/x = 0.
     let expr = create_expr!("1/x").unwrap();
     assert!(approx(expr.limit('x', &Real::infinity()), 0.0));
@@ -46,7 +42,6 @@ fn limit_at_infinity_of_rational() {
 
 #[test]
 fn limit_at_infinity_grows() {
-    super::setup();
     // lim_{x->inf} x = +inf.
     let expr = create_expr!("x").unwrap();
     assert_eq!(expr.limit('x', &Real::infinity()), Limit::PosInfinity);
@@ -54,7 +49,6 @@ fn limit_at_infinity_grows() {
 
 #[test]
 fn improper_integral_to_infinity() {
-    super::setup();
     // int_1^inf 1/x^2 dx = 1.
     let expr = create_expr!("1/x^2").unwrap();
     let value = expr.integrate(Real::from_i64(1), Real::infinity()).unwrap();
@@ -63,7 +57,6 @@ fn improper_integral_to_infinity() {
 
 #[test]
 fn improper_integral_from_negative_infinity() {
-    super::setup();
     // int_{-inf}^0 e^x dx = 1.
     let expr = create_expr!("e^x").unwrap();
     let value = expr
@@ -74,7 +67,6 @@ fn improper_integral_from_negative_infinity() {
 
 #[test]
 fn finite_definite_integral() {
-    super::setup();
     // int_0^3 2x dx = 9.
     let expr = create_expr!("2x").unwrap();
     let value = expr.integrate(Real::from_i64(0), Real::from_i64(3)).unwrap();
@@ -83,7 +75,6 @@ fn finite_definite_integral() {
 
 #[test]
 fn zero_times_infinity_rewritten() {
-    super::setup();
     // lim_{x->0+} x ln(x) = 0  (0 · ∞ rewritten to x / (1/ln x)).
     let expr = create_expr!("x ln(x)").unwrap();
     assert!(approx(expr.limit('x', &Real::from_i64(0)), 0.0));
@@ -91,7 +82,6 @@ fn zero_times_infinity_rewritten() {
 
 #[test]
 fn one_to_the_infinity_rewritten() {
-    super::setup();
     // lim_{x->inf} (1 + 1/x)^x = e  (1^∞ rewritten via exp(g ln f)).
     let expr = create_expr!("(1 + 1/x)^x").unwrap();
     assert!(approx(expr.limit('x', &Real::infinity()), std::f64::consts::E));
@@ -99,7 +89,6 @@ fn one_to_the_infinity_rewritten() {
 
 #[test]
 fn zero_to_the_zero_rewritten() {
-    super::setup();
     // lim_{x->0+} x^x = 1  (0^0 rewritten via exp(g ln f)).
     let expr = create_expr!("x^x").unwrap();
     assert!(approx(expr.limit('x', &Real::from_i64(0)), 1.0));
@@ -107,7 +96,6 @@ fn zero_to_the_zero_rewritten() {
 
 #[test]
 fn oscillation_is_reported_as_not_existing() {
-    super::setup();
     // lim_{x->0} sin(1/x) does not exist (oscillates without a limit).
     let expr = create_expr!("sin(1/x)").unwrap();
     assert_eq!(expr.limit('x', &Real::from_i64(0)), Limit::DoesNotExist);
@@ -115,7 +103,6 @@ fn oscillation_is_reported_as_not_existing() {
 
 #[test]
 fn polynomial_over_exponential_goes_to_zero() {
-    super::setup();
     // lim_{x->inf} x^8 / 2^x = 0 (eight applications of L'Hôpital).
     let expr = create_expr!("x^8/2^x").unwrap();
     assert_eq!(expr.limit('x', &Real::infinity()), Limit::Finite(Real::zero()));

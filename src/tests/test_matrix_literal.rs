@@ -16,7 +16,6 @@ fn matrix_of(expr: &Expr) -> Matrix<Expr> {
 
 #[test]
 fn parses_a_numeric_matrix() {
-    super::setup();
     let expr = create_expr!("[[1, 2], [3, 4]]").unwrap();
     let matrix = matrix_of(&expr);
     assert_eq!(matrix.rows(), 2);
@@ -29,7 +28,6 @@ fn parses_a_numeric_matrix() {
 
 #[test]
 fn parses_a_symbolic_matrix() {
-    super::setup();
     let expr = create_expr!("[[x, 1], [2, x^2]]").unwrap();
     let matrix = matrix_of(&expr);
     assert_eq!(matrix[0][0].to_string(), "x");
@@ -41,7 +39,6 @@ fn parses_a_symbolic_matrix() {
 fn parsed_matrix_determinant_differentiates() {
     use crate::math::calculus::derivative::Derivative;
 
-    super::setup();
     let matrix = matrix_of(&create_expr!("[[x, 1], [2, x^2]]").unwrap());
     let determinant = matrix.det();
     let derivative = determinant.get_derivative();
@@ -54,7 +51,6 @@ fn parsed_matrix_determinant_differentiates() {
 
 #[test]
 fn matrix_adds_as_an_expression() {
-    super::setup();
     // `[[1,0],[0,1]] + [[1,0],[0,1]]` parses as an operator over two matrix tokens.
     let expr = create_expr!("[[1, 0], [0, 1]] + [[1, 0], [0, 1]]").unwrap();
     assert!(
@@ -66,13 +62,11 @@ fn matrix_adds_as_an_expression() {
 
 #[test]
 fn mismatched_row_lengths_are_rejected() {
-    super::setup();
     assert!(create_expr!("[[1, 2], [3]]").is_err());
 }
 
 #[test]
 fn matrix_renders_as_latex_pmatrix() {
-    super::setup();
     let expr = create_expr!("[[1, 2], [3, 4]]").unwrap();
     let latex = expr.to_latex().unwrap();
     assert!(latex.contains(r"\begin{pmatrix}"), "got {latex}");

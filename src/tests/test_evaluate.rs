@@ -5,7 +5,6 @@ use crate::math::structs::expr::evaluate::Evaluated;
 
 #[test]
 fn evaluate_polynomial_f64() {
-    super::setup();
     let expr = create_expr!("2x^2 + 3x + 1").unwrap();
     assert_eq!(expr.evaluate(2.0_f64).value(), Some(15.0));
     assert_eq!(expr.evaluate(0.0_f64).value(), Some(1.0));
@@ -14,7 +13,6 @@ fn evaluate_polynomial_f64() {
 
 #[test]
 fn evaluate_trig_f64() {
-    super::setup();
     let expr = create_expr!("sin(x)^2 + cos(x)^2").unwrap();
     let value = expr.evaluate(0.7_f64).value().unwrap();
     assert!((value - 1.0).abs() < 1e-12, "got {value}");
@@ -22,7 +20,6 @@ fn evaluate_trig_f64() {
 
 #[test]
 fn evaluate_sqrt_and_ln() {
-    super::setup();
     let expr = create_expr!("sqrt(x) + ln(x)").unwrap();
     let value = expr.evaluate(1.0_f64).value().unwrap();
     assert!((value - 1.0).abs() < 1e-12, "got {value}");
@@ -30,7 +27,6 @@ fn evaluate_sqrt_and_ln() {
 
 #[test]
 fn evaluate_float_constant_pi() {
-    super::setup();
     let expr = create_expr!("2pi").unwrap();
     let value = expr.evaluate(1.0_f64).value().unwrap();
     assert!((value - std::f64::consts::TAU).abs() < 1e-12, "got {value}");
@@ -38,14 +34,12 @@ fn evaluate_float_constant_pi() {
 
 #[test]
 fn evaluate_integer_type() {
-    super::setup();
     let expr = create_expr!("x^2 + 1").unwrap();
     assert_eq!(expr.evaluate(5_i64).value(), Some(26));
 }
 
 #[test]
 fn evaluate_with_map_fully_bound() {
-    super::setup();
     let expr = create_expr!("a^2 + b^2").unwrap();
     let mut values = HashMap::new();
     values.insert('a', 3.0_f64);
@@ -55,7 +49,6 @@ fn evaluate_with_map_fully_bound() {
 
 #[test]
 fn evaluate_with_map_partial_is_expression() {
-    super::setup();
     // `y` is the independent variable by default only for the chosen letter, so
     // use `a` and an unbound `b`.
     let expr = create_expr!("a + b").unwrap();
@@ -70,7 +63,6 @@ fn evaluate_with_map_partial_is_expression() {
 
 #[test]
 fn evaluate_independent_variable_is_lookup_free() {
-    super::setup();
     // `x` is the independent variable, so only `x` gets substituted even if a
     // map for it would be empty.
     let expr = create_expr!("x + 1").unwrap();
@@ -79,7 +71,6 @@ fn evaluate_independent_variable_is_lookup_free() {
 
 #[test]
 fn evaluate_with_other_variable_returns_expression() {
-    super::setup();
     let expr = create_expr!("x + y").unwrap();
     // Evaluating the independent variable `x` leaves `y` symbolic.
     let result = expr.evaluate(2.0_f64);
@@ -90,7 +81,6 @@ fn evaluate_with_other_variable_returns_expression() {
 
 #[test]
 fn evaluate_default_trait_methods() {
-    super::setup();
     // `sec`, `csc` and `cot` come from default implementations built on the
     // primitive trig functions.
     let expr = create_expr!("sec(x)^2 - tan(x)^2").unwrap();
@@ -101,7 +91,6 @@ fn evaluate_default_trait_methods() {
 #[test]
 fn evaluate_rational_exact() {
     use crate::math::algebra::rational::Rat;
-    super::setup();
     // (1/2)x + 1/3 evaluated at x = 1/6 stays exact: 1/12 + 1/3 = 5/12.
     let expr = create_expr!("(1/2)x + 1/3").unwrap();
     let half = Rat::new(1, 2).unwrap();
@@ -118,7 +107,6 @@ fn evaluate_rational_exact() {
 #[test]
 fn evaluate_surd_exact_sqrt() {
     use crate::math::algebra::surd::Surd;
-    super::setup();
     // sqrt(x) at x = 4 is exactly 2 (stays rational).
     let expr = create_expr!("sqrt(x)").unwrap();
     let four = Surd::rational(crate::math::algebra::rational::Rat::from_i64(4));
@@ -130,7 +118,6 @@ fn evaluate_surd_exact_sqrt() {
 #[test]
 fn evaluate_multiquadratic_exact() {
     use crate::math::algebra::algebraic::Multiquadratic;
-    super::setup();
     // x^2 at x = sqrt(2) is exactly 2.
     let expr = create_expr!("x^2").unwrap();
     let root_two = Multiquadratic::<1>::sqrt_of(2).unwrap();

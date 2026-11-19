@@ -15,7 +15,6 @@ fn symbolic() -> Matrix<Expr> {
 
 #[test]
 fn symbolic_matrix_display() {
-    super::setup();
     let matrix = symbolic();
     // Entries keep their symbolic form.
     assert_eq!(matrix.rows(), 2);
@@ -26,7 +25,6 @@ fn symbolic_matrix_display() {
 
 #[test]
 fn symbolic_matrix_adds() {
-    super::setup();
     let left = symbolic();
     let right = symbolic();
     let sum = left + right;
@@ -36,7 +34,6 @@ fn symbolic_matrix_adds() {
 
 #[test]
 fn symbolic_matrix_scales() {
-    super::setup();
     let matrix = symbolic();
     let scaled = matrix * create_expr!("2").unwrap();
     assert_eq!(scaled[0][0].to_string(), "x 2");
@@ -45,7 +42,6 @@ fn symbolic_matrix_scales() {
 /// The determinant of `[[x, 1], [2, x^2]]` is `x * x^2 - 1 * 2`.
 #[test]
 fn symbolic_matrix_determinant_is_symbolic() {
-    super::setup();
     let matrix = symbolic();
     let determinant = matrix.det();
     let text = determinant.to_string();
@@ -60,7 +56,6 @@ fn symbolic_matrix_determinant_is_symbolic() {
 fn symbolic_determinant_can_be_differentiated() {
     use crate::math::calculus::derivative::Derivative;
 
-    super::setup();
     let determinant = symbolic().det();
     let derivative = determinant.get_derivative();
     let text = derivative.to_string();
@@ -72,7 +67,6 @@ fn symbolic_determinant_can_be_differentiated() {
 
 #[test]
 fn symbolic_matrix_identity_and_equality() {
-    super::setup();
     let identity = Matrix::<Expr>::identity(2);
     assert_eq!(identity[0][0].to_string(), "1");
     assert_eq!(identity[0][1].to_string(), "0");

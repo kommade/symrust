@@ -47,7 +47,6 @@ fn assert_entries(expr: &Expr, expected: &[&[f64]]) {
 
 #[test]
 fn recognises_matrix_and_non_matrix_expressions() {
-    super::setup();
     let matrix = create_expr!("[[1, 2], [3, 4]]").unwrap();
     assert!(matrix.is_matrix());
     assert!(matrix.as_matrix().is_some());
@@ -61,7 +60,6 @@ fn recognises_matrix_and_non_matrix_expressions() {
 
 #[test]
 fn determinant_of_a_matrix_expression() {
-    super::setup();
     let matrix = create_expr!("[[1, 2], [3, 4]]").unwrap();
     let determinant = matrix.det().expect("square matrix");
     // det([[1,2],[3,4]]) = -2, and the answer is a scalar expression.
@@ -72,7 +70,6 @@ fn determinant_of_a_matrix_expression() {
 
 #[test]
 fn inverse_and_transpose_round_trip() {
-    super::setup();
     let matrix = create_expr!("[[4, 7], [2, 6]]").unwrap();
 
     let inverse = matrix.inv().expect("invertible");
@@ -84,7 +81,6 @@ fn inverse_and_transpose_round_trip() {
 
 #[test]
 fn rref_matches_the_direct_matrix_api() {
-    super::setup();
     let expr = create_expr!("[[1, 2], [3, 4]]").unwrap();
     let direct = expr.as_matrix().unwrap().rref();
     let via_expr = expr.rref().expect("matrix");
@@ -106,7 +102,6 @@ fn rref_matches_the_direct_matrix_api() {
 
 #[test]
 fn rank_and_nullity_of_a_matrix_expression() {
-    super::setup();
     let full = create_expr!("[[1, 2], [3, 4]]").unwrap();
     assert_eq!(full.rank().unwrap(), 2);
     assert_eq!(full.nullity().unwrap(), 0);
@@ -118,7 +113,6 @@ fn rank_and_nullity_of_a_matrix_expression() {
 
 #[test]
 fn qr_and_lu_products_reconstruct_the_matrix() {
-    super::setup();
     let expr = create_expr!("[[1, 1], [1, 0]]").unwrap();
 
     // The factorisations return the product of their factors, i.e. the
@@ -135,7 +129,6 @@ fn qr_and_lu_products_reconstruct_the_matrix() {
 
 #[test]
 fn svd_and_diagonalisation_products_reconstruct_the_matrix() {
-    super::setup();
     let expr = create_expr!("[[1, 0], [0, 2]]").unwrap();
     assert_entries(&expr.svd().expect("diagonal matrix decomposes"), &[&[1.0, 0.0], &[0.0, 2.0]]);
     assert_entries(&expr.diagonalize().expect("diagonal is diagonalisable"), &[&[1.0, 0.0], &[0.0, 2.0]]);
@@ -143,7 +136,6 @@ fn svd_and_diagonalisation_products_reconstruct_the_matrix() {
 
 #[test]
 fn eigenvalues_and_eigenvectors_are_reachable_on_an_expression() {
-    super::setup();
     let expr = create_expr!("[[1, 0], [0, 2]]").unwrap();
 
     let mut values: Vec<f64> = expr
@@ -162,7 +154,6 @@ fn eigenvalues_and_eigenvectors_are_reachable_on_an_expression() {
 
 #[test]
 fn solution_methods_work_on_an_expression() {
-    super::setup();
     let expr = create_expr!("[[1, 2], [3, 4]]").unwrap();
 
     assert_eq!(
@@ -181,7 +172,6 @@ fn solution_methods_work_on_an_expression() {
 
 #[test]
 fn non_matrix_expressions_report_not_a_matrix() {
-    super::setup();
     let scalar = create_expr!("2x^2").unwrap();
     assert_eq!(scalar.det().unwrap_err(), ExprError::NotAMatrix);
     assert_eq!(scalar.inv().unwrap_err(), ExprError::NotAMatrix);
@@ -198,7 +188,6 @@ fn non_matrix_expressions_report_not_a_matrix() {
 
 #[test]
 fn non_square_matrices_report_not_square() {
-    super::setup();
     let wide = create_expr!("[[1, 2, 3], [4, 5, 6]]").unwrap();
 
     assert_eq!(
@@ -216,8 +205,6 @@ fn non_square_matrices_report_not_square() {
 
 #[test]
 fn defined_but_unanswerable_operations_report_undefined() {
-    super::setup();
-
     let singular = create_expr!("[[1, 2], [2, 4]]").unwrap();
     assert!(matches!(singular.inv().unwrap_err(), ExprError::Undefined(_)));
     assert!(matches!(
@@ -236,7 +223,6 @@ fn defined_but_unanswerable_operations_report_undefined() {
 
 #[test]
 fn parse_errors_are_reported_as_expr_errors() {
-    super::setup();
     let error = create_expr!("2x^2 +").unwrap_err();
     assert!(
         matches!(error, ExprError::Parse(_) | ExprError::Lex(_)),
@@ -248,7 +234,6 @@ fn parse_errors_are_reported_as_expr_errors() {
 
 #[test]
 fn latex_errors_use_the_expression_error_type() {
-    super::setup();
     // A well-formed expression renders; the point here is only that the result
     // type is `ExprError`, so a caller has one error type for the `Expr` API.
     let latex: Result<String, ExprError> = create_expr!("[[1, 2], [3, 4]]").unwrap().to_latex();
@@ -261,8 +246,6 @@ fn latex_errors_use_the_expression_error_type() {
 /// up instead of starting at column zero.
 #[test]
 fn a_shared_factor_is_pulled_out_of_the_printed_matrix() {
-    super::setup();
-
     // A common fraction: `1/5 [1 2]` rather than `[1/5 2/5]`.
     let fraction = create_expr!("[[1/5, 2/5], [2/5, 4/5]]").unwrap();
     assert_eq!(fraction.to_string(), "1 / 5 [1 2]\n      [2 4]\n");
@@ -285,7 +268,6 @@ fn a_shared_factor_is_pulled_out_of_the_printed_matrix() {
 /// did before, so reading the entries back gives the original values.
 #[test]
 fn factored_rendering_preserves_the_matrix_value() {
-    super::setup();
     let matrix = create_expr!("[[1/5, 2/5], [2/5, 4/5]]").unwrap();
     assert_entries(&matrix, &[&[0.2, 0.4], &[0.4, 0.8]]);
 }

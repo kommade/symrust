@@ -18,8 +18,6 @@ fn value(expr: &Expr) -> f64 {
 
 #[test]
 fn recognises_vectors_and_matrices_distinctly() {
-    super::setup();
-
     let vector = create_expr!("[1, 2, 3]").unwrap();
     assert!(vector.is_vector());
     assert!(!vector.is_matrix());
@@ -41,7 +39,6 @@ fn recognises_vectors_and_matrices_distinctly() {
 
 #[test]
 fn vector_entries_are_expressions() {
-    super::setup();
     let vector = create_expr!("[x, x + 1, 2x]").unwrap();
     let entries = vector.entries().expect("vector");
     assert_eq!(entries.len(), 3);
@@ -51,8 +48,6 @@ fn vector_entries_are_expressions() {
 
 #[test]
 fn vector_products_and_norms() {
-    super::setup();
-
     let a = create_expr!("[1, 2, 3]").unwrap();
     let b = create_expr!("[4, 5, 6]").unwrap();
 
@@ -71,7 +66,6 @@ fn vector_products_and_norms() {
 
 #[test]
 fn mismatched_lengths_report_undefined() {
-    super::setup();
     let a = create_expr!("[1, 2]").unwrap();
     let b = create_expr!("[1, 2, 3]").unwrap();
 
@@ -84,7 +78,6 @@ fn mismatched_lengths_report_undefined() {
 
 #[test]
 fn scale_and_to_matrix() {
-    super::setup();
     let vector = create_expr!("[1, 2, 3]").unwrap();
     let scaled = vector.scale(create_expr!("2").unwrap()).expect("vector");
     let entries = scaled.entries().expect("vector");
@@ -99,7 +92,6 @@ fn scale_and_to_matrix() {
 
 #[test]
 fn vector_latex_renders_as_a_column() {
-    super::setup();
     let vector = create_expr!("[1, x]").unwrap();
     let latex = vector.to_latex().expect("renders");
     assert!(latex.contains("pmatrix"), "got {latex}");
@@ -110,7 +102,6 @@ fn vector_latex_renders_as_a_column() {
 
 #[test]
 fn vector_displays_as_a_flat_list() {
-    super::setup();
     let vector = create_expr!("[1, 2, 3]").unwrap();
     let text = vector.to_string();
     assert!(text.contains('1') && text.contains('3'), "got {text}");
@@ -118,7 +109,6 @@ fn vector_displays_as_a_flat_list() {
 
 #[test]
 fn vectors_work_over_a_non_default_float_type() {
-    super::setup();
     let vector: Expr<f64> = Expr::<f64>::parse("[1, 2, 3]".to_string(), None).unwrap();
     assert!(vector.is_vector());
 }

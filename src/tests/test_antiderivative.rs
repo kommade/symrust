@@ -135,7 +135,6 @@ static NOT_ELEMENTARY: [&str; 6] = [
 
 #[test]
 fn try_antiderivative() {
-    super::setup();
     for (input, expected) in EXAMPLES {
         let expr = create_expr!(input).unwrap();
         let result = expr
@@ -149,7 +148,6 @@ fn try_antiderivative() {
 /// records the techniques it tried.
 #[test]
 fn antiderivative_solution_records_steps() {
-    super::setup();
     for (input, expected) in EXAMPLES {
         let solution = create_expr!(input)
             .unwrap()
@@ -171,7 +169,6 @@ fn antiderivative_solution_records_steps() {
 
 #[test]
 fn factored_and_expanded_denominators_agree() {
-    super::setup();
     let pairs = [
         ("1/(x^5+1)", "1/((x+1)(x^4-x^3+x^2-x+1))"),
         ("1/(x^4+5x^2+4)", "1/((x^2+1)(x^2+4))"),
@@ -191,7 +188,6 @@ fn factored_and_expanded_denominators_agree() {
 
 #[test]
 fn irreducible_denominators_report_failure() {
-    super::setup();
     // x^7+1 and x^8+1 have cyclotomic factors (Phi_14, Phi_16) that do not
     // reduce to quadratics over a square-root extension. Without the `algebraic`
     // feature they are refused; with it they integrate exactly as a formal sum
@@ -229,7 +225,6 @@ fn irreducible_denominators_report_failure() {
 #[cfg(feature = "algebraic")]
 #[test]
 fn cyclotomic_denominators_integrate() {
-    super::setup();
     for input in ["1/(x^5+1)", "1/(x^6+1)"] {
         let expr = create_expr!(input).unwrap();
         let antiderivative = expr
@@ -244,7 +239,6 @@ fn cyclotomic_denominators_integrate() {
 
 #[test]
 fn try_functions_without_elementary_antiderivative() {
-    super::setup();
     let start = Instant::now();
     for input in NOT_ELEMENTARY {
         let expr = create_expr!(input).unwrap();
@@ -262,7 +256,6 @@ fn try_functions_without_elementary_antiderivative() {
 
 #[test]
 fn antiderivative_latex() {
-    super::setup();
     let expr = create_expr!("1/(x^2+1)").unwrap();
     let antiderivative = expr.get_antiderivative().unwrap();
     assert_eq!(antiderivative.to_latex().unwrap(), "\\arctan(x)");
@@ -274,7 +267,6 @@ fn antiderivative_latex() {
 
 #[test]
 fn antiderivative_with_custom_variable() {
-    super::setup();
     let expr = Expr::<Real>::new("2t + 1".to_string(), Some('t')).unwrap();
     let antiderivative = expr.get_antiderivative().unwrap();
     assert_eq!(antiderivative.to_string(), "t ^ 2 + t");
@@ -286,7 +278,6 @@ fn antiderivative_with_custom_variable() {
 #[cfg(feature = "algebraic")]
 #[test]
 fn algebraic_feature_integrates_a_3real_root_cubic() {
-    super::setup();
     let expr = create_expr!("1/(x^3 - 3x + 1)").unwrap();
     let antiderivative = expr
         .get_antiderivative()
@@ -300,7 +291,6 @@ fn algebraic_feature_integrates_a_3real_root_cubic() {
 
 #[test]
 fn derivative_of_extended_functions() {
-    super::setup();
     let cases = [
         ("asin(x)", "1 / sqrt(1 - x ^ 2)"),
         ("acos(x)", "-1 / sqrt(1 - x ^ 2)"),
@@ -316,7 +306,6 @@ fn derivative_of_extended_functions() {
 
 #[test]
 fn try_custom() {
-    super::setup();
     let expr = create_expr!("2x*sqrt(1-x) + sqrt(1-x)^3/3").unwrap();
     assert!(expr.get_antiderivative().is_ok(), "custom derivative failed");
 }
@@ -327,7 +316,6 @@ fn try_custom() {
 fn integrate_solution_matches_integrate_and_records_steps() {
     use crate::math::numeric::Real;
 
-    super::setup();
     let expr = create_expr!("2xsin(x) + 2xcos(x)^3/3").unwrap();
     let (lower, upper) = (Real::from_i64(0), Real::from_i64(3));
 
@@ -364,7 +352,6 @@ fn integrate_solution_matches_integrate_and_records_steps() {
 fn decision_steps_record_no_result() {
     use crate::math::structs::solution::SolutionStep;
 
-    super::setup();
     let solution = create_expr!("1/(x^2+1)")
         .unwrap()
         .get_antiderivative_solution()
@@ -403,7 +390,6 @@ fn decision_steps_record_no_result() {
 fn techniques_that_do_nothing_record_no_step() {
     use crate::math::structs::solution::SolutionStep;
 
-    super::setup();
     for input in ["1/(x^2-1)", "1/(x^4+1)", "x/(x^2+2x+5)"] {
         let solution = create_expr!(input)
             .unwrap()
@@ -428,7 +414,6 @@ fn techniques_that_do_nothing_record_no_step() {
 /// *is* the answer: `∫ e^x dx = e^x`. Such a solution must not be empty.
 #[test]
 fn a_self_identical_rule_still_records_a_step() {
-    super::setup();
     let solution = create_expr!("e^x")
         .unwrap()
         .get_antiderivative_solution()
@@ -448,7 +433,6 @@ fn a_self_identical_rule_still_records_a_step() {
 #[cfg(feature = "algebraic")]
 #[test]
 fn algebraic_feature_integrates_an_irreducible_cubic() {
-    super::setup();
     // 1/(x^3 - 2): the denominator is irreducible over the rationals with a
     // single real root (the cube root of 2), which the surd path cannot reach.
     let expr = create_expr!("1/(x^3-2)").unwrap();
@@ -466,7 +450,6 @@ fn algebraic_feature_integrates_an_irreducible_cubic() {
 #[cfg(feature = "algebraic")]
 #[test]
 fn binomial_cubic_uses_exact_radicals() {
-    super::setup();
     for input in ["1/(x^3+2)", "1/(x^3-2)"] {
         let expr = create_expr!(input).unwrap();
         let antiderivative = expr
@@ -495,7 +478,6 @@ fn binomial_cubic_uses_exact_radicals() {
 #[cfg(not(feature = "algebraic"))]
 #[test]
 fn default_build_warns_that_the_algebraic_feature_is_required() {
-    super::setup();
     let expr = create_expr!("1/(x^3-2)").unwrap();
     match expr.get_antiderivative() {
         Err(crate::math::calculus::antiderivative::IntegrationError::FeatureRequired { feature, .. }) => {
@@ -512,7 +494,6 @@ fn default_build_warns_that_the_algebraic_feature_is_required() {
 #[cfg(feature = "algebraic")]
 #[test]
 fn c_is_preferred_over_b_when_both_could_apply() {
-    super::setup();
     let expr = create_expr!("1/(x^4+1)").unwrap();
     let antiderivative = expr
         .get_antiderivative()
@@ -529,7 +510,6 @@ fn c_is_preferred_over_b_when_both_could_apply() {
 #[cfg(feature = "algebraic")]
 #[test]
 fn root_sum_result_carries_explanatory_comment() {
-    super::setup();
     // `x^3 - 3x + 1` is irreducible over the rationals with three real,
     // non-radical roots, so the integrator falls back to a root sum.
     let solution = create_expr!("1/(x^3-3x+1)")
@@ -562,7 +542,6 @@ fn integrate_solution_shows_the_antiderivative_and_the_bound_substitutions() {
     use crate::math::numeric::Real;
     use crate::math::structs::solution::SolutionStep;
 
-    super::setup();
     let solution = create_expr!("2x")
         .unwrap()
         .integrate_solution(Real::from_i64(0), Real::from_i64(3))
@@ -609,7 +588,6 @@ fn integrate_solution_shows_the_antiderivative_and_the_bound_substitutions() {
 /// reads as `2 x sin(x)`, never as `2 x s i n x`.
 #[test]
 fn a_bare_function_name_after_a_factor_is_a_call() {
-    super::setup();
     for (input, expected) in [
         ("sinx", "sin(x)"),
         ("2xsinx", "2 x sin(x)"),
@@ -642,7 +620,6 @@ fn a_bare_function_name_after_a_factor_is_a_call() {
 fn by_parts_nests_its_sub_integrals() {
     use crate::math::structs::solution::SolutionStep;
 
-    super::setup();
     let solution = create_expr!("x sin(x)")
         .unwrap()
         .get_antiderivative_solution()
@@ -680,7 +657,6 @@ fn a_pending_integral_token_is_display_only() {
     use crate::math::numeric::Real;
     use crate::math::structs::expr::node::Node;
 
-    super::setup();
     let integrand = create_expr!("-cos(x)").unwrap();
     let pending = Node::<Real>::pending_integral(integrand.tree().clone(), 'x');
     assert_eq!(pending.to_string(), "∫ -cos(x) dx");
@@ -723,7 +699,6 @@ fn a_pending_integral_token_is_display_only() {
 /// "constant multiple" step per term.
 #[test]
 fn linearity_is_recorded_in_one_step() {
-    super::setup();
     let solution = create_expr!("2xsin(x) + 2xcos(x)^3/3")
         .unwrap()
         .get_antiderivative_solution()
@@ -753,7 +728,6 @@ fn linearity_is_recorded_in_one_step() {
 /// substituted back out.
 #[test]
 fn substitution_declares_u_and_shows_the_rewritten_integral() {
-    super::setup();
     // The constant factor comes out first (linearity), so the substitution
     // works on `x sin(x ^ 2)` and carries the residual `1/2` in the rewrite:
     // with u = x ^ 2, x dx = du / 2, so the integral is ∫ sin(u) / 2 du.
@@ -797,7 +771,6 @@ fn an_indeterminate_bound_takes_the_limit_not_nan() {
     use crate::math::numeric::Real;
     use crate::math::structs::solution::SolutionStep;
 
-    super::setup();
     // ∫₀¹ ln(x) dx = -1: the antiderivative x ln(x) - x is NaN at 0 by
     // substitution, but its limit there is 0.
     let value = create_expr!("ln(x)")
@@ -836,7 +809,6 @@ fn a_divergent_bound_reports_why_instead_of_nan() {
     use crate::math::calculus::antiderivative::IntegrationError;
     use crate::math::numeric::Real;
 
-    super::setup();
     // ∫₀¹ dx/x: the antiderivative ln(x) tends to -∞ at 0.
     match create_expr!("1/x").unwrap().integrate(Real::from_i64(0), Real::from_i64(1)) {
         Err(IntegrationError::Divergent { antiderivative, bound, behaviour }) => {
@@ -875,7 +847,6 @@ fn an_improper_integral_converges_via_the_limit() {
     use crate::math::numeric::Real;
     use crate::math::structs::solution::SolutionStep;
 
-    super::setup();
     // ∫₁^∞ dx/x² = 1, found as lim_{x -> ∞} (-1/x) = 0 minus F(1) = -1.
     let value = create_expr!("1/x^2")
         .unwrap()

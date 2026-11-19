@@ -23,14 +23,6 @@ mod test_vector;
 mod test_real;
 mod test_dyadic;
 
-static INIT: std::sync::Once = std::sync::Once::new();
-
-fn setup() {
-    INIT.call_once(|| {
-        color_eyre::install().expect("Failed to install color_eyre");
-    });
-}
-
 struct Example {
     pub input: &'static str,
     pub latex: &'static str,

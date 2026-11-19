@@ -4,7 +4,6 @@ use crate::math::calculus::derivative::Derivative;
 
 #[test]
 fn try_derivative() {
-    super::setup();
     for example in &EXAMPLE_FUNCTIONS {
         let expr = create_expr!(example.input).unwrap();
         let derivative = expr.get_derivative();
@@ -15,7 +14,6 @@ fn try_derivative() {
 
 #[test]
 fn try_custom() {
-    super::setup();
     let expr = create_expr!("x sin(x) x").unwrap();
     let simple = expr.simplify(true);
     assert_eq!(simple.to_string(), "sin(x) x ^ 2");
@@ -29,7 +27,6 @@ fn try_custom() {
 /// records the rules it applied.
 #[test]
 fn derivative_solution_records_steps() {
-    super::setup();
     for example in &EXAMPLE_FUNCTIONS {
         let expr = create_expr!(example.input).unwrap();
         let expected = expr.clone().get_derivative();

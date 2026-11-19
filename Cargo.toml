@@ -26,6 +26,4 @@ algebraic = ["generic_const"]
 # is an unstable feature and may not be available on all Rust versions. It is
 # off by default to maintain compatibility with stable Rust.
 generic_const = []
-[dev-dependencies]
-color-eyre = "0.6.3"
 

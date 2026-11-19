@@ -8,28 +8,24 @@ use crate::math::structs::expr::{Expr, node::Node};
 
 #[test]
 fn macro_defaults_to_real() {
-    super::setup();
     let expr: Expr = create_expr!("2x^2").unwrap();
     assert_eq!(expr.to_string(), "2 x ^ 2");
 }
 
 #[test]
 fn macro_accepts_explicit_float_type() {
-    super::setup();
     let expr: Expr<f64> = create_expr!("x^2"; f64).unwrap();
     assert!(expr.tree().is_operator_type(Op::Pow));
 }
 
 #[test]
 fn macro_accepts_explicit_type_and_indep_var() {
-    super::setup();
     let expr: Expr<f32> = create_expr!("t^2", 't'; f32).unwrap();
     assert!(expr.tree().is_operator_type(Op::Pow));
 }
 
 #[test]
 fn build_f64_tree_with_public_constructors() {
-    super::setup();
     let two = Node::<f64>::from_float(2.0);
     let x = Node::<f64>::independent('x');
     let tree = Node::operate(Op::Mul, two, x);
@@ -39,7 +35,6 @@ fn build_f64_tree_with_public_constructors() {
 
 #[test]
 fn build_f32_tree_from_string_matches_real_structure() {
-    super::setup();
     let real_tree = create_expr!("x + 1").unwrap();
     let f32_tree = Node::<f32>::from_real(real_tree.tree());
     assert!(f32_tree.is_operator_type(Op::Add));
@@ -64,7 +59,6 @@ fn string_literals_parse_directly_into_t() {
 
 #[test]
 fn tree_and_solutions_are_send_sync() {
-    super::setup();
     const fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<Node<f64>>();
     assert_send_sync::<Node<f32>>();
@@ -76,7 +70,6 @@ fn tree_and_solutions_are_send_sync() {
 
 #[test]
 fn expr_simplifies_on_another_thread() {
-    super::setup();
     let expr: Expr<f64> = create_expr!("(x + x) + 1"; f64).unwrap();
     let rendered = std::thread::spawn(move || {
         // The tree moves to a fresh thread, is rewritten there and rendered.
