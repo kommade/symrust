@@ -403,20 +403,43 @@ where
         for (i, existing) in q.iter().enumerate() {
             let projection = dot_generic(existing, &vector);
             if projection.is_zero_value() {
+                recorder.record_decision(
+                    "orthogonalise",
+                    || {
+                        format!(
+                            "the projection of column {} onto q{} is q{}·a{} = {}, \
+                             so nothing needs subtracting",
+                            j + 1,
+                            i + 1,
+                            i + 1,
+                            j + 1,
+                            projection
+                        )
+                    },
+                );
                 continue;
             }
             for (row, value) in vector.iter_mut().enumerate() {
                 *value = value.clone() - projection.clone() * existing[row].clone();
             }
             let described = column_matrix_generic(&vector);
+            let multiple = times(
+                &projection.to_string(),
+                &format!("q{}", i + 1),
+                projection == T::multiplicative_identity(),
+            );
             recorder.record_step(
                 "orthogonalise",
                 || {
                     format!(
-                        "subtracted the projection of column {} onto q{} from column {}",
+                        "projected column {} onto q{}: q{}·a{} = {}, so column {} -= {}",
                         j + 1,
                         i + 1,
-                        j + 1
+                        i + 1,
+                        j + 1,
+                        projection,
+                        j + 1,
+                        multiple
                     )
                 },
                 || described.clone(),
@@ -430,6 +453,7 @@ where
         if norm_squared.is_zero_value() {
             return None;
         }
+        let squared_text = norm_squared.to_string();
         let norm = norm_squared.try_sqrt()?;
         for value in vector.iter_mut() {
             *value = value.clone() / norm.clone();
@@ -437,7 +461,15 @@ where
         let described = column_matrix_generic(&vector);
         recorder.record_step(
             "normalise",
-            || format!("normalised column {} to unit length to give q{}", j + 1, j + 1),
+            || {
+                format!(
+                    "the reduced column has squared length {}, so divided by its \
+                     length {} to give q{}",
+                    squared_text,
+                    norm,
+                    j + 1
+                )
+            },
             || described.clone(),
         );
         q.push(vector);
@@ -484,7 +516,10 @@ where
         "assemble",
         || format!(
             "Q holds the orthonormal columns and R = QᵀA; written side by side, \
-             Q = the first {columns} columns and R = the remaining {columns}"
+             Q = the first {columns} columns and R = the remaining {columns}. \
+             R's diagonal holds the lengths the normalise steps divided by, and \
+             the entries above it are the projections the orthogonalise steps \
+             subtracted"
         ),
     );
     Some(recorder.finish(augmented))
@@ -835,6 +870,19 @@ where
     Expr::from_node(Node::one())
 }
 
+/// Render `coefficient * target` the way the row operations do: just `target`
+/// when the coefficient is one, and parenthesised when the coefficient's text
+/// has spaces that would make the product read as two factors.
+fn times(coefficient: &str, target: &str, coefficient_is_one: bool) -> String {
+    if coefficient_is_one {
+        target.to_string()
+    } else if coefficient.contains(' ') {
+        format!("({coefficient}) * {target}")
+    } else {
+        format!("{coefficient} * {target}")
+    }
+}
+
 /// Reduce an entry to the most readable exact form.
 ///
 /// The work is done by [`Expr::tidy`], which is shared with the symbolic
@@ -1006,6 +1054,7 @@ where
     let mut work = matrix.clone();
     let mut recorder = StepRecorder::new(matrix_expr(matrix), "determinant");
     let mut sign = 1i64;
+    let mut swaps = 0usize;
 
     for i in 0..size {
         let pivot = (i..size).find(|&candidate| !work[candidate][i].is_zero());
@@ -1025,6 +1074,7 @@ where
         if pivot_row != i {
             swap_rows(&mut work, i, pivot_row, &mut recorder, "choose pivot");
             sign = -sign;
+            swaps += 1;
         }
         let pivot_value = work[i][i].clone();
         for target in (i + 1)..size {
@@ -1038,14 +1088,32 @@ where
     }
 
     // The determinant is the product of the triangular diagonal, times the sign
-    // accumulated from row swaps.
+    // accumulated from row swaps. Show the working: which entries multiply and
+    // how many swaps flipped the sign.
     let mut value = Expr::from_f64(sign as f64);
     for i in 0..size {
         value = (value * work[i][i].clone()).simplify(false);
     }
+    let diagonal = (0..size)
+        .map(|index| work[index][index].to_string())
+        .collect::<Vec<_>>()
+        .join(" · ");
     recorder.record(
         "multiply the diagonal",
-        || String::from("the determinant is the product of the diagonal, times the swap sign"),
+        || {
+            if swaps == 0 {
+                format!(
+                    "the triangular diagonal is {diagonal}, and no rows were swapped, \
+                     so the determinant is the product of those entries"
+                )
+            } else {
+                format!(
+                    "the triangular diagonal is {diagonal}, and {swaps} row swap{} flipped \
+                     its sign, so the determinant is the diagonal product signed by the swaps",
+                    if swaps == 1 { "" } else { "s" }
+                )
+            }
+        },
         || value.clone(),
     );
     Some(recorder.finish(value))
@@ -1127,14 +1195,27 @@ where
         }
     }
 
-    // Read the right-hand half out as the inverse.
+    // Read the right-hand half out as the inverse, recording the read-off so
+    // the solution's last working is the answer itself rather than the last
+    // row operation on the augmented matrix.
     let mut inverse = Matrix::<Expr<T>>::new(size, size);
     for row in 0..size {
         for column in 0..size {
             inverse[row][column] = augmented[row][size + column].clone();
         }
     }
-    Some(recorder.finish(matrix_expr(&inverse)))
+    let described = matrix_expr(&inverse);
+    recorder.record(
+        "read the inverse",
+        || {
+            format!(
+                "the right-hand half of the fully reduced [A | I] is the inverse, \
+                 so read out the last {size} columns"
+            )
+        },
+        || described.clone(),
+    );
+    Some(recorder.finish(described))
 }
 
 /// QR factorisation by Gram–Schmidt, recording the orthogonalisation steps.
@@ -1163,24 +1244,50 @@ where
             .cloned()
             .collect();
 
-        // Orthogonalise against every already-built q_i.
+        // Orthogonalise against every already-built q_i. The step shows the
+        // full working: the coefficient `q_i·a_j` — which is also the entry
+        // `R[i][j]` the assemble step reports, because `R = QᵀA` reads off
+        // exactly these dot products — and the subtraction it performed.
         for (i, existing) in q.iter().enumerate() {
             let projection = dot(existing, &vector);
             if projection.is_zero() {
+                recorder.record_decision(
+                    "orthogonalise",
+                    || {
+                        format!(
+                            "the projection of column {} onto q{} is q{}·a{} = {}, \
+                             so nothing needs subtracting",
+                            j + 1,
+                            i + 1,
+                            i + 1,
+                            j + 1,
+                            projection
+                        )
+                    },
+                );
                 continue;
             }
             for (row, value) in vector.iter_mut().enumerate() {
                 *value = tidy(value.clone() - projection.clone() * existing[row].clone());
             }
             let described = column_matrix(&vector);
+            let multiple = times(
+                &projection.to_string(),
+                &format!("q{}", i + 1),
+                projection == one(),
+            );
             recorder.record(
                 "orthogonalise",
                 || {
                     format!(
-                        "subtracted the projection of column {} onto q{} from column {}",
+                        "projected column {} onto q{}: q{}·a{} = {}, so column {} -= {}",
                         j + 1,
                         i + 1,
-                        j + 1
+                        i + 1,
+                        j + 1,
+                        projection,
+                        j + 1,
+                        multiple
                     )
                 },
                 || described.clone(),
@@ -1222,17 +1329,24 @@ where
         if is_dependent {
             return None;
         }
+        let squared_text = norm_squared.to_string();
         let norm = norm_squared.sqrt();
         for value in vector.iter_mut() {
             *value = tidy(value.clone() / norm.clone());
         }
         let described = column_matrix(&vector);
+        // The full working: name both the squared length and the divisor, the
+        // latter tidied so `sqrt(6 / 5)` reads as the exact surd
+        // `sqrt(30) / 5` instead of an unfolded radical of a fraction.
+        let length = tidy(norm.clone());
         recorder.record(
             "normalise",
             || {
                 format!(
-                    "normalised column {} to unit length to give q{}",
-                    j + 1,
+                    "the reduced column has squared length {}, so divided by its \
+                     length {} to give q{}",
+                    squared_text,
+                    length,
                     j + 1
                 )
             },
@@ -1285,7 +1399,10 @@ where
         "assemble",
         || format!(
             "Q holds the orthonormal columns and R = QᵀA; written side by side, \
-             Q = the first {columns} columns and R = the remaining {columns}"
+             Q = the first {columns} columns and R = the remaining {columns}. \
+             R's diagonal holds the lengths the normalise steps divided by, and \
+             the entries above it are the projections the orthogonalise steps \
+             subtracted"
         ),
         || described.clone(),
     );
@@ -1449,7 +1566,10 @@ where
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join(", ");
-    recorder.record(
+    // The characteristic polynomial as one decision: the eigenvalues are its
+    // roots, and the roots are named right here — there is no separate value
+    // this step produces.
+    recorder.record_decision(
         "characteristic polynomial",
         || match &polynomial_text {
             Some(polynomial) => {
@@ -1457,7 +1577,6 @@ where
             }
             None => format!("the eigenvalues (roots of det(xI - A)) are {root_list}"),
         },
-        || Expr::from_f64(0.0),
     );
 
     let mut seen: Vec<Expr<T>> = Vec::new();

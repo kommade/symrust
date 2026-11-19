@@ -155,7 +155,7 @@ fn solution_displays_with_steps() {
 /// and Q's columns must be orthonormal.
 #[test]
 fn qr_records_elementary_steps() {
-    let source = matrix(&[&["1", "-1", "1"], &["1", "0", "0"], &["1", "1", "1"], &["1", "2", "4"]]);
+    let source = matrix(&[&["1", "-1", "-1"], &["1", "0", "0"], &["1", "1", "1"], &["1", "2", "4"]]);
     let solution = source.qr_solution().expect("columns are independent");
     assert_eq!(solution.problem_type(), "QR factorisation (Gram-Schmidt)");
     println!("solution: {solution}");
@@ -189,8 +189,8 @@ fn qr_records_elementary_steps() {
     assert_eq!(augmented.columns(), 6);
     // Q's entries are the normalised columns and R itself is upper triangular
     // with textbook entries. Splitting the augmented matrix at column 3:
-    // `R = [[2, 1, 3], [0, sqrt(5), sqrt(5)], [0, 0, 2]]`, zero-filled on the
-    // last row because the matrix is tall.
+    // `R = [[2, 1, 2], [0, sqrt(5), 8 sqrt(5) / 5], [0, 0, sqrt(30) / 5]]`,
+    // zero-filled on the last row because the matrix is tall.
     assert_eq!(augmented[0][0].to_string(), "1 / 2");
     assert_eq!(augmented[0][1].to_string(), "-3 sqrt(5) / 10");
     assert_eq!(augmented[1][1].to_string(), "-sqrt(5) / 10");
@@ -199,7 +199,7 @@ fn qr_records_elementary_steps() {
     }
     assert_eq!(augmented[0][3].to_string(), "2");
     assert_eq!(augmented[1][4].to_string(), "sqrt(5)");
-    assert_eq!(augmented[2][5].to_string(), "2");
+    assert_eq!(augmented[2][5].to_string(), "sqrt(30) / 5");
 
     // No entry may still show the rationalised form `5 / sqrt(5)`; every
     // radial quantity must render as an exact `sqrt(5)` coefficient instead.
@@ -211,6 +211,46 @@ fn qr_records_elementary_steps() {
     assert!(
         result_text.contains("sqrt(5)"),
         "result lost its exact radical: {result_text}"
+    );
+
+    // The steps show the full working: an orthogonalise step names its
+    // projection coefficient `q_i·a_j` and the subtraction it performed — and
+    // that coefficient is exactly the R entry the assemble step reports —
+    // while a normalise step names the squared length and the length it
+    // divided by, as an exact surd.
+    let descriptions: Vec<(String, String)> = solution
+        .steps()
+        .iter()
+        .filter_map(|step| match step {
+            SolutionStep::Elementary(step) => {
+                Some((step.step_name.clone(), step.description.clone()))
+            }
+            SolutionStep::SubSolution(_) => None,
+        })
+        .collect();
+    let projecting = descriptions
+        .iter()
+        .find(|(name, text)| name == "orthogonalise" && text.contains("q2·a3"))
+        .expect("an orthogonalise step against q2");
+    assert!(
+        projecting.1.contains("q2·a3 = 8 sqrt(5) / 5"),
+        "the projection coefficient should show the full working: {}",
+        projecting.1
+    );
+    assert!(
+        projecting.1.contains("column 3 -= (8 sqrt(5) / 5) * q2"),
+        "the subtraction should be spelled out: {}",
+        projecting.1
+    );
+    let normalising = descriptions
+        .iter()
+        .find(|(name, text)| name == "normalise" && text.contains("to give q3"))
+        .expect("a normalise step for q3");
+    assert!(
+        normalising.1.contains("squared length 6 / 5")
+            && normalising.1.contains("length sqrt(30) / 5"),
+        "the normalise step should show its exact working: {}",
+        normalising.1
     );
 
     // The steps must stay exact. No step may contain a long
