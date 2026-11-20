@@ -41,6 +41,7 @@
 mod binomial;
 mod helpers;
 mod rational;
+mod sqrt_rational;
 mod trig;
 mod trig_weierstrass;
 
@@ -1022,6 +1023,12 @@ where
                 || format!("binomial differential {} with t = the binomial's square root", describe_signed(node)),
                 || result.clone(),
             );
+            return Ok(result);
+        }
+        // A rational function of x riding an integer power of a quadratic's
+        // square root rationalises through the Euler substitution u = x +
+        // sqrt(q); by parts would grind one radical power per level.
+        if let Some(result) = sqrt_rational::try_integrate(self, node) {
             return Ok(result);
         }
         // Integration by parts.

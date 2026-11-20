@@ -1093,3 +1093,60 @@ fn weierstrass_substitution_integrates_trig_rationals() {
         );
     }
 }
+
+/// A rational function of x riding an integer power of a quadratic's square
+/// root rationalises through the Euler substitution `u = x + sqrt(q)`. These
+/// are the shapes integration by parts grinds on, one radical power per
+/// level; the answers are checked by differentiating the antiderivative.
+#[test]
+fn euler_substitution_integrates_radicand_rationals() {
+    use crate::math::numeric::{FloatBridge, Real};
+
+    let derivative_check = |antiderivative: &Expr<Real>, x: f64, integrand: f64| {
+        let h = 1e-7;
+        let forward = antiderivative
+            .evaluate(Real::from_f64(x + h))
+            .value()
+            .expect("evaluates")
+            .clone();
+        let backward = antiderivative
+            .evaluate(Real::from_f64(x - h))
+            .value()
+            .expect("evaluates")
+            .clone();
+        let derivative = (forward - backward).to_real().as_f64() / (2.0 * h);
+        assert!(
+            (derivative - integrand).abs() < 1e-5,
+            "x = {x}: derivative {derivative}, integrand {integrand}"
+        );
+    };
+
+    // ∫ x^2 / sqrt(x^2 - 1) dx = (x sqrt(x^2 - 1) + ln(x + sqrt(x^2 - 1)))/2.
+    // Decreased x range: the verification samples keep real domains.
+    let expr = create_expr!("x^2/sqrt(x^2 - 1)").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("a numerator over a sqrt takes the Euler route");
+    for x in [1.9_f64, 2.3, 2.8] {
+        derivative_check(&antiderivative, x, x * x / (x * x - 1.0).sqrt());
+    }
+
+    // ∫ x^3/sqrt(x^2 + 1) dx = ((x^2 - 2) sqrt(x^2 + 1))/3 + C up to constants.
+    let expr = create_expr!("x^3/sqrt(x^2 + 1)").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("an odd power over the sqrt takes the Euler route");
+    for x in [-1.7_f64, 0.8, 1.9] {
+        derivative_check(&antiderivative, x, x.powi(3) / (x * x + 1.0).sqrt());
+    }
+
+    // ∫ x^2 sqrt(x^2 + 1) dx: the radical in the numerator, cubed route via
+    // the polynomial part after rationalisation (harder by parts).
+    let expr = create_expr!("x^2 sqrt(x^2 + 1)").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("a polynomial times the radical takes the Euler route");
+    for x in [-1.6_f64, 0.7, 1.8] {
+        derivative_check(&antiderivative, x, x * x * (x * x + 1.0).sqrt());
+    }
+}
