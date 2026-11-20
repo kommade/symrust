@@ -1408,3 +1408,33 @@ fn hermite_repeated_cubic_powers_integrate() {
         "the peel should land the exact rational part, got: {rendered}"
     );
 }
+
+/// The numeric fallback answers definite integrals whose antiderivative
+/// search fails: e^(x^2) over [0, 1] is 1.46265174590718..., and the
+/// gaussian tail e^(-x^2) over [0, inf) is sqrt(pi)/2 through the
+/// exponential half-line map. Both run entirely in `Real` arithmetic.
+#[test]
+fn numeric_quadrature_answers_definite_integrals() {
+    use crate::math::calculus::antiderivative::Antiderivative;
+    use crate::math::numeric::{Real, FloatBridge};
+
+    let expr = create_expr!("e^(x^2)").unwrap();
+    let value = expr
+        .integrate(Real::from_i64(0), Real::from_i64(1))
+        .expect("the smooth finite case certifies")
+        .to_real();
+    assert!(
+        (value.as_f64() - 1.462_651_745_907_18).abs() < 1e-9,
+        "got {value}"
+    );
+
+    let expr = create_expr!("e^(-x^2)").unwrap();
+    let value = expr
+        .integrate(Real::from_i64(0), Real::infinity())
+        .expect("the gaussian tail certifies")
+        .to_real();
+    assert!(
+        (value.as_f64() - 0.886_226_925_452_758).abs() < 1e-8,
+        "got {value}"
+    );
+}

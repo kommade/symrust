@@ -42,6 +42,7 @@ mod ansatz;
 mod binomial;
 mod helpers;
 mod hyperexponential;
+mod quadrature;
 mod rational;
 mod sqrt_rational;
 mod trig;
@@ -325,8 +326,22 @@ where
         if odd_symmetric_zero(self, &lower, &upper).is_some() {
             return Ok(T::zero());
         }
-        let antiderivative = self.get_antiderivative_with_context(context)?;
-        evaluate_definite_integral(&antiderivative, lower, upper)
+        match self.get_antiderivative_with_context(context) {
+            Ok(antiderivative) => evaluate_definite_integral(&antiderivative, lower, upper),
+            Err(error) => {
+                // A divergence diagnosis is stronger evidence than a numeric
+                // estimate; every other failure leaves the definite value
+                // potentially computable, and FeatureRequired in particular
+                // is a configuration complaint the quadrature answers.
+                if matches!(error, IntegrationError::Divergent { .. }) {
+                    return Err(error);
+                }
+                match quadrature::integrate(&self.tree, &lower, &upper) {
+                    Some(value) => Ok(value),
+                    None => Err(error),
+                }
+            }
+        }
     }
 
     fn integrate_solution_with_context(
@@ -353,7 +368,35 @@ where
         // One recorder carries the whole narrative: the search, the statement
         // of the antiderivative and the bound substitutions. Finishing and
         // reopening a solution here would round-trip the fields for nothing.
-        let antiderivative = antiderivative_with_context(self, context, &mut recorder)?;
+        let antiderivative = match antiderivative_with_context(self, context, &mut recorder) {
+            Ok(found) => found,
+            Err(error) => {
+                // A divergence diagnosis is stronger evidence than a numeric
+                // estimate; otherwise the definite value may still exist, and
+                // the adaptive quadrature witnesses it with its own step.
+                if matches!(error, IntegrationError::Divergent { .. }) {
+                    return Err(error);
+                }
+                let Some(value) = quadrature::integrate(&self.tree, &lower, &upper) else {
+                    return Err(error);
+                };
+                recorder.push_step(
+                    "numeric quadrature",
+                    format!(
+                        "no elementary antiderivative; evaluated over \
+                         [{} , {}] by adaptive Gauss-Kronrod quadrature",
+                        lower, upper
+                    ),
+                    Expr::from_node(Node::<T>::float(value.clone())),
+                );
+                recorder.set_result_comment(
+                    "the value is numeric: the integrand has no elementary \
+                     antiderivative, so the definite integral was evaluated \
+                     by adaptive 15-point Gauss-Kronrod quadrature",
+                );
+                return Ok(recorder.finish(Expr::from_node(Node::<T>::float(value))));
+            }
+        };
         let antiderivative_text = antiderivative.to_string();
         recorder.push_step(
             "calculation complete",
