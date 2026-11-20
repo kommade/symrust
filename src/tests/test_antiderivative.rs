@@ -1281,3 +1281,53 @@ fn hyperexponential_integrals_solve_or_certificate() {
         other => panic!("expected a non-elementarity proof, got {other:?}"),
     }
 }
+
+/// The substitution search enumerates every proportional candidate and takes
+/// the shortest closed form, so a greedy first hit cannot dominate the
+/// choice. These shapes carry multiple rename candidates in one product.
+#[test]
+fn substitution_enumerates_candidates_and_picks_the_smallest() {
+    use crate::math::numeric::{FloatBridge, Real};
+
+    let derivative_check = |antiderivative: &Expr<Real>, x: f64, integrand: f64| {
+        let h = 1e-7;
+        let forward = antiderivative
+            .evaluate(Real::from_f64(x + h))
+            .value()
+            .expect("evaluates")
+            .clone();
+        let backward = antiderivative
+            .evaluate(Real::from_f64(x - h))
+            .value()
+            .expect("evaluates")
+            .clone();
+        let derivative = (forward - backward).to_real().as_f64() / (2.0 * h);
+        assert!(
+            (derivative - integrand).abs() < 1e-5,
+            "x = {x}: derivative {derivative}, integrand {integrand}"
+        );
+    };
+
+    // 2x/(x^2+1): the denominator's derivative is proportional to the
+    // remainder — the log case answers, shortest form ln(x^2+1).
+    let expr = create_expr!("2x/(x^2+1)").unwrap();
+    assert_eq!(expr.get_antiderivative().unwrap().to_string(), "ln(x ^ 2 + 1)");
+
+    // x (x^2+1)^3: both a power candidate (u = x^2+1, exact) and — after
+    // expansion — a Chebyshev shape; the substitution result must stay
+    // exact and verify.
+    let expr = create_expr!("x (x^2+1)^3").unwrap();
+    let antiderivative = expr.get_antiderivative().unwrap();
+    for x in [-1.3_f64, 0.5, 1.7] {
+        derivative_check(&antiderivative, x, x * (x * x + 1.0).powi(3));
+    }
+
+    // sqrt(ln x)/x ... declines; instead the doubled rename: sin(x)·(cos x + 2)
+    // carries both a sine-power candidate (u = cos x) and a mixed one; the
+    // shorter closed form must win and verify.
+    let expr = create_expr!("sin(x) (cos(x) + 2)").unwrap();
+    let antiderivative = expr.get_antiderivative().unwrap();
+    for x in [-1.4_f64, 0.2, 1.2] {
+        derivative_check(&antiderivative, x, x.sin() * (x.cos() + 2.0));
+    }
+}

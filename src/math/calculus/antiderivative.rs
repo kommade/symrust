@@ -1453,7 +1453,15 @@ where
     }
 
     fn try_substitution(&mut self, node: &Node<T>) -> Result<Option<Node<T>>, IntegrationError> {
-        let Some(case) = self.find_substitution(node) else {
+        // Every candidate is a hypothesis; the first proportional factor can
+        // lead the rewrite somewhere weaker than the second (two nested
+        // structures both admit a rename and the inner one composes better),
+        // so the whole set is enumerated and the smallest closed form wins.
+        let cases = self.find_substitutions(node);
+        let Some(case) = cases
+            .into_iter()
+            .min_by_key(|case| describe(&case.result))
+        else {
             return Ok(None);
         };
         // Declare the substitution and show the integrand rewritten in `u`:
@@ -1483,10 +1491,8 @@ where
         Ok(Some(case.result))
     }
 
-    fn find_substitution(
-        &mut self,
-        node: &Node<T>,
-    ) -> Option<SubstitutionCase<T>> {
+    fn find_substitutions(&mut self, node: &Node<T>) -> Vec<SubstitutionCase<T>> {
+        let mut cases: Vec<SubstitutionCase<T>> = Vec::new();
         let u = Node::<T>::var('u');
         let product = helpers::flatten_product(node);
         // Every candidate below probes the same factors at the same sample
@@ -1508,7 +1514,7 @@ where
                 let result = helpers::multiply_by(logarithm, ratio.clone());
                 let rewritten =
                     helpers::scale(helpers::div(one(), u.clone()), ratio);
-                return Some(SubstitutionCase {
+                cases.push(SubstitutionCase {
                     result,
                     inner: divisor.clone(),
                     derivative,
@@ -1540,7 +1546,7 @@ where
                                 helpers::multiply_by(antiderivative, ratio.clone());
                             let renamed = helpers::function(func.clone(), u.clone());
                             let rewritten = helpers::scale(renamed, ratio);
-                            return Some(SubstitutionCase {
+                            cases.push(SubstitutionCase {
                                 result,
                                 inner: argument.clone(),
                                 derivative,
@@ -1572,7 +1578,7 @@ where
                                     helpers::multiply_by(antiderivative, ratio.clone());
                                 let renamed = helpers::pow(base.clone(), u.clone());
                                 let rewritten = helpers::scale(renamed, ratio);
-                                return Some(SubstitutionCase {
+                                cases.push(SubstitutionCase {
                                     result,
                                     inner: exponent.clone(),
                                     derivative,
@@ -1608,7 +1614,7 @@ where
                                 )
                             };
                             let result = helpers::multiply_by(antiderivative, ratio);
-                            return Some(SubstitutionCase {
+                            cases.push(SubstitutionCase {
                                 result,
                                 inner,
                                 derivative,
@@ -1628,7 +1634,7 @@ where
                         float_from::<T>(2.0),
                     );
                     let rewritten = helpers::scale(u.clone(), ratio);
-                    return Some(SubstitutionCase {
+                    cases.push(SubstitutionCase {
                         result,
                         inner: factor.clone(),
                         derivative,
@@ -1636,7 +1642,7 @@ where
                     });
                 }
         }
-        None
+        cases
     }
 
     fn try_by_parts(&mut self, node: &Node<T>) -> Result<Option<Node<T>>, IntegrationError> {
