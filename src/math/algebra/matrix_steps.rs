@@ -84,9 +84,9 @@ where
     ///
     /// # Examples
     /// ```
-    /// use rust_calculus::math::algebra::linear::Matrix;
-    /// use rust_calculus::math::algebra::rational::Rat;
-    /// use rust_calculus::math::numeric::ExactField;
+    /// use symrust::math::algebra::linear::Matrix;
+    /// use symrust::math::algebra::rational::Rat;
+    /// use symrust::math::numeric::ExactField;
     /// let entries: Vec<Rat> = [1, 2, 3, 4].iter().map(|v| Rat::from_i64(*v)).collect();
     /// let matrix = Matrix::from_vec(2, 2, entries).unwrap();
     /// let solution = matrix.determinant_steps().unwrap();
@@ -110,9 +110,9 @@ where
     ///
     /// # Examples
     /// ```
-    /// use rust_calculus::math::algebra::linear::Matrix;
-    /// use rust_calculus::math::algebra::rational::Rat;
-    /// use rust_calculus::math::numeric::ExactField;
+    /// use symrust::math::algebra::linear::Matrix;
+    /// use symrust::math::algebra::rational::Rat;
+    /// use symrust::math::numeric::ExactField;
     /// let entries: Vec<Rat> = [1, 2, 3, 4].iter().map(|v| Rat::from_i64(*v)).collect();
     /// let matrix = Matrix::from_vec(2, 2, entries).unwrap();
     /// let solution = matrix.row_reduce_steps(true);
@@ -134,9 +134,9 @@ where
     ///
     /// # Examples
     /// ```
-    /// use rust_calculus::math::algebra::linear::Matrix;
-    /// use rust_calculus::math::algebra::rational::Rat;
-    /// use rust_calculus::math::numeric::ExactField;
+    /// use symrust::math::algebra::linear::Matrix;
+    /// use symrust::math::algebra::rational::Rat;
+    /// use symrust::math::numeric::ExactField;
     /// let entries: Vec<Rat> = [2, 0, 0, 4].iter().map(|v| Rat::from_i64(*v)).collect();
     /// let matrix = Matrix::from_vec(2, 2, entries).unwrap();
     /// let solution = matrix.inverse_steps().unwrap();
@@ -158,9 +158,9 @@ where
     ///
     /// # Examples
     /// ```
-    /// use rust_calculus::math::algebra::linear::Matrix;
-    /// use rust_calculus::math::algebra::rational::Rat;
-    /// use rust_calculus::math::numeric::ExactField;
+    /// use symrust::math::algebra::linear::Matrix;
+    /// use symrust::math::algebra::rational::Rat;
+    /// use symrust::math::numeric::ExactField;
     /// // [[3, 0], [4, 0]] is singular, so the second column is dependent.
     /// let entries: Vec<Rat> = [3, 0, 4, 0].iter().map(|v| Rat::from_i64(*v)).collect();
     /// let matrix = Matrix::from_vec(2, 2, entries).unwrap();
@@ -193,9 +193,9 @@ where
     ///
     /// # Examples
     /// ```
-    /// use rust_calculus::math::algebra::linear::Matrix;
-    /// use rust_calculus::math::algebra::rational::Rat;
-    /// use rust_calculus::math::numeric::ExactField;
+    /// use symrust::math::algebra::linear::Matrix;
+    /// use symrust::math::algebra::rational::Rat;
+    /// use symrust::math::numeric::ExactField;
     /// // [[1, 0], [0, 2]] is already diagonal.
     /// let entries: Vec<Rat> = [1, 0, 0, 2].iter().map(|v| Rat::from_i64(*v)).collect();
     /// let matrix = Matrix::from_vec(2, 2, entries).unwrap();
@@ -223,9 +223,9 @@ where
     ///
     /// # Examples
     /// ```
-    /// use rust_calculus::math::algebra::linear::Matrix;
-    /// use rust_calculus::math::algebra::rational::Rat;
-    /// use rust_calculus::math::numeric::ExactField;
+    /// use symrust::math::algebra::linear::Matrix;
+    /// use symrust::math::algebra::rational::Rat;
+    /// use symrust::math::numeric::ExactField;
     /// // A diagonal matrix is its own SVD.
     /// let entries: Vec<Rat> = [2, 0, 0, 3].iter().map(|v| Rat::from_i64(*v)).collect();
     /// let matrix = Matrix::from_vec(2, 2, entries).unwrap();

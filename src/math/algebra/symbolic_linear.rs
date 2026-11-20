@@ -323,9 +323,9 @@ impl<T: SymbolicLeaf> ExprPoly<T> {
     ///
     /// # Examples
     /// ```
-    /// use rust_calculus::math::algebra::symbolic_linear::ExprPoly;
-    /// use rust_calculus::math::numeric::{ExactField, Real};
-    /// use rust_calculus::math::structs::expr::Expr;
+    /// use symrust::math::algebra::symbolic_linear::ExprPoly;
+    /// use symrust::math::numeric::{ExactField, Real};
+    /// use symrust::math::structs::expr::Expr;
     ///
     /// // λ² - 4 has the roots -2 and 2.
     /// let poly = ExprPoly::new(vec![

@@ -32,7 +32,7 @@
 //! the answer:
 //!
 //! ```
-//! use rust_calculus::{math::calculus::antiderivative::Antiderivative, create_expr};
+//! use symrust::{math::calculus::antiderivative::Antiderivative, create_expr};
 //! let expr = create_expr!("x^2 e^x").unwrap();
 //! let solution = expr.get_antiderivative_solution().unwrap();
 //! println!("{} steps, answer {}", solution.len(), solution.result());
@@ -160,7 +160,7 @@ pub trait Antiderivative<T> {
     /// [`Solution`] with the steps.
     /// # Examples
     /// ```
-    /// use rust_calculus::{create_expr, math::calculus::antiderivative::Antiderivative};
+    /// use symrust::{create_expr, math::calculus::antiderivative::Antiderivative};
     /// let expr = create_expr!("2x").unwrap();
     /// let solution = expr.get_antiderivative_solution().unwrap();
     /// assert_eq!(solution.result().to_string(), "x ^ 2");
@@ -214,8 +214,8 @@ pub trait Antiderivative<T> {
     /// definite integral.
     /// # Examples
     /// ```rust
-    /// use rust_calculus::math::numeric::Real;
-    /// use rust_calculus::{create_expr, math::calculus::antiderivative::Antiderivative};
+    /// use symrust::math::numeric::Real;
+    /// use symrust::{create_expr, math::calculus::antiderivative::Antiderivative};
     /// let expr = create_expr!("2x").unwrap();
     /// let solution = expr
     ///     .integrate_solution(Real::from_i64(0), Real::from_i64(3))
@@ -257,7 +257,7 @@ where
     ///
     /// # Examples
     /// ```
-    /// use rust_calculus::{create_expr, math::calculus::antiderivative::Antiderivative, math::structs::expr::Expr};
+    /// use symrust::{create_expr, math::calculus::antiderivative::Antiderivative, math::structs::expr::Expr};
     /// let expr = create_expr!("2x").unwrap();
     /// let antiderivative = expr.get_antiderivative().unwrap();
     /// assert_eq!(antiderivative.to_string(), "x ^ 2");
@@ -265,7 +265,7 @@ where
     ///
     /// Functions without an elementary antiderivative produce an error:
     /// ```
-    /// use rust_calculus::{create_expr, math::calculus::antiderivative::Antiderivative, math::structs::expr::Expr};
+    /// use symrust::{create_expr, math::calculus::antiderivative::Antiderivative, math::structs::expr::Expr};
     /// let expr = create_expr!("e^(x^2)").unwrap();
     /// assert!(expr.get_antiderivative().is_err());
     /// ```
@@ -308,8 +308,8 @@ where
     ///
     /// # Examples
     /// ```
-    /// use rust_calculus::math::numeric::Real;
-    /// use rust_calculus::{create_expr, math::calculus::antiderivative::Antiderivative};
+    /// use symrust::math::numeric::Real;
+    /// use symrust::{create_expr, math::calculus::antiderivative::Antiderivative};
     /// let expr = create_expr!("2x").unwrap();
     /// let value = expr.integrate(Real::from_i64(0), Real::from_i64(3)).unwrap();
     /// assert_eq!(value, Real::from_i64(9));

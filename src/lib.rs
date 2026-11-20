@@ -47,13 +47,13 @@ mod tests;
 /// Create an [`Expr`][crate::math::structs::expr::Expr] from a string. Takes an optional second argument for independent variable.
 /// # Examples
 /// ```
-/// use rust_calculus::{create_expr, math::structs::expr::Expr};
+/// use symrust::{create_expr, math::structs::expr::Expr};
 /// let expr = create_expr!("2x^2").unwrap();
 /// assert_eq!(expr.to_string(), "2 x ^ 2");
 /// ```
 /// Returns an error if the expression is invalid.
 /// ```
-/// use rust_calculus::{create_expr, math::structs::expr::Expr};
+/// use symrust::{create_expr, math::structs::expr::Expr};
 /// let expr = create_expr!("2x^2 +");
 /// debug_assert!(expr.is_err());
 /// ```
@@ -68,17 +68,17 @@ mod tests;
 /// there is no `Real` round-trip.
 ///
 /// ```
-/// use rust_calculus::create_expr;
+/// use symrust::create_expr;
 /// let expr = create_expr!("2x^2"; f64).unwrap();
-/// let _: rust_calculus::math::structs::expr::Expr<f64> = expr;
+/// let _: symrust::math::structs::expr::Expr<f64> = expr;
 /// ```
 ///
 /// With an independent variable as well:
 ///
 /// ```
-/// use rust_calculus::create_expr;
+/// use symrust::create_expr;
 /// let expr = create_expr!("2t^2", 't'; f32).unwrap();
-/// let _: rust_calculus::math::structs::expr::Expr<f32> = expr;
+/// let _: symrust::math::structs::expr::Expr<f32> = expr;
 /// ```
 #[macro_export]
 macro_rules! create_expr {

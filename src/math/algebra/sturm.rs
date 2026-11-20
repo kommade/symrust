@@ -22,7 +22,7 @@ use super::rational::Rat;
 ///
 /// # Examples
 /// ```
-/// use rust_calculus::math::algebra::{polynomial::Poly, rational::Rat};
+/// use symrust::math::algebra::{polynomial::Poly, rational::Rat};
 /// // x^2 - 2 has two real roots.
 /// let poly = Poly::new(vec![Rat::from_i64(-2), Rat::ZERO, Rat::ONE]);
 /// let sturm = poly.sturm_sequence().unwrap();

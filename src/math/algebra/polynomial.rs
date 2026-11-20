@@ -13,7 +13,7 @@ use crate::math::structs::expr::node::Node;
 ///
 /// # Examples
 /// ```
-/// use rust_calculus::math::algebra::{polynomial::Poly, rational::Rat};
+/// use symrust::math::algebra::{polynomial::Poly, rational::Rat};
 /// let poly = Poly::new(vec![Rat::from_i64(1), Rat::ZERO, Rat::from_i64(2)]);
 /// assert_eq!(poly.degree(), Some(2));
 /// assert_eq!(poly.describe(), "2 x^2 + 1");

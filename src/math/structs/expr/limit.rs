@@ -83,9 +83,9 @@ impl<T: SymbolicLeaf> Expr<T> {
     ///
     /// # Examples
     /// ```
-    /// use rust_calculus::math::numeric::Real;
-    /// use rust_calculus::create_expr;
-    /// use rust_calculus::math::structs::expr::limit::Limit;
+    /// use symrust::math::numeric::Real;
+    /// use symrust::create_expr;
+    /// use symrust::math::structs::expr::limit::Limit;
     ///
     /// // lim_{x->0} sin(x)/x = 1
     /// let expr = create_expr!("sin(x)/x").unwrap();

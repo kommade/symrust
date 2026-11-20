@@ -346,9 +346,9 @@ impl<T: FloatType + Display> Expr<T> {
     ///
     /// # Examples
     /// ```
-    /// use rust_calculus::create_expr;
-    /// use rust_calculus::math::structs::expr::evaluate::Evaluated;
-    /// use rust_calculus::math::structs::expr::Expr;
+    /// use symrust::create_expr;
+    /// use symrust::math::structs::expr::evaluate::Evaluated;
+    /// use symrust::math::structs::expr::Expr;
     ///
     /// let expr = create_expr!("2x^2 + 3").unwrap();
     /// let result = expr.evaluate(4.0_f64);
@@ -380,9 +380,9 @@ impl<T: FloatType + Display> Expr<T> {
     ///
     /// # Examples
     /// ```
-    /// use rust_calculus::create_expr;
-    /// use rust_calculus::math::structs::expr::evaluate::Evaluated;
-    /// use rust_calculus::math::structs::expr::Expr;
+    /// use symrust::create_expr;
+    /// use symrust::math::structs::expr::evaluate::Evaluated;
+    /// use symrust::math::structs::expr::Expr;
     ///
     /// // No irrationals: the usual full evaluation.
     /// let expr = create_expr!("2x + 1").unwrap();
@@ -417,7 +417,7 @@ impl<T: FloatType + Display> Expr<T> {
     /// # Examples
     /// ```
     /// use std::collections::HashMap;
-    /// use rust_calculus::create_expr;
+    /// use symrust::create_expr;
     ///
     /// let expr = create_expr!("a + sqrt(a)").unwrap();
     /// let mut values = HashMap::new();
@@ -441,8 +441,8 @@ impl<T: FloatType + Display> Expr<T> {
     /// # Examples
     /// ```
     /// use std::collections::HashMap;
-    /// use rust_calculus::create_expr;
-    /// use rust_calculus::math::structs::expr::Expr;
+    /// use symrust::create_expr;
+    /// use symrust::math::structs::expr::Expr;
     ///
     /// let expr = create_expr!("a^2 + b^2").unwrap();
     /// let mut values = HashMap::new();

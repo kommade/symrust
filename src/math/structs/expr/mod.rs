@@ -220,7 +220,7 @@ impl<T: SymbolicLeaf> Expr<T> {
     ///
     /// # Examples
     /// ```
-    /// use rust_calculus::{create_expr, math::structs::expr::Expr};
+    /// use symrust::{create_expr, math::structs::expr::Expr};
     /// let expr = create_expr!("0").unwrap();
     /// assert!(expr.is_zero());
     /// let expr = create_expr!("2x").unwrap();
@@ -272,7 +272,7 @@ where
     /// to their precision.
     /// # Examples
     /// ```
-    /// use rust_calculus::{create_expr, math::structs::expr::Expr};
+    /// use symrust::{create_expr, math::structs::expr::Expr};
     /// let expr = create_expr!("2x^2 + 0").unwrap();
     /// assert_eq!(expr.simplify(true).to_string(), "2 x ^ 2");
     /// let expr = create_expr!("2x^2 * 0").unwrap();

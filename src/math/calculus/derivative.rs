@@ -18,7 +18,7 @@ pub trait Derivative {
     /// Find the derivative of the expression, recording every step.
     /// # Examples
     /// ```
-    /// use rust_calculus::{create_expr, math::calculus::derivative::Derivative};
+    /// use symrust::{create_expr, math::calculus::derivative::Derivative};
     /// let expr = create_expr!("2x^2").unwrap();
     /// let solution = expr.get_derivative_solution();
     /// assert_eq!(solution.result().to_string(), "4 x");
@@ -55,7 +55,7 @@ where
     /// Find the derivative of the expression. Attempts to simplify the expression before and after finding the derivative.
     /// # Examples
     /// ```
-    /// use rust_calculus::{create_expr, math::structs::expr::Expr, math::calculus::derivative::Derivative};
+    /// use symrust::{create_expr, math::structs::expr::Expr, math::calculus::derivative::Derivative};
     /// let expr = create_expr!("2x^2").unwrap();
     /// let derivative = expr.get_derivative();
     /// assert_eq!(derivative.to_string(), "4 x");
