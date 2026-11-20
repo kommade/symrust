@@ -116,6 +116,12 @@ pub enum Func<T = Real> {
     Root(T),
     Log(T),
     Ln,
+    /// The Gauss error function, `erf(x) = 2/√π · ∫₀ˣ e^(-t²) dt`.
+    Erf,
+    /// The sine integral, `Si(x) = ∫₀ˣ sin(t) / t dt`.
+    Si,
+    /// The exponential integral, `Ei(x) = -γ + ∫₀ˣ e^t / t dt` for `x > 0`.
+    Ei,
 }
 
 impl<T: FloatType + Display> Display for Func<T> {
@@ -134,6 +140,9 @@ impl<T: FloatType + Display> Display for Func<T> {
             Self::Root(n) => write!(f, "root_{n}"),
             Self::Log(n) => write!(f, "log_{n}"),
             Self::Ln => write!(f, "ln"),
+            Self::Erf => write!(f, "erf"),
+            Self::Si => write!(f, "si"),
+            Self::Ei => write!(f, "ei"),
         }
     }
 }
@@ -504,13 +513,6 @@ impl<T: FloatType + Display> Lexer<T> {
             },
             c if c == self.indp => Ok(Token::Indp(c)),
             c if c.is_ascii_alphabetic() => {
-                if c == 'e' || c == 'π' {
-                    return Ok(Token::from_const(match c {
-                        'e' => Const::E,
-                        'π' => Const::Pi,
-                        _ => unreachable!(),
-                    }));
-                };
                 // Collect the full run of letters: a keyword may sit anywhere
                 // inside it (`xsinx` is `x` times `sin(x)`), so the run as a
                 // whole cannot be matched against the keyword list.
@@ -523,6 +525,18 @@ impl<T: FloatType + Display> Lexer<T> {
                         self.pos -= 1;
                         break;
                     }
+                }
+                // `π` always names the constant, and `e` does too unless the
+                // run starts with a keyword (`erf(x)`, `ei(y)` — the constant
+                // check used to fire first and made them unlexable: `e` won
+                // the letter and the rest of the name turned into variables).
+                if c == 'π' {
+                    self.pos = run_start + 1;
+                    return Ok(Token::from_const(Const::Pi));
+                }
+                if c == 'e' && Self::keyword_prefix(&value).is_none() {
+                    self.pos = run_start + 1;
+                    return Ok(Token::from_const(Const::E));
                 }
                 match Self::keyword_prefix(&value) {
                     None => {
@@ -584,6 +598,9 @@ impl<T: FloatType + Display> Lexer<T> {
                                 Func::Log(base)
                             }
                             "ln" => Func::Ln,
+                            "erf" => Func::Erf,
+                            "si" => Func::Si,
+                            "ei" => Func::Ei,
                             "root" => {
                                 // `root_n(x)`; a bare `root(...)` defaults to the square root.
                                 let mut index = T::parse_decimal("2")
@@ -642,9 +659,10 @@ impl<T: FloatType + Display> Lexer<T> {
     /// prefixes `run`, or `None`. Longer names are tried first so a never
     /// keyword is mistaken for a shorter one (`arcsin` before `asin`).
     fn keyword_prefix(run: &str) -> Option<usize> {
-        const KEYWORDS: [&str; 17] = [
+        const KEYWORDS: [&str; 20] = [
             "arcsin", "arccos", "arctan", "asin", "acos", "atan", "sqrt", "root",
-            "sin", "cos", "tan", "sec", "csc", "cot", "log", "ln", "pi",
+            "sin", "si", "cos", "tan", "sec", "csc", "cot", "log", "ln", "erf",
+            "ei", "pi",
         ];
         KEYWORDS
             .iter()

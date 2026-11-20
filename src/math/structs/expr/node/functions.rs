@@ -535,6 +535,11 @@ impl<T: SymbolicLeaf> NodeFunctions<T> for Node<T> {
                         // `log_b(x)` is `ln x / ln b`; the trait's `log` takes a
                         // concrete `Float`, so the base is converted through it.
                         Func::Log(base) => argument.ln() / base.ln(),
+                        // The special functions are real-valued; the trait's
+                        // default implementations compute them over `Real`.
+                        Func::Erf => argument.erf(),
+                        Func::Si => argument.si(),
+                        Func::Ei => argument.ei(),
                     }
                 }
                 _ => unreachable!(),

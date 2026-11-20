@@ -455,6 +455,9 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                             let trimmed = n.strip_suffix('.').unwrap_or(&n);
                             format!(r"\sqrt[{trimmed}]{{{right_str}}}")
                         }
+                        Func::Erf => format!(r"\operatorname{{erf}}({right_str})"),
+                        Func::Si => format!(r"\operatorname{{Si}}({right_str})"),
+                        Func::Ei => format!(r"\operatorname{{Ei}}({right_str})"),
                         _ => format!(r"\{op_str}({right_str})"),
                     },
                     _ => return Err(NodeError::WrongToken("operator".to_string())),

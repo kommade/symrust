@@ -330,6 +330,9 @@ where
         }
         Func::Ln => argument.ln(),
         Func::Log(base) => argument.log(base.to_real()),
+        Func::Erf => argument.erf(),
+        Func::Si => argument.si(),
+        Func::Ei => argument.ei(),
     }
 }
 

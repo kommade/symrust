@@ -267,6 +267,31 @@ where
                                 .div(ln_base.impl_mul(arg))
                         }
                     }
+                    Func::Erf => {
+                        // d/dx erf(u) = 2 e^(-u²) u' / √π.
+                        let arg = op_node.right.clone();
+                        let gaussian = pow(
+                            Node::from_constant(Const::E),
+                            negate(arg.clone().pow(2)),
+                        );
+                        let f_prime = number(2)
+                            .div(call(Func::Sqrt, Node::from_constant(Const::Pi)))
+                            .impl_mul(gaussian);
+                        arg.get_derivative(steps).impl_mul(f_prime)
+                    }
+                    Func::Si => {
+                        // d/dx Si(u) = sin(u) u' / u.
+                        let arg = op_node.right.clone();
+                        let f_prime = call(Func::Sin, arg.clone()).div(arg.clone());
+                        arg.get_derivative(steps).impl_mul(f_prime)
+                    }
+                    Func::Ei => {
+                        // d/dx Ei(u) = e^u u' / u.
+                        let arg = op_node.right.clone();
+                        let f_prime =
+                            pow(Node::from_constant(Const::E), arg.clone()).div(arg.clone());
+                        arg.get_derivative(steps).impl_mul(f_prime)
+                    }
                 }
                 .simplify(false, true);
                 calc_step!(
@@ -286,6 +311,9 @@ where
                         Func::Root(_) => format!("d/dx u^(1/n) = (1/n) u^(1/n - 1) u' for {borrowed}"),
                         Func::Ln => format!("d/dx ln(u) = u' / u for {borrowed}"),
                         Func::Log(_) => format!("d/dx log_b(u) = u' / (u ln b) for {borrowed}"),
+                        Func::Erf => format!("d/dx erf(u) = 2 e^(-u^2) u' / sqrt(pi) for {borrowed}"),
+                        Func::Si => format!("d/dx si(u) = sin(u) u' / u for {borrowed}"),
+                        Func::Ei => format!("d/dx ei(u) = e^u u' / u for {borrowed}"),
                     },
                     result.clone()
                 );
@@ -497,6 +525,18 @@ where
                     }
                     Func::Ln => div(one(), right),
                     Func::Log(base) => div(one(), mul(right, function(Func::Ln, float(base)))),
+                    Func::Erf => div(
+                        mul(
+                            number(2),
+                            pow(
+                                Node::from_constant(Const::E),
+                                negate(pow(right, number(2))),
+                            ),
+                        ),
+                        sqrt_arg(Node::from_constant(Const::Pi)),
+                    ),
+                    Func::Si => div(call(Func::Sin, right.clone()), right),
+                    Func::Ei => div(pow(Node::from_constant(Const::E), right.clone()), right),
                 };
                 mul(inner, arg_derivative)
             }

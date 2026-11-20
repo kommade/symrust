@@ -290,6 +290,9 @@ fn numeric_evaluate_inner<T: SymbolicLeaf>(node: &Node<T>, depth: usize) -> Opti
                     Func::Root(index) => argument.pow(one() / index),
                     Func::Ln => argument.ln(),
                     Func::Log(base) => argument.ln() / base.ln(),
+                    Func::Erf => argument.erf(),
+                    Func::Si => argument.si(),
+                    Func::Ei => argument.ei(),
                 }
             }
             _ => return None,
@@ -419,6 +422,9 @@ fn apply_numeric_function<T: SymbolicLeaf>(func: &Func<T>, argument: T) -> Optio
         Func::Root(index) => argument.pow(one() / index.clone()),
         Func::Ln => argument.ln(),
         Func::Log(base) => argument.ln() / base.clone().ln(),
+        Func::Erf => argument.erf(),
+        Func::Si => argument.si(),
+        Func::Ei => argument.ei(),
     })
 }
 

@@ -221,6 +221,28 @@ pub trait ExpressionScalar: NumCore + FloatBridge {
         Self::e().pow(self)
     }
 
+    // --- special functions ----------------------------------------------
+
+    /// The Gauss error function, `erf(x) = 2/√π · ∫₀ˣ e^(-t²) dt`.
+    ///
+    /// A real-valued special function: the default implementation computes it
+    /// over [`Real`] and rebuilds the caller's leaf type. The sine integral
+    /// [`si`](Self::si) and the exponential integral [`ei`](Self::ei) follow
+    /// the same pattern.
+    fn erf(self) -> Self {
+        Self::from_real(self.to_real().erf())
+    }
+
+    /// The sine integral, `Si(x) = ∫₀ˣ sin(t) / t dt`.
+    fn si(self) -> Self {
+        Self::from_real(self.to_real().si())
+    }
+
+    /// The exponential integral, `Ei(x) = γ + ln|x| + Σ xᵏ/(k·k!)`.
+    fn ei(self) -> Self {
+        Self::from_real(self.to_real().ei())
+    }
+
     // --- constants -----------------------------------------------------
 
     /// The constant `π`.

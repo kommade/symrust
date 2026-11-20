@@ -124,9 +124,10 @@ static EXAMPLES: [(&str, &str); 79] = [
     ("sin(ln(x))", "x (sin(ln(x)) - cos(ln(x))) / 2"),
 ];
 
-static NOT_ELEMENTARY: [&str; 6] = [
+static NOT_ELEMENTARY: [&str; 5] = [
     "e^(x^2)",
-    "sin(x)/x",
+    // (sin(x)/x retired from this list: the special-function table closes it
+    // into Si(x).)
     "x^x",
     "ln(ln(x))",
     "1/ln(x)",
@@ -1436,5 +1437,173 @@ fn numeric_quadrature_answers_definite_integrals() {
     assert!(
         (value.as_f64() - 0.886_226_925_452_758).abs() < 1e-8,
         "got {value}"
+    );
+}
+
+/// The special-function table: gaussians into `erf`, and the f(λx)/x shapes
+/// into `Si`/`Ei`. Each antiderivative is checked by differentiating it
+/// numerically against the integrand — the same form-independent gate the
+/// trig routes use — and the definite pair ∫ e^(-x²) and ∫ sin(x)/x over
+/// centred-to-infinite bounds pins the limit machinery against the known
+/// values √π/2 and π/2.
+#[test]
+fn special_function_table_closes_the_gaussian_and_over_linear_shapes() {
+    use crate::math::numeric::{FloatBridge, Real};
+
+    // Derivative of the found antiderivative against the integrand.
+    let derivative_check = |antiderivative: &Expr<Real>, x: f64, integrand: f64| {
+        let h = 1e-7;
+        let forward = antiderivative
+            .evaluate(Real::from_f64(x + h))
+            .value()
+            .expect("evaluates")
+            .clone();
+        let backward = antiderivative
+            .evaluate(Real::from_f64(x - h))
+            .value()
+            .expect("evaluates")
+            .clone();
+        let derivative = (forward - backward).to_real().as_f64() / (2.0 * h);
+        assert!(
+            (derivative - integrand).abs() < 1e-5,
+            "x = {x}: derivative {derivative}, integrand {integrand}"
+        );
+    };
+
+    // ∫ e^(-x²) dx = √π/2 · erf(x), rendered in the new function.
+    let expr = create_expr!("e^(-x^2)").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("the gaussian closes into erf");
+    assert!(
+        antiderivative.to_string().contains("erf"),
+        "the gaussian renders erf: {}",
+        antiderivative
+    );
+    for x in [0.3_f64, 1.7, -2.1] {
+        derivative_check(&antiderivative, x, (-(x * x)).exp());
+    }
+
+    // ∫ e^(-x² + 1) dx carries the constant factor e^1.
+    let expr = create_expr!("e^(-x^2+1)").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("the shifted gaussian closes too");
+    for x in [0.4_f64, 1.9] {
+        derivative_check(&antiderivative, x, (-(x * x) + 1.0).exp());
+    }
+
+    // ∫ sin(2x)/x dx = Si(2x): the chain factor cancels the denominator.
+    let expr = create_expr!("sin(2x)/x").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("sin(λx)/x closes into Si");
+    assert!(
+        antiderivative.to_string().contains("si"),
+        "the sine ratio renders Si: {}",
+        antiderivative
+    );
+    for x in [0.5_f64, 2.3, -1.1] {
+        derivative_check(&antiderivative, x, (2.0 * x).sin() / x);
+    }
+
+    // ∫ e^(3x)/x dx = Ei(3x).
+    let expr = create_expr!("e^(3x)/x").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("e^(λx)/x closes into Ei");
+    assert!(
+        antiderivative.to_string().contains("ei"),
+        "the exponential ratio renders Ei: {}",
+        antiderivative
+    );
+    for x in [0.4_f64, 1.6] {
+        derivative_check(&antiderivative, x, (3.0 * x).exp() / x);
+    }
+
+    // The definite gaussian is now exactly symbolic: erf(∞) = 1 through the
+    // limit machinery, and the value equals √π/2.
+    let expr = create_expr!("e^(-x^2)").unwrap();
+    let value = expr
+        .integrate(Real::from_i64(0), Real::infinity())
+        .expect("the gaussian integral is symbolic now")
+        .to_real();
+    assert!(
+        (value.as_f64() - 0.886_226_925_452_758).abs() < 1e-12,
+        "∫₀^∞ e^(-x²) = {value}"
+    );
+
+    // The Dirichlet integral ∫₀^∞ sin(x)/x dx = π/2 walks the same path
+    // through Si's asymptotic tail.
+    let expr = create_expr!("sin(x)/x").unwrap();
+    let value = expr
+        .integrate(Real::from_i64(0), Real::infinity())
+        .expect("the Dirichlet integral is symbolic")
+        .to_real();
+    assert!(
+        (value.as_f64() - std::f64::consts::FRAC_PI_2).abs() < 1e-10,
+        "∫₀^∞ sin(x)/x = {value}"
+    );
+
+    // The downward quadratic stays outside the table: e^(+x²) needs `erfi`
+    // and remains unsupported in the antiderivative language.
+    let expr = create_expr!("e^(x^2)").unwrap();
+    assert!(
+        expr.get_antiderivative().is_err(),
+        "the growing exponential needs erfi, out of scope"
+    );
+}
+
+/// The special functions evaluate, differentiate and render as first-class
+/// tokens: parse round-trips, exact values at the anchor points and the
+/// chain-rule derivatives all agree.
+#[test]
+fn special_functions_parse_evaluate_and_differentiate() {
+    use crate::math::numeric::FloatBridge;
+
+    // erf(1) = 0.8427007929497149...; Si(1) = 0.9460830703671830...;
+    // Ei(1) = 1.8951178163559367...
+    let expr = create_expr!("erf(1)").unwrap();
+    let value = expr
+        .evaluate(Real::from_f64(0.0))
+        .value()
+        .expect("erf(1) evaluates");
+    assert!(
+        (value.to_real().as_f64() - 0.842_700_792_949_714_9).abs() < 1e-14,
+        "erf(1) = {value}"
+    );
+
+    let expr = create_expr!("si(1)").unwrap();
+    let value = expr
+        .evaluate(Real::from_f64(0.0))
+        .value()
+        .expect("si(1) evaluates");
+    assert!(
+        (value.to_real().as_f64() - 0.946_083_070_367_183).abs() < 1e-14,
+        "si(1) = {value}"
+    );
+
+    // The chain rule: d/dx erf(x²) = 2·2x·e^(-x⁴)/√π; the derivative check
+    // runs through the recorded steps.
+    let expr = create_expr!("erf(x^2)").unwrap();
+    let derivative = expr.get_derivative();
+    let probe = derivative
+        .evaluate(Real::from_f64(0.5))
+        .value()
+        .expect("the erf derivative evaluates");
+    let expected = 2.0 * 2.0 * 0.5 * (-(0.25_f64 * 0.25)).exp() / std::f64::consts::PI.sqrt();
+    assert!(
+        (probe.to_real().as_f64() - expected).abs() < 1e-12,
+        "d/dx erf(x²) at 0.5: {probe} vs {expected}"
+    );
+
+    // The LaTeX rendering names the special functions explicitly.
+    let expr = create_expr!("erf(x) + si(2x) + ei(x)").unwrap();
+    let latex = expr
+        .to_latex()
+        .expect("the special-function tree renders");
+    assert!(
+        latex.contains("erf") && latex.contains("Si") && latex.contains("Ei"),
+        "the LaTeX should name the specials: {latex}"
     );
 }

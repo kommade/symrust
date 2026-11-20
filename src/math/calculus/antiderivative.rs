@@ -44,6 +44,7 @@ mod helpers;
 mod hyperexponential;
 mod quadrature;
 mod rational;
+mod special;
 mod sqrt_rational;
 mod trig;
 mod trig_weierstrass;
@@ -1027,6 +1028,13 @@ where
         if let Some(result) = ansatz::try_ansatz(self, node) {
             return Ok(result);
         }
+        // The special-function families: gaussians into erf, and the
+        // f(λx)/x shapes into Si / Ei. They must ride ahead of the
+        // hyperexponential certificate, whose non-elementarity proof would
+        // otherwise end the search before the table speaks.
+        if let Some(result) = special::try_special(self, node) {
+            return Ok(result);
+        }
         // `sin`/`cos` of a logarithm: `sin(a ln x + b)`, `cos(a ln x + b)`.
         if let Some(result) = self.try_log_trig(node) {
             return Ok(result);
@@ -1924,6 +1932,9 @@ where
             let logarithm = helpers::function(Func::Ln, helpers::float(base.clone()));
             helpers::div(numerator, logarithm)
         }
+        // The special functions carry no elementary antiderivative: the
+        // definite shapes that produce them live in `special::try_special`.
+        Func::Erf | Func::Si | Func::Ei => return None,
         Func::Asin => helpers::add(
             helpers::mul(
                 argument.clone(),

@@ -24,6 +24,33 @@ use super::FloatBridge;
 static EPSILON: std::sync::LazyLock<Float> =
     std::sync::LazyLock::new(|| Float::from_f64(1e-10).cast(FP128));
 
+/// The Euler–Mascheroni constant, `γ = 0.5772…`, the offset that turns the
+/// harmonic numbers into the exponential integral's regular part.
+///
+/// `arpfloat` does not provide it and an f64 literal is 17 digits short, so the
+/// constant is computed once through the Euler–Maclaurin expansion of the
+/// harmonic numbers: `γ = H_N − ln N − 1/(2N) + ΣₖᐧB₂ₖ/(2k·N^(2k))` with the
+/// first six Bernoulli corrections, stationary at `N = 100` to about `10⁻³⁰`
+/// (the next term is `B₁₄/(14·N¹⁴) ≈ 5·10⁻³¹`).
+static EULER_GAMMA: std::sync::LazyLock<Real> = std::sync::LazyLock::new(|| {
+    let n = Real::from_u64(100);
+    let mut harmonic = Real::zero();
+    for k in 1..=100u64 {
+        harmonic = harmonic + Real::one() / Real::from_u64(k);
+    }
+    let square = n.clone() * n.clone();
+    let fourth = square.clone() * square.clone();
+    let eighth = fourth.clone() * fourth.clone();
+    harmonic - n.clone().ln()
+        - Real::one() / Real::from_i64(2) / n.clone()
+        + Real::one() / Real::from_i64(12) / square.clone()
+        - Real::one() / Real::from_i64(120) / fourth.clone()
+        + Real::one() / Real::from_i64(252) / (fourth.clone() * square.clone())
+        - Real::one() / Real::from_i64(240) / eighth.clone()
+        + Real::one() / Real::from_i64(132) / (eighth.clone() * square.clone())
+        - Real::from_i64(691) / Real::from_i64(32760) / (eighth.clone() * fourth.clone())
+});
+
 /// A floating-point value with a crate-owned API.
 ///
 /// Wraps an FP128 [`arpfloat::Float`]; construct values with [`Real::from_i64`],
@@ -69,6 +96,14 @@ impl Real {
     #[must_use]
     pub fn e() -> Self {
         Self(Float::e(FP128))
+    }
+
+    /// The Euler–Mascheroni constant `γ = 0.5772…`, the offset that turns the
+    /// harmonic numbers into the exponential integral's regular part;
+    /// computed once per process from the [`EULER_GAMMA`] expansion.
+    #[must_use]
+    pub fn euler_gamma() -> Self {
+        EULER_GAMMA.clone()
     }
 
     /// Positive infinity (`+∞`).
@@ -467,6 +502,197 @@ impl Real {
             return Self::nan();
         }
         half_pi - self.asin()
+    }
+
+    /// The Gauss error function, `erf(x) = 2/√π · ∫₀ˣ e^(-t²) dt`.
+    ///
+    /// `arpfloat` does not provide the special functions, so — like
+    /// [`asin`](Self::asin) and [`atan`](Self::atan) — they are implemented
+    /// here. Two regions:
+    ///
+    /// - `|x| ≤ 6`: the Maclaurin series `2/√π · Σ (-1)ᵏ x^(2k+1)/(k!(2k+1))`.
+    ///   Convergent everywhere, but for `x = 6` the largest term is about
+    ///   `e³⁶ ≈ 4·10¹⁵`, so the alternating sum loses ~15 of the 34 carried
+    ///   digits — still 18 good ones.
+    /// - `x > 6`: the complementary continued fraction (DLMF 7.9.1)
+    ///   `√π e^(x²) erfc(x) = 1/(x+) ½/(x+) ²⁄2/(x+) ³⁄2/(x+) ⋯`, whose partial
+    ///   numerators are `k/2`, evaluated by the modified Lentz method, with
+    ///   `erf(x) = 1 - erfc(x)`. The subtraction is harmless there: `erfc` is
+    ///   already below `2·10⁻¹⁷` at the crossover.
+    #[must_use]
+    pub fn erf(self) -> Self {
+        if self.is_nan() {
+            return Self::nan();
+        }
+        if self.is_zero() {
+            return Self::zero();
+        }
+        if self.is_negative() {
+            // Odd function.
+            return -self.neg().erf();
+        }
+        let boundary = Self::from_f64(6.0);
+        if self <= boundary {
+            let square = self.clone() * self.clone();
+            // The summand `x^(2k+1)/(k!(2k+1))`, updated multiplicatively.
+            // `t_k/t_(k-1) = -x² · (2k-1)/(k(2k+1))`.
+            let mut term = self.clone();
+            let mut sum = self.clone();
+            let mut largest = Self::one();
+            for k in 1u64..=160 {
+                term = term
+                    * (-square.clone())
+                    * (Self::from_u64(2 * k - 1) / Self::from_u64(k * (2 * k + 1)));
+                if term.abs() > largest.clone() {
+                    largest = term.abs();
+                }
+                sum = sum + term.clone();
+                if term.is_zero() || term.abs() < largest.clone() * Self::from_f64(1e-39) {
+                    break;
+                }
+            }
+            sum * Self::from_f64(2.0) / Self::pi().sqrt()
+        } else {
+            // The complementary fraction from DLMF 7.9.1 through the modified
+            // Lentz method: `CF = 1/(x + ½/(x + ²⁄2/(x + ³⁄2/(x + ⋯))))` —
+            // partial denominators all `x`, partial numerators `k/2`.
+            let tiny = Self::from_f64(1e-300);
+            let mut f = self.clone();
+            let mut c_term = f.clone();
+            let mut d_term = Self::zero();
+            for k in 1u64..=400 {
+                d_term = self.clone() + Self::from_f64(k as f64 / 2.0) * d_term.clone();
+                if d_term.is_zero() {
+                    d_term = tiny.clone();
+                }
+                d_term = Self::one() / d_term;
+                c_term = self.clone() + Self::from_f64(k as f64 / 2.0) / c_term.clone();
+                if c_term.is_zero() {
+                    c_term = tiny.clone();
+                }
+                let delta = c_term.clone() * d_term.clone();
+                f = f * delta.clone();
+                if (delta.clone() - Self::one()).abs() < Self::from_f64(1e-39) {
+                    break;
+                }
+            }
+            // erfc(x) = e^(-x²)/√π · CF; erf = 1 - erfc.
+            let erfc = (-self.clone() * self.clone()).exp() / Self::pi().sqrt() * f;
+            Self::one() - erfc
+        }
+    }
+
+    /// The sine integral, `Si(x) = ∫₀ˣ sin(t) / t dt` (an odd function).
+    ///
+    /// - `|x| ≤ 26`: the Maclaurin series `Σ (-1)ᵏ x^(2k+1)/((2k+1)·(2k+1)!)`.
+    ///   The largest term grows like `eˣ`, so at the crossover about 11 of the
+    ///   34 carried digits are spent on cancellation — 23 remain.
+    /// - `x > 26`: the asymptotic expansion
+    ///   `Si(x) = π/2 - cos(x)/x · f(x) - sin(x)/x² · g(x)` with
+    ///   `f(x) = Σ (-1)ᵏ (2k)!/x^(2k+1)` and `g(x) = Σ (-1)ᵏ (2k+1)!/x^(2k+2)`,
+    ///   truncated at its smallest term (a divergent series). At `x = 26` it is
+    ///   good to about `10⁻¹³`, improving factorially with `x`.
+    #[must_use]
+    pub fn si(self) -> Self {
+        if self.is_nan() {
+            return Self::nan();
+        }
+        if self.is_zero() {
+            return Self::zero();
+        }
+        if self.is_negative() {
+            return -self.neg().si();
+        }
+        let boundary = Self::from_f64(26.0);
+        if self <= boundary {
+            // The update `t_k/t_(k-1) = -x²·(2k-1)/((2k+1)²·(2k))`.
+            let square = self.clone() * self.clone();
+            let mut term = self.clone();
+            let mut sum = self.clone();
+            let mut largest = Self::one();
+            for k in 1u64..=140 {
+                let index = Self::from_u64(2 * k + 1);
+                term = term * (-square.clone()) * Self::from_u64(2 * k - 1)
+                    / (index.clone() * index.clone() * Self::from_u64(2 * k));
+                if term.abs() > largest.clone() {
+                    largest = term.abs();
+                }
+                sum = sum + term.clone();
+                if term.is_zero() || term.abs() < largest.clone() * Self::from_f64(1e-39) {
+                    break;
+                }
+            }
+            sum
+        } else {
+            // The two asymptotic tails, each truncated when the terms stop
+            // shrinking (the standard termination for a divergent expansion):
+            // `f_k = (-1)ᵏ(2k)!/x^(2k+1)`, `g_k = (-1)ᵏ(2k+1)!/x^(2k+2)`, and
+            // `Si = π/2 - cos(x)·f - sin(x)·g`. The factorial-argument product
+            // updates each tail multiplicatively.
+            let x = self.clone();
+            let square = x.clone() * x.clone();
+            let mut f = Self::one() / self.clone();
+            let mut g = f.clone() / self.clone();
+            let mut f_term = f.clone();
+            let mut g_term = g.clone();
+            for k in 1u64..=80 {
+                // The next terms past their smallest magnitude: the series is
+                // eventually divergent, so stop before the terms grow again.
+                let before = f_term.abs();
+                f_term = -(f_term * Self::from_u64(2 * k) * Self::from_u64(2 * k - 1)
+                    / square.clone());
+                g_term = -(g_term * Self::from_u64(2 * k) * Self::from_u64(2 * k + 1)
+                    / square.clone());
+                f = f + f_term.clone();
+                g = g + g_term.clone();
+                if f_term.abs() < Self::from_f64(1e-40)
+                    && g_term.abs() < Self::from_f64(1e-40)
+                {
+                    break;
+                }
+                if f_term.abs() > before.clone() {
+                    // The minimum term has passed; the best truncation is the
+                    // last sum (the growing tail would only deteriorate it).
+                    f = f - f_term;
+                    g = g - g_term;
+                    break;
+                }
+            }
+            let half_pi = Self::pi() / Self::from_u64(2);
+            half_pi - x.clone().cos() * f - x.clone().sin() * g
+        }
+    }
+
+    /// The exponential integral, `Ei(x) = γ + ln|x| + Σ_{k≥1} xᵏ/(k·k!)`.
+    ///
+    /// The series is convergent for every `x`, alternating for `x < 0` and
+    /// positive for `x > 0`; the result itself grows like `e^x/x`, the same
+    /// scale as the largest summand, so the relative accuracy is that of the
+    /// individual terms for every argument. `Ei(0)` diverges to negative
+    /// infinity.
+    #[must_use]
+    pub fn ei(self) -> Self {
+        if self.is_nan() {
+            return Self::nan();
+        }
+        if self.is_zero() {
+            return Self::neg_infinity();
+        }
+        // `t₁ = x`; `t_k/t_(k-1) = x(k-1)/k²`.
+        let mut term = self.clone();
+        let mut sum = term.clone();
+        let mut largest = Self::one();
+        for k in 2u64..=260 {
+            term = term * self.clone() * Self::from_u64(k - 1) / Self::from_u64(k * k);
+            if term.abs() > largest.clone() {
+                largest = term.abs();
+            }
+            sum = sum + term.clone();
+            if term.is_zero() || term.abs() < largest.clone() * Self::from_f64(1e-39) {
+                break;
+            }
+        }
+        Self::euler_gamma() + self.abs().ln() + sum
     }
 }
 
