@@ -161,13 +161,18 @@ where
     // `integrate_trig` returns `None` when it has nothing to contribute; it used
     // to report success by handing back the integrand unchanged, which made every
     // rational integral record a `trigonometric reduction: u => u` step.
-    let result = integrate_trig(integrator, node)?;
-    integrator.step(
-        "trigonometric reduction",
-        || super::describe_signed(node),
-        || result.clone(),
-    );
-    Some(result)
+    if let Some(result) = integrate_trig(integrator, node) {
+        integrator.step(
+            "trigonometric reduction",
+            || super::describe_signed(node),
+            || result.clone(),
+        );
+        return Some(result);
+    }
+    // The reduction tables cover uniform sine/cosine monomials; what they
+    // decline — mixed denominators like `1 + sin(x)` — is the Weierstrass
+    // substitution's territory.
+    super::trig_weierstrass::try_integrate(integrator, node)
 }
 
 fn integrate_trig<T, R>(
@@ -198,11 +203,18 @@ where
     }
     for factor in &product.denom {
         let mut collected = Vec::new();
-        collect_trig_powers(factor, 1, &mut collected, 0)?;
-        // A factor in the denominator is the reciprocal function.
-        for mut power in collected {
-            power.func = reciprocal(&power.func)?;
-            powers.push(power);
+        match collect_trig_powers(factor, 1, &mut collected, 0) {
+            Some(()) => {
+                // A factor in the denominator is the reciprocal function.
+                for mut power in collected {
+                    power.func = reciprocal(&power.func)?;
+                    powers.push(power);
+                }
+            }
+            // A non-monomial denominator (a sum, the Weierstrass shapes) is
+            // not a reduction-table case: keep it as a stranger so the
+            // product-to-sum and Weierstrass routes still see it.
+            None => others.push(factor.clone()),
         }
     }
     if powers.is_empty() {

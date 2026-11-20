@@ -1021,3 +1021,75 @@ fn chebyshev_covers_integral_binomial_powers() {
         );
     }
 }
+
+/// Rational functions of sine and cosine the reduction tables decline — mixed
+/// denominators above all — come out of the Weierstrass substitution
+/// `t = tan(x/2)` as partial fractions in `t`. Each answer is checked by
+/// differentiating the antiderivative numerically, which is form-independent
+/// (the closed forms of trig integrals vary by constants across routes).
+#[test]
+fn weierstrass_substitution_integrates_trig_rationals() {
+    use crate::math::numeric::{FloatBridge, Real};
+
+    // Derivative of the found antiderivative against the integrand, at points
+    // clear of the substitution's own singularities.
+    let derivative_check = |antiderivative: &Expr<Real>, x: f64, integrand: f64| {
+        let h = 1e-7;
+        let forward = antiderivative
+            .evaluate(Real::from_f64(x + h))
+            .value()
+            .expect("evaluates")
+            .clone();
+        let backward = antiderivative
+            .evaluate(Real::from_f64(x - h))
+            .value()
+            .expect("evaluates")
+            .clone();
+        let derivative = (forward - backward).to_real().as_f64() / (2.0 * h);
+        assert!(
+            (derivative - integrand).abs() < 1e-5,
+            "x = {x}: derivative {derivative}, integrand {integrand}"
+        );
+    };
+
+    // ∫ dx/(1 + sin x): mixed denominator; the substitution lands at
+    // -2/(tan(x/2) + 1), up to a constant one of the (tan x - sec x) family.
+    let expr = create_expr!("1/(1 + sin(x))").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("a mixed sine denominator takes the Weierstrass route");
+    for x in [-1.4_f64, -0.6, 0.5, 1.1] {
+        derivative_check(&antiderivative, x, 1.0 / (1.0 + x.sin()));
+    }
+
+    // ∫ dx/(2 + cos x): a constant-plus-cosine denominator with no sine.
+    // The standard closed form is (2/sqrt(3)) atan(tan(x/2)/sqrt(3)) + C.
+    let expr = create_expr!("1/(2 + cos(x))").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("a cosine denominator takes the Weierstrass route");
+    for x in [-1.2_f64, 0.3, 0.9] {
+        derivative_check(&antiderivative, x, 1.0 / (2.0 + x.cos()));
+    }
+
+    // ∫ dx/sin(x) = ln|tan(x/2)|: the pure csc integral is served by the
+    // existing reduction table, NOT the Weierstrass route; it is here as a
+    // regression guard that the normalisation rewrite keeps working.
+    let expr = create_expr!("1/sin(x)").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("csc integrates through the reduction table");
+    for x in [0.4_f64, 0.8, 1.3] {
+        let found = antiderivative
+            .evaluate(Real::from_f64(x))
+            .value()
+            .expect("the antiderivative evaluates")
+            .clone();
+        let expected = (x / 2.0).tan().abs().ln();
+        assert!(
+            (found.to_real().as_f64() - expected).abs() < 1e-5,
+            "x = {x}: found {}, expected {expected}",
+            found.to_real().as_f64()
+        );
+    }
+}

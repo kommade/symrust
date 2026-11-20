@@ -42,6 +42,7 @@ mod binomial;
 mod helpers;
 mod rational;
 mod trig;
+mod trig_weierstrass;
 
 use std::{
     error::Error,
