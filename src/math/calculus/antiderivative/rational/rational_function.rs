@@ -102,7 +102,76 @@ where
         }
         Some(helpers::sum(terms))
     }
+
+    /// The proper part: peel repeated powers with Hermite reduction, then
+    /// take what remains through the ordinary factorisation machinery.
+    ///
+    /// When the denominator is an exact power `C^m` (`m >= 2`), the identity
+    ///
+    /// ```text
+    /// A/C^m = (B/C^(m-1))' + E/C^(m-1)
+    ///   with  A = B'C - (m-1)BC' + E C^(m-1)
+    /// ```
+    ///
+    /// peels one power per pass: `B/((m-1)C^(m-1))` is an antiderivative
+    /// contribution in its own right, and the residue `E/C^(m-1)` recurses
+    /// down to multiplicity one. The linear equation is square (m·deg C
+    /// unknowns and rows) and exact over [`Rat`]; C never needs
+    /// factorisation, so an irreducible cubic or higher riding a repeated
+    /// power - a shape the factoriser refuses through the algebraic
+    /// feature - contributes its rational part here, and its squarefree
+    /// residue flows through the ordinary path.
     fn integrate_proper<R>(
+        &self,
+        numerator: &Poly,
+        variable: &Node<T>,
+        integrator: &mut super::super::Integrator<'_, R, T>,
+    ) -> Option<Node<T>>
+    where
+        R: Recorder<Expr<T>> + ?Sized,
+    {
+        let Some((multiplicity, base)) = perfect_power(&self.denom) else {
+            return self.integrate_reduced(numerator, variable, integrator);
+        };
+        let Some((b, residue)) = hermite_step(numerator, &base, multiplicity) else {
+            // An unsolvable coefficient equation means the power peel does
+            // not apply to this numerator; the factorisation path handles
+            // the original pair.
+            return self.integrate_reduced(numerator, variable, integrator);
+        };
+        // The peeled antiderivative part: B/((m-1) C^(m-1)).
+        let scale = Rat::new(1, (multiplicity - 1) as i128)?;
+        let shifted = helpers::multiply_by_rational(
+            helpers::div(
+                b.to_node(variable),
+                base.pow(multiplicity - 1)?.to_node(variable),
+            ),
+            scale,
+        );
+        integrator.step_without_result(
+            "Hermite reduction",
+            || {
+                format!(
+                    "peeled power {} from the denominator {}: B/((m-1) C^(m-1)) \n                     joins the antiderivative, the residue carries the rest",
+                    multiplicity,
+                    self.denom.describe()
+                )
+            },
+        );
+        // The residue lives over C^(m-1); recurse on the smaller power.
+        let reduced = Self {
+            numer: residue.clone(),
+            denom: base.pow(multiplicity - 1)?,
+            denom_node: None,
+        };
+        let tail = reduced.integrate_proper(&residue, variable, integrator)?;
+        Some(helpers::add(shifted, tail))
+    }
+
+    /// The factorisation-based integration of a proper fraction, over a
+    /// numerator that Hermite reduction has already stripped of repeated
+    /// powers.
+    fn integrate_reduced<R>(
         &self,
         numerator: &Poly,
         variable: &Node<T>,
@@ -210,6 +279,160 @@ where
         }
         Some(helpers::sum(terms))
     }
+}
+
+/// Whether the denominator is an exact power `C^m` with `m >= 2`.
+///
+/// `gcd(D, D') = C^(m-1)` for a squarefree C with uniform multiplicity; the
+/// returned candidate is verified multiplicatively, so anything the test
+/// cannot confirm returns `None` and the caller falls back to factoring.
+fn perfect_power(denom: &Poly) -> Option<(u32, Poly)> {
+    let degree = denom.degree()?;
+    if degree < 2 {
+        return None;
+    }
+    let derivative = denom.derivative()?;
+    let common = denom.gcd(&derivative)?;
+    let gcd_degree = common.degree()? as i64;
+    let denom_degree = degree as i64;
+    // m = deg D / (deg D - deg gcd) when the gcd is exactly C^(m-1).
+    let divisor = denom_degree - gcd_degree;
+    if divisor <= 0 || denom_degree % divisor != 0 {
+        return None;
+    }
+    let multiplicity = (denom_degree / divisor) as u32;
+    if multiplicity < 2 {
+        return None;
+    }
+    let base = denom.div_exact(&common)?;
+    // Confirm the power multiplicatively: mixed multiplicities fail here and
+    // fall back to factoring.
+    let rebuilt = base.pow(multiplicity)?;
+    if rebuilt.sub(denom)?.is_zero() {
+        Some((multiplicity, base))
+    } else {
+        None
+    }
+}
+
+/// Solve `A = B'C - (m-1)BC' + E C^(m-1)` exactly for `B` (deg < deg C) and
+/// `E` (deg < (m-1) deg C), or `None` when the system is inconsistent.
+///
+/// Each unknown contributes one column polynomial: the B entries through
+/// `j x^(j-1) C - (m-1) x^j C'`, the E entries through `x^k C^(m-1)`. The
+/// final algebraic check absorbs any column slip.
+fn hermite_step(a: &Poly, c: &Poly, multiplicity: u32) -> Option<(Poly, Poly)> {
+    let c_degree = c.degree()? as i64;
+    let repeat = (multiplicity - 1) as i64;
+    let c_prime = c.derivative()?;
+    let mut columns: Vec<Poly> = Vec::new();
+    for j in 0..c_degree {
+        let mut column = Poly::zero();
+        if j > 0 {
+            column = column
+                .add(&Poly::variable().pow((j - 1) as u32)?.mul(c)?)?
+                .scale(Rat::from_i64(j))?;
+        }
+        let shifted = Poly::variable()
+            .pow(j as u32)?
+            .mul(&c_prime)?
+            .scale(Rat::from_i64(repeat))?;
+        column = column.sub(&shifted)?;
+        columns.push(column);
+    }
+    for k in 0..(c_degree * repeat) as u32 {
+        columns.push(Poly::variable().pow(k)?.mul(&c.pow(multiplicity - 1)?)?);
+    }
+    // The E columns can overshoot the denominator's degree (x^(m-1)·degC-1
+    // times C^(m-1)); the equation's rows must span every power any column
+    // touches, with an exact consistency check on the excess rows.
+    let last = columns
+        .iter()
+        .chain(std::iter::once(a))
+        .filter_map(|column| column.degree())
+        .max()?
+        + 1;
+    let solution = solve_consistent(&columns, a, last)?;
+    let b = Poly::new(solution[..c_degree as usize].to_vec());
+    let residue = Poly::new(solution[c_degree as usize..].to_vec());
+    // A = B'C - (m-1) B C' + E C^(m-1), verified before the caller relies on
+    // the split.
+    let rebuilt = b
+        .derivative()?
+        .mul(c)?
+        .add(&b.mul(&c_prime)?.scale(Rat::from_i64(-repeat))?)?
+        .add(&residue.mul(&c.pow(multiplicity - 1)?)?)?;
+    if rebuilt.sub(a)?.is_zero() {
+        Some((b, residue))
+    } else {
+        None
+    }
+}
+
+/// Solve `columns · x = rhs` exactly over the rationals, row range `rows`,
+/// tolerating more rows than columns: Gaussian elimination with an exact
+/// consistency check on the discarded rows (a row that eliminates to
+/// `0 = non-zero` proves the system unsolvable, which is the Hermite
+/// reduction's non-existence signal for that shape).
+fn solve_consistent(columns: &[Poly], rhs: &Poly, rows: usize) -> Option<Vec<Rat>> {
+    let n = columns.len();
+    if n == 0 || rows == 0 {
+        return None;
+    }
+    // Augmented matrix: one row per power of x, one column per unknown plus
+    // the right-hand side.
+    let mut matrix = vec![vec![Rat::ZERO; n + 1]; rows];
+    for (column_index, column) in columns.iter().enumerate() {
+        for (row, slot) in matrix.iter_mut().enumerate() {
+            slot[column_index] = column.coeff(row);
+        }
+    }
+    for (row, slot) in matrix.iter_mut().enumerate() {
+        slot[n] = rhs.coeff(row);
+    }
+    // Forward elimination with pivoting.
+    let mut pivots: Vec<usize> = Vec::new();
+    let mut lead = 0usize;
+    for row in 0..rows.min(n) {
+        if lead >= n {
+            break;
+        }
+        let Some(pivot) = (row..rows).find(|probe| !matrix[*probe][lead].is_zero()) else {
+            lead += 1;
+            continue;
+        };
+        matrix.swap(row, pivot);
+        let factor = matrix[row][lead].recip()?;
+        for slot in matrix[row].iter_mut().skip(lead) {
+            *slot = slot.mul(factor)?;
+        }
+        for below in 0..rows {
+            if below == row || matrix[below][lead].is_zero() {
+                continue;
+            }
+            let weight = matrix[below][lead];
+            let pivot_row = matrix[row].clone();
+            for (slot, pivot_value) in matrix[below].iter_mut().zip(pivot_row.iter()) {
+                *slot = slot.sub(pivot_value.mul(weight)?)?;
+            }
+        }
+        pivots.push(lead);
+        lead += 1;
+    }
+    // Consistency: a row with no surviving coefficients must carry a zero
+    // right side — the over-determined rows (above the denominator degree)
+    // are exactly where an unsolvable Hermite shape shows up.
+    for entry in &matrix {
+        if entry[..n].iter().all(Rat::is_zero) && !entry[n].is_zero() {
+            return None;
+        }
+    }
+    // Back-substitute along the pivots; free columns stay zero.
+    let mut solution = vec![Rat::ZERO; n];
+    for (row, &column) in pivots.iter().enumerate() {
+        solution[column] = matrix[row][n];
+    }
+    Some(solution)
 }
 
 /// Solve the square system `columns * coefficients = numerator` for the partial

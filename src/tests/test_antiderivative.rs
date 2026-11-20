@@ -1331,3 +1331,80 @@ fn substitution_enumerates_candidates_and_picks_the_smallest() {
         derivative_check(&antiderivative, x, x.sin() * (x.cos() + 2.0));
     }
 }
+
+/// Hermite reduction peels repeated powers of the whole denominator without
+/// factoring it: 1/C^m = (B/((m-1) C^(m-1)))' + E/C^(m-1) solved exactly,
+/// feature-free, over the rationals. The peeled rational part lands even
+/// when the squarefree residue would need the algebraic feature - which is
+/// why 1/(x^2+2x+2)^2 comes out in closed form where its residue is a plain
+/// quadratic anyway.
+#[test]
+fn hermite_reduction_peels_repeated_denominator_powers() {
+    use crate::math::numeric::{FloatBridge, Real};
+
+    let derivative_check = |antiderivative: &Expr<Real>, x: f64, integrand: f64| {
+        let h = 1e-7;
+        let forward = antiderivative
+            .evaluate(Real::from_f64(x + h))
+            .value()
+            .expect("evaluates")
+            .clone();
+        let backward = antiderivative
+            .evaluate(Real::from_f64(x - h))
+            .value()
+            .expect("evaluates")
+            .clone();
+        let derivative = (forward - backward).to_real().as_f64() / (2.0 * h);
+        assert!(
+            (derivative - integrand).abs() < 1e-5,
+            "x = {x}: derivative {derivative}, integrand {integrand}"
+        );
+    };
+
+    // 1/(x^2+1)^3: the classic repeated quadratic. The Hermite peel lands
+    // x/(4 (x^2+1)^2) and the residue integrates through the existing
+    // quadratic term.
+    let expr = create_expr!("1/(x^2+1)^3").unwrap();
+    let antiderivative = expr.get_antiderivative().unwrap();
+    for x in [-1.2_f64, 0.5, 1.4] {
+        derivative_check(&antiderivative, x, 1.0 / (x * x + 1.0).powi(3));
+    }
+
+    // 1/(x^2+2x+2)^2: a shifted perfect square's square; the peel produces
+    // the (x+1)/(2 C) rational part and atan residue.
+    let expr = create_expr!("1/(x^2+2x+2)^2").unwrap();
+    let antiderivative = expr.get_antiderivative().unwrap();
+    for x in [-1.9_f64, -0.4, 1.0] {
+        derivative_check(&antiderivative, x, 1.0 / (x * x + 2.0 * x + 2.0).powi(2));
+    }
+}
+
+/// With the algebraic feature the Hermite peel plus factorisation cover
+/// perfect powers of irreducible cubics: 1/(x^3+2)^2 peels to
+/// (x/6)/(x^3+2) plus a factored-log residue, and the pure-derivative
+/// 3x^2/(x^3+2)^2 collapses to exactly -1/(x^3+2). The rendered forms carry
+/// rt_3/root-sum leaves that evaluate() does not fold, so the assertions
+/// are on integration success and shape - every result already passed the
+/// integrator's own numeric verification gate.
+#[test]
+#[cfg(feature = "algebraic")]
+fn hermite_repeated_cubic_powers_integrate() {
+    // The barrier case: without the peel this exact integral reported
+    // FeatureRequired, because the factoriser cannot split C^2 directly.
+    let expr = create_expr!("1/(x^3+2)^2").unwrap();
+    assert!(
+        expr.get_antiderivative().is_ok(),
+        "the cubic perfect power integrates through the peel"
+    );
+
+    // The pure derivative case: the peel must land the exact -1/(x^3+2).
+    let expr = create_expr!("3x^2/(x^3+2)^2").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("the derivative shape integrates through the peel");
+    let rendered = antiderivative.to_string();
+    assert!(
+        rendered.contains("- 1 / (x ^ 3 + 2)"),
+        "the peel should land the exact rational part, got: {rendered}"
+    );
+}
