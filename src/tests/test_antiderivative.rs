@@ -1150,3 +1150,59 @@ fn euler_substitution_integrates_radicand_rationals() {
         derivative_check(&antiderivative, x, x * x * (x * x + 1.0).sqrt());
     }
 }
+
+/// `P(x)·e^(ax)·sin^j·cos^k` with a genuine polynomial rides the
+/// undetermined-coefficients ansatz: one exact linear solve replaces the
+/// by-parts level per degree. Derivative checks; the closed forms from the
+/// ansatz differ by constants from any hand-derived one.
+#[test]
+fn ansatz_integrates_polynomial_exponential_trig() {
+    use crate::math::numeric::{FloatBridge, Real};
+
+    let derivative_check = |antiderivative: &Expr<Real>, x: f64, integrand: f64| {
+        let h = 1e-7;
+        let forward = antiderivative
+            .evaluate(Real::from_f64(x + h))
+            .value()
+            .expect("evaluates")
+            .clone();
+        let backward = antiderivative
+            .evaluate(Real::from_f64(x - h))
+            .value()
+            .expect("evaluates")
+            .clone();
+        let derivative = (forward - backward).to_real().as_f64() / (2.0 * h);
+        assert!(
+            (derivative - integrand).abs() < 1e-5,
+            "x = {x}: derivative {derivative}, integrand {integrand}"
+        );
+    };
+
+    // ∫ x^5 e^x dx: degree-5 exponential, the deepest by-parts chain.
+    let expr = create_expr!("x^5 e^x").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("a degree-5 exponential takes the ansatz");
+    for x in [-1.2_f64, 0.4, 1.1] {
+        derivative_check(&antiderivative, x, x.powi(5) * x.exp());
+    }
+
+    // ∫ x^3 e^(2x) sin(3x) dx: the by-parts nightmare - two nested
+    // exp-trig chains - collapses to one solve.
+    let expr = create_expr!("x^3 e^(2x) sin(3x)").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("an exponential-times-trig product takes the ansatz");
+    for x in [-0.9_f64, 0.2, 0.8] {
+        derivative_check(&antiderivative, x, x.powi(3) * (2.0 * x).exp() * (3.0 * x).sin());
+    }
+
+    // ∫ (x^2 + 1) cos(x) dx: a sum polynomial and a pure trig core.
+    let expr = create_expr!("(x^2 + 1) cos(x)").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("a polynomial-times-cosine takes the ansatz");
+    for x in [-1.5_f64, 0.3, 1.4] {
+        derivative_check(&antiderivative, x, (x * x + 1.0) * x.cos());
+    }
+}

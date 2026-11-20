@@ -38,6 +38,7 @@
 //! println!("{} steps, answer {}", solution.len(), solution.result());
 //! ```
 
+mod ansatz;
 mod binomial;
 mod helpers;
 mod rational;
@@ -975,6 +976,11 @@ where
         }
         // Exponential multiplied by sine or cosine.
         if let Some(result) = self.try_exponential_trig(node) {
+            return Ok(result);
+        }
+        // P(x)·e^(ax+c)·sin^j·cos^k by undetermined coefficients: one exact
+        // linear solve instead of a by-parts level per degree.
+        if let Some(result) = ansatz::try_ansatz(self, node) {
             return Ok(result);
         }
         // `sin`/`cos` of a logarithm: `sin(a ln x + b)`, `cos(a ln x + b)`.
