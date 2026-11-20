@@ -6,6 +6,33 @@ use crate::{
     math::structs::expr::Expr,
 };
 
+/// The antiderivative answers differ in shape across routes (each family has
+/// several equally valid closed forms), so the tests gate every closed form
+/// the same way: differentiate the found antiderivative as a central
+/// difference and compare against the integrand's point value. One tolerance
+/// serves all routes; it is the same check the integrator's verification gate
+/// applies internally.
+fn derivative_check(antiderivative: &Expr<Real>, x: f64, integrand: f64) {
+    use crate::math::numeric::FloatBridge;
+
+    let h = 1e-7;
+    let forward = antiderivative
+        .evaluate(Real::from_f64(x + h))
+        .value()
+        .expect("evaluates")
+        .clone();
+    let backward = antiderivative
+        .evaluate(Real::from_f64(x - h))
+        .value()
+        .expect("evaluates")
+        .clone();
+    let derivative = (forward - backward).to_real().as_f64() / (2.0 * h);
+    assert!(
+        (derivative - integrand).abs() < 1e-5,
+        "x = {x}: derivative {derivative}, integrand {integrand}"
+    );
+}
+
 /// `(integrand, antiderivative)` pairs. The constant of integration is
 /// intentionally omitted from the results.
 static EXAMPLES: [(&str, &str); 79] = [
@@ -1032,27 +1059,6 @@ fn chebyshev_covers_integral_binomial_powers() {
 fn weierstrass_substitution_integrates_trig_rationals() {
     use crate::math::numeric::{FloatBridge, Real};
 
-    // Derivative of the found antiderivative against the integrand, at points
-    // clear of the substitution's own singularities.
-    let derivative_check = |antiderivative: &Expr<Real>, x: f64, integrand: f64| {
-        let h = 1e-7;
-        let forward = antiderivative
-            .evaluate(Real::from_f64(x + h))
-            .value()
-            .expect("evaluates")
-            .clone();
-        let backward = antiderivative
-            .evaluate(Real::from_f64(x - h))
-            .value()
-            .expect("evaluates")
-            .clone();
-        let derivative = (forward - backward).to_real().as_f64() / (2.0 * h);
-        assert!(
-            (derivative - integrand).abs() < 1e-5,
-            "x = {x}: derivative {derivative}, integrand {integrand}"
-        );
-    };
-
     // ∫ dx/(1 + sin x): mixed denominator; the substitution lands at
     // -2/(tan(x/2) + 1), up to a constant one of the (tan x - sec x) family.
     let expr = create_expr!("1/(1 + sin(x))").unwrap();
@@ -1101,27 +1107,6 @@ fn weierstrass_substitution_integrates_trig_rationals() {
 /// level; the answers are checked by differentiating the antiderivative.
 #[test]
 fn euler_substitution_integrates_radicand_rationals() {
-    use crate::math::numeric::{FloatBridge, Real};
-
-    let derivative_check = |antiderivative: &Expr<Real>, x: f64, integrand: f64| {
-        let h = 1e-7;
-        let forward = antiderivative
-            .evaluate(Real::from_f64(x + h))
-            .value()
-            .expect("evaluates")
-            .clone();
-        let backward = antiderivative
-            .evaluate(Real::from_f64(x - h))
-            .value()
-            .expect("evaluates")
-            .clone();
-        let derivative = (forward - backward).to_real().as_f64() / (2.0 * h);
-        assert!(
-            (derivative - integrand).abs() < 1e-5,
-            "x = {x}: derivative {derivative}, integrand {integrand}"
-        );
-    };
-
     // ∫ x^2 / sqrt(x^2 - 1) dx = (x sqrt(x^2 - 1) + ln(x + sqrt(x^2 - 1)))/2.
     // Decreased x range: the verification samples keep real domains.
     let expr = create_expr!("x^2/sqrt(x^2 - 1)").unwrap();
@@ -1158,27 +1143,6 @@ fn euler_substitution_integrates_radicand_rationals() {
 /// ansatz differ by constants from any hand-derived one.
 #[test]
 fn ansatz_integrates_polynomial_exponential_trig() {
-    use crate::math::numeric::{FloatBridge, Real};
-
-    let derivative_check = |antiderivative: &Expr<Real>, x: f64, integrand: f64| {
-        let h = 1e-7;
-        let forward = antiderivative
-            .evaluate(Real::from_f64(x + h))
-            .value()
-            .expect("evaluates")
-            .clone();
-        let backward = antiderivative
-            .evaluate(Real::from_f64(x - h))
-            .value()
-            .expect("evaluates")
-            .clone();
-        let derivative = (forward - backward).to_real().as_f64() / (2.0 * h);
-        assert!(
-            (derivative - integrand).abs() < 1e-5,
-            "x = {x}: derivative {derivative}, integrand {integrand}"
-        );
-    };
-
     // ∫ x^5 e^x dx: degree-5 exponential, the deepest by-parts chain.
     let expr = create_expr!("x^5 e^x").unwrap();
     let antiderivative = expr
@@ -1288,27 +1252,6 @@ fn hyperexponential_integrals_solve_or_certificate() {
 /// choice. These shapes carry multiple rename candidates in one product.
 #[test]
 fn substitution_enumerates_candidates_and_picks_the_smallest() {
-    use crate::math::numeric::{FloatBridge, Real};
-
-    let derivative_check = |antiderivative: &Expr<Real>, x: f64, integrand: f64| {
-        let h = 1e-7;
-        let forward = antiderivative
-            .evaluate(Real::from_f64(x + h))
-            .value()
-            .expect("evaluates")
-            .clone();
-        let backward = antiderivative
-            .evaluate(Real::from_f64(x - h))
-            .value()
-            .expect("evaluates")
-            .clone();
-        let derivative = (forward - backward).to_real().as_f64() / (2.0 * h);
-        assert!(
-            (derivative - integrand).abs() < 1e-5,
-            "x = {x}: derivative {derivative}, integrand {integrand}"
-        );
-    };
-
     // 2x/(x^2+1): the denominator's derivative is proportional to the
     // remainder — the log case answers, shortest form ln(x^2+1).
     let expr = create_expr!("2x/(x^2+1)").unwrap();
@@ -1341,27 +1284,6 @@ fn substitution_enumerates_candidates_and_picks_the_smallest() {
 /// quadratic anyway.
 #[test]
 fn hermite_reduction_peels_repeated_denominator_powers() {
-    use crate::math::numeric::{FloatBridge, Real};
-
-    let derivative_check = |antiderivative: &Expr<Real>, x: f64, integrand: f64| {
-        let h = 1e-7;
-        let forward = antiderivative
-            .evaluate(Real::from_f64(x + h))
-            .value()
-            .expect("evaluates")
-            .clone();
-        let backward = antiderivative
-            .evaluate(Real::from_f64(x - h))
-            .value()
-            .expect("evaluates")
-            .clone();
-        let derivative = (forward - backward).to_real().as_f64() / (2.0 * h);
-        assert!(
-            (derivative - integrand).abs() < 1e-5,
-            "x = {x}: derivative {derivative}, integrand {integrand}"
-        );
-    };
-
     // 1/(x^2+1)^3: the classic repeated quadratic. The Hermite peel lands
     // x/(4 (x^2+1)^2) and the residue integrates through the existing
     // quadratic term.
@@ -1449,26 +1371,6 @@ fn numeric_quadrature_answers_definite_integrals() {
 #[test]
 fn special_function_table_closes_the_gaussian_and_over_linear_shapes() {
     use crate::math::numeric::{FloatBridge, Real};
-
-    // Derivative of the found antiderivative against the integrand.
-    let derivative_check = |antiderivative: &Expr<Real>, x: f64, integrand: f64| {
-        let h = 1e-7;
-        let forward = antiderivative
-            .evaluate(Real::from_f64(x + h))
-            .value()
-            .expect("evaluates")
-            .clone();
-        let backward = antiderivative
-            .evaluate(Real::from_f64(x - h))
-            .value()
-            .expect("evaluates")
-            .clone();
-        let derivative = (forward - backward).to_real().as_f64() / (2.0 * h);
-        assert!(
-            (derivative - integrand).abs() < 1e-5,
-            "x = {x}: derivative {derivative}, integrand {integrand}"
-        );
-    };
 
     // ∫ e^(-x²) dx = √π/2 · erf(x), rendered in the new function.
     let expr = create_expr!("e^(-x^2)").unwrap();
