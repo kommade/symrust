@@ -614,8 +614,37 @@ impl<T: SymbolicLeaf> Node<T> {
                 }
                 NodeInner::<T>::from_function(Func::Sqrt, simplified)
             }
-            t if t.is_empty() || t.is_operand() || t.is_fn() => {
+            t if t.is_empty() || t.is_operand() => {
                 self
+            }
+            // A generic function application (or its negation `0 - f(u)`).
+            // Unlike log and sqrt there is no rule table for these: the only
+            // simplification available is the argument's own. Skipping that
+            // recursion left `sin(9x + 4x)` with its sum forever unfolded
+            // while the same sum outside a function folded to `13 x`.
+            t if t.is_fn() => {
+                // Shape one: a plain `f(u)` applications keeps its argument
+                // on the right of the operator node.
+                if let NodeValue::Operator(op_node) = &t.value
+                    && let Token::Function(func) = &op_node.token
+                {
+                    let argument = op_node.right.clone();
+                    let simplified = argument.clone().simplify(expand, combine_fns);
+                    if simplified.shares_with(&argument) {
+                        return self;
+                    }
+                    return NodeInner::<T>::from_function(func.clone(), simplified);
+                }
+                // Shape two: the negation form `0 - f(u)`.
+                let NodeValue::Operator(op_node) = &t.value else {
+                    unreachable!("is_fn is an operator node")
+                };
+                let function = op_node.right.clone();
+                let simplified = function.clone().simplify(expand, combine_fns);
+                if simplified.shares_with(&function) {
+                    return self;
+                }
+                NodeInner::<T>::from_operation(Op::Sub, Node::<T>::zero(), simplified)
             }
             t if t.is_op_node() => {
                 let op_node = match &t.value {

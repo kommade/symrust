@@ -83,6 +83,35 @@ fn expr_simplify() {
     assert_eq!(expr.simplify(true).to_string(), "5 ln(2) / x");
 }
 
+/// Function arguments take part in simplification like the rest of the tree:
+/// the argument is rewritten and the function is rebuilt around it. Skipping
+/// the recursion left `sin(9x + 4x)` with an unfolded sum that the same sum
+/// outside a function would have folded.
+#[test]
+fn simplify_folds_inside_function_arguments() {
+    assert_eq!(
+        create_expr!("sin(9x + 4x)").unwrap().simplify(true).to_string(),
+        "sin(13 x)"
+    );
+    // The function wrapper survives the rewrite of its argument; without
+    // expansion a completed-square argument stays whole.
+    assert_eq!(
+        create_expr!("atan((x + 1) / 2) / 2")
+            .unwrap()
+            .simplify(false)
+            .to_string(),
+        "atan((x + 1) / 2) / 2"
+    );
+    // The negation form `0 - f(u)` simplifies its argument too.
+    assert_eq!(
+        create_expr!("0 - cos(2x + 3x)")
+            .unwrap()
+            .simplify(true)
+            .to_string(),
+        "-cos(5 x)"
+    );
+}
+
 /// `simplify` must collapse `sqrt(a)^n` for even `n` and parse `a^-n` as
 /// `a^(-n)` rather than as a subtraction.
 #[test]

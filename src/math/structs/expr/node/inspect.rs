@@ -388,9 +388,15 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                 Token::Float(num) => Some(num.clone()),
                 Token::Rational(value) => Some(value.to_leaf()),
                 Token::Constant(k) => Some(k.get_value()),
-                // Narrative tokens (`∫ f dx`, `d f/dx`) never evaluate.
-                Token::Integral(..) | Token::DerivativeOf(..) => None,
-                _ => unreachable!("NodeInner::evaluate: unexpected token {token:?}"),
+                // Narrative tokens (`∫ f dx`, `d f/dx`) never evaluate, and
+                // neither do matrix or vector values: `evaluate` reads a
+                // *scalar*, and a matrix node (a scalar times a matrix, say)
+                // simply has no scalar reading here. This is not unreachable:
+                // [`Expr::tidy`] runs evaluate on whole results, which can
+                // legitimately end in a matrix token.
+                Token::Integral(..) | Token::DerivativeOf(..) | Token::Matrix(..)
+                | Token::Vector(..) => None,
+                _ => unreachable!("NodeInner::evaluate: unexpected token {token}"),
             },
             NodeValue::Operator(op_node) => match &op_node.token {
                 Token::Operator(op) => {

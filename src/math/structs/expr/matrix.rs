@@ -4,7 +4,7 @@
 //! parses into an expression like any other value:
 //!
 //! ```
-//! use rust_calculus::create_expr;
+//! use symrust::create_expr;
 //! let matrix = create_expr!("[[1, 2], [3, 4]]").unwrap();
 //! assert!(matrix.is_matrix());
 //! ```
@@ -45,6 +45,25 @@ where
     #[must_use]
     pub fn is_matrix(&self) -> bool {
         self.as_matrix().is_some()
+    }
+
+    /// Wrap a matrix of expressions back up as a single matrix expression.
+    ///
+    /// This is [`as_matrix`][Self::as_matrix] read backward: an answer
+    /// computed entry by entry (a determinant product, a QR factor) becomes
+    /// an expression again and renders, nests and feeds back into further
+    /// operations like any other matrix value.
+    #[must_use]
+    pub fn from_matrix(matrix: Matrix<Expr<T>>) -> Self {
+        Expr::from_node(Node::matrix(matrix))
+    }
+
+    /// Wrap a vector of expressions back up as a single vector expression.
+    ///
+    /// This is [`as_vector`][Self::as_vector] read backward.
+    #[must_use]
+    pub fn from_vector(vector: Vector<Expr<T>>) -> Self {
+        Expr::from_node(Node::vector(vector))
     }
 
     /// The vector this expression holds, or `None` when it is not a vector.
@@ -425,7 +444,7 @@ where
 /// `[1, 2, 3]` parses to an expression like any other value:
 ///
 /// ```
-/// use rust_calculus::create_expr;
+/// use symrust::create_expr;
 /// let vector = create_expr!("[1, 2, 3]").unwrap();
 /// assert!(vector.is_vector());
 /// ```
