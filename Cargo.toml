@@ -1,6 +1,6 @@
 [package]
-name = "rust-calculus"
-version = "0.1.1"
+name = "symrust"
+version = "0.1.2"
 edition = "2024"
 
 [dependencies]
@@ -8,8 +8,7 @@ arpfloat = "=0.1.10"
 
 [features]
 default = []
-# Enables the crate's `Complex` number type. Off by default: with it disabled
-# none of the extra code is compiled, so there is zero runtime cost. Combined
+# Enables the crate's `Complex` number type. Combined
 # with `algebraic` it additionally enables the exact roots-of-unity integration
 # of cyclotomic denominators (which factors over C using `Complex` residues).
 complex = []
