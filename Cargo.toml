@@ -3,8 +3,16 @@ name = "symrust"
 version = "0.1.2"
 edition = "2024"
 
+[lib]
+name = "symrust"
+path = "src/lib.rs"
+
 [dependencies]
 arpfloat = "=0.1.10"
+# The `symr` REPL's line editor (src/bin/repl). Optional and consumed only
+# through the `repl` feature below, so a plain build of the library — or a
+# build that merely depends on it — never compiles any of this.
+rustyline = { version = "19.0.0", optional = true }
 
 [features]
 default = []
@@ -25,4 +33,18 @@ algebraic = ["generic_const"]
 # is an unstable feature and may not be available on all Rust versions. It is
 # off by default to maintain compatibility with stable Rust.
 generic_const = []
+# Dependency feature for the `symr` REPL binary (src/bin/repl). Declared with
+# `dep:` so enabling it never exposes `rustyline` through the library itself:
+# the only consumer of the dependency is the binary via `required-features`.
+repl = ["dep:rustyline"]
+
+[[bin]]
+name = "symr"
+path = "src/bin/repl/main.rs"
+# The line editor exists only behind `repl`, so without that feature the
+# binary is not built at all: `required-features` drops it from cargo's
+# target set, and a crate depending on this package builds only the [lib]
+# target anyway, so the REPL never compiles for library users. Run it with
+# `cargo run --features repl --bin symr`.
+required-features = ["repl"]
 
