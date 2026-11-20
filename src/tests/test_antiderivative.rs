@@ -1206,3 +1206,78 @@ fn ansatz_integrates_polynomial_exponential_trig() {
         derivative_check(&antiderivative, x, (x * x + 1.0) * x.cos());
     }
 }
+
+/// P(x)·e^(g(x)) with polynomial g of degree two or more: the coefficient
+/// equation q' + g'·q = P either yields the exact antiderivative q·e^g, or is
+/// provably inconsistent — and then the integrator reports a proof of
+/// non-elementarity instead of burning the search budget on a doomed
+/// recursion.
+#[test]
+fn hyperexponential_integrals_solve_or_certificate() {
+    use crate::math::calculus::antiderivative::IntegrationError;
+    use crate::math::numeric::{FloatBridge, Real};
+
+    // ∫ x e^(x^2) dx = e^(x^2)/2 — the coefficient solve (q = 1/2 exact).
+    let expr = create_expr!("x e^(x^2)").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("the x e^(x^2) core solves exactly");
+    for x in [-1.1_f64, 0.3, 0.9] {
+        let found = antiderivative
+            .evaluate(Real::from_f64(x))
+            .value()
+            .expect("the antiderivative evaluates")
+            .clone();
+        let expected = (x * x).exp() / 2.0;
+        assert!(
+            (found.to_real().as_f64() - expected).abs() < 1e-10,
+            "x = {x}: found {}, expected {expected}",
+            found.to_real().as_f64()
+        );
+    }
+
+    // ∫ x^2 e^(x^3) dx = e^(x^3)/3.
+    let expr = create_expr!("x^2 e^(x^3)").unwrap();
+    let antiderivative = expr
+        .get_antiderivative()
+        .expect("the x^2 e^(x^3) core solves exactly");
+    for x in [-1.2_f64, 0.4, 1.0] {
+        let found = antiderivative
+            .evaluate(Real::from_f64(x))
+            .value()
+            .expect("the antiderivative evaluates")
+            .clone();
+        let expected = (x.powi(3)).exp() / 3.0;
+        assert!(
+            (found.to_real().as_f64() - expected).abs() < 1e-10,
+            "x = {x}: found {}, expected {expected}",
+            found.to_real().as_f64()
+        );
+    }
+
+    // ∫ e^(x^2) dx: Hermite's q' + 2x·q = 1 has no polynomial solution, so
+    // the certificate refuses with a PROOF — and the error names the
+    // criterion and the equation.
+    match create_expr!("e^(x^2)").unwrap().get_antiderivative() {
+        Err(IntegrationError::Unsupported(message)) => {
+            assert!(
+                message.contains("no elementary antiderivative exists")
+                    && message.contains("q' + 2 x·q = 1"),
+                "the refusal should carry the Liouville proof, got: {message}"
+            );
+        }
+        other => panic!("expected a non-elementarity proof, got {other:?}"),
+    }
+
+    // Same for the prefactored e^(x^2)·(x+1) — no proportional ratio exists,
+    // and the coefficient solve proves none does, exactly and immediately.
+    match create_expr!("(x + 1) e^(x^2)").unwrap().get_antiderivative() {
+        Err(IntegrationError::Unsupported(message)) => {
+            assert!(
+                message.contains("no rational solution"),
+                "the refusal should carry the proof, got: {message}"
+            );
+        }
+        other => panic!("expected a non-elementarity proof, got {other:?}"),
+    }
+}

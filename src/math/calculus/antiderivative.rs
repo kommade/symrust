@@ -41,6 +41,7 @@
 mod ansatz;
 mod binomial;
 mod helpers;
+mod hyperexponential;
 mod rational;
 mod sqrt_rational;
 mod trig;
@@ -1006,6 +1007,15 @@ where
                     feature: "algebraic",
                 });
             }
+        }
+        // A polynomial riding a polynomial exponent with base e: the
+        // coefficient solve either produces q·e^(g) or PROVES the integral
+        // non-elementary. Running before the substitution search means the
+        // refusal lands without burning the budget.
+        match hyperexponential::try_hyperexponential(self, node) {
+            Ok(Some(result)) => return Ok(result),
+            Ok(None) => {}
+            Err(error) => return Err(error),
         }
         // Substitution.
         if let Some(result) = self.try_substitution(node)? {
