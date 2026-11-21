@@ -23,6 +23,9 @@ use super::command::{self, Command, RESERVED};
 /// The automatic name the previous answer is bound under.
 const ANS: &str = "ans";
 
+/// The deepest a command may nest other commands (`:d :simp :expand x`).
+const INLINE_COMMAND_MAX: usize = 8;
+
 /// What executing one command wants from the outer loop.
 pub enum Outcome {
     /// The value of a computation, printed as `= value` — or as `=` followed
@@ -30,6 +33,9 @@ pub enum Outcome {
     Value(String),
     /// Anything that is not a single value: narratives, listings, statements.
     Remark(String),
+    /// A stored-name binding, printed as `name = value` with the same
+    /// multi-line handling a value gets.
+    Binding { name: String, value_text: String },
     /// Leave the REPL.
     Quit,
 }
@@ -40,6 +46,9 @@ pub struct App {
     current: Option<Expr<Real>>,
     /// Named expressions, substituted into every parsed expression.
     names: BTreeMap<String, Expr<Real>>,
+    /// How many inline commands are currently executing; `execute` starts
+    /// every top-level run at zero.
+    inline_depth: usize,
 }
 
 impl App {
@@ -48,6 +57,7 @@ impl App {
         Self {
             current: None,
             names: BTreeMap::new(),
+            inline_depth: 0,
         }
     }
 
@@ -57,6 +67,7 @@ impl App {
     /// After every success the produced answer (if the command has one) is
     /// bound as `ans` so the next line can refer to it.
     pub fn execute(&mut self, command: Command) -> Result<Outcome, String> {
+        self.inline_depth = 0;
         let outcome = self.run(command)?;
         if let Some(value) = self.current.clone() {
             self.names.insert(ANS.to_string(), value);
@@ -143,34 +154,53 @@ impl App {
                         "'{name}' is a reserved name (the session's {ANS}, the lexer's keywords)"
                     ));
                 }
-                // The right side may be a command: `poly = :simp poly` runs
-                // the command and stores its expression result.
-                if let Some(command_text) = expr.strip_prefix(':') {
-                    let command = command::parse_command_line(command_text)?
-                        .ok_or_else(|| "missing the command after '='".to_string())?;
-                    if !produces_value(&command) {
-                        return Err(
-                            "that command does not produce an expression value — see :help"
-                                .to_string(),
-                        );
+                // A name on its own right side may only refer to a PREVIOUS
+                // binding: with none, `poly` would parse as a product of
+                // letters and the definition would silently store nonsense.
+                if !self.names.contains_key(&name) {
+                    let references_self = expr
+                        .split(|c: char| !c.is_ascii_alphabetic())
+                        .any(|word| word == name);
+                    if references_self {
+                        return Err(format!(
+                            "'{name}' is not defined yet — the name on the right side of its \
+                             own definition refers to the previous value"
+                        ));
                     }
-                    let inner = self.run(command)?;
-                    let bound = self.current.clone().ok_or_else(|| {
-                        "the command produced no expression to store".to_string()
-                    })?;
-                    let mut output = match inner {
-                        Outcome::Value(text) => format!("= {text}\n"),
-                        Outcome::Remark(text) => format!("{text}\n"),
-                        Outcome::Quit => return Ok(Outcome::Quit),
-                    };
-                    self.names.insert(name.clone(), bound.clone());
-                    output.push_str(&format!("{name} = {bound}"));
-                    Ok(Outcome::Remark(output))
-                } else {
-                    let bound = self.parse_expr(&expr)?;
-                    self.names.insert(name.clone(), bound.clone());
-                    Ok(Outcome::Remark(format!("{name} = {bound}")))
                 }
+                // The right side may be a command: `poly = :expand poly`
+                // runs the command and stores its result. A narrative the
+                // command may have produced (:ds, :ints, ...) is kept; a
+                // plain value is not echoed separately, since the binding
+                // below already shows it.
+                let bound = if let Some(command_text) = expr.strip_prefix(':') {
+                    match self.run_inline(command_text)? {
+                        Outcome::Quit => return Ok(Outcome::Quit),
+                        Outcome::Remark(narrative) => {
+                            let bound = self.current.clone().ok_or_else(|| {
+                                "the command produced no expression to store".to_string()
+                            })?;
+                            let value_text = bound.to_string();
+                            self.names.insert(name.clone(), bound);
+                            return Ok(Outcome::Remark(format!(
+                                "{narrative}\n{name} = {value_text}"
+                            )));
+                        }
+                        // A plain value is not echoed separately: the
+                        // binding prints it once below.
+                        Outcome::Value(_) | Outcome::Binding { .. } => {}
+                    }
+                    self.current.clone().ok_or_else(|| {
+                        "the command produced no expression to store".to_string()
+                    })?
+                } else {
+                    self.parse_expr(&expr)?
+                };
+                self.names.insert(name.clone(), bound.clone());
+                Ok(Outcome::Binding {
+                    name,
+                    value_text: bound.to_string(),
+                })
             }
             Command::Undefine(name) => {
                 if name == ANS {
@@ -189,7 +219,12 @@ impl App {
                 }
                 let mut output = String::new();
                 for (name, bound) in &self.names {
-                    output.push_str(&format!("{name} = {bound}\n"));
+                    let text = bound.to_string();
+                    if text.contains('\n') {
+                        output.push_str(&format!("{name} =\n{text}\n"));
+                    } else {
+                        output.push_str(&format!("{name} = {text}\n"));
+                    }
                 }
                 Ok(Outcome::Remark(output.trim_end().to_string()))
             }
@@ -297,35 +332,44 @@ impl App {
             }
             Command::Eigen(argument) => {
                 let expr = self.argument(argument)?;
-                let values: Vec<Expr<Real>> = expr
-                    .eigenvalues()
-                    .map_err(sym_err)?
-                    .into_iter()
-                    .map(readable)
+                let spaces = match expr.eigenspaces() {
+                    Ok(spaces) => spaces,
+                    // Only an eigenvalue that cannot be found at all is a
+                    // failure here. A matrix that is not diagonalisable
+                    // still has eigenvectors, and they are printed like any
+                    // other — that is the note at the bottom, not an error.
+                    Err(error) => {
+                        return Ok(Outcome::Remark(format!("eigenvalues: none ({error})")));
+                    }
+                };
+                let eigen_texts: Vec<String> = spaces
+                    .iter()
+                    .map(|(lambda, _)| eigen_value_text(lambda))
                     .collect();
-                let mut output = format!(
-                    "eigenvalues: {}",
-                    values
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-                // A matrix can have eigenvalues it is not diagonalisable
-                // over; the vectors are then simply not available.
-                match expr.eigenvectors() {
-                    Ok(vectors) => {
-                        output.push_str("\neigenvectors (columns of each matrix):\n");
-                        for (index, vector) in vectors.iter().enumerate() {
-                            output.push_str(&format!(
-                                "  for eigenvalue {index}:\n{}",
-                                readable(vector.clone())
-                            ));
+                let directions: usize = spaces.iter().map(|(_, basis)| basis.len()).sum();
+                let rows = expr.as_matrix().map_or(0, |matrix| matrix.rows());
+                let mut output = format!("eigenvalues: {}", eigen_texts.join(", "));
+                output.push_str("\neigenvectors (one basis per eigenspace):");
+                for (lambda, basis) in &spaces {
+                    output.push_str(&format!(
+                        "\n  for eigenvalue {}:",
+                        eigen_value_text(lambda)
+                    ));
+                    if basis.is_empty() {
+                        output.push_str("\n    (none)");
+                    }
+                    for vector in basis {
+                        let rendered = eigenvector_text(vector, lambda.is_float_leaf());
+                        for line in rendered.lines() {
+                            output.push_str(&format!("\n    {line}"));
                         }
                     }
-                    Err(error) => {
-                        output.push_str(&format!("\neigenvectors: none ({error})"));
-                    }
+                }
+                if directions < rows {
+                    output.push_str(&format!(
+                        "\nonly {directions} of {rows} eigenvector directions, so the matrix \
+                         is not diagonalisable — it still has exactly these eigenvectors"
+                    ));
                 }
                 Ok(Outcome::Remark(output))
             }
@@ -483,6 +527,18 @@ impl App {
     fn argument(&mut self, argument: Option<String>) -> Result<Expr<Real>, String> {
         match argument {
             Some(text) => {
+                // A nested command: run it and hand its result over, so
+                // `:det :simp m` and `:roots :expand ans` compose.
+                if let Some(inline) = text.strip_prefix(':') {
+                    if let Outcome::Quit = self.run_inline(inline)? {
+                        return Err(
+                            "cannot use :quit inside a command argument".to_string(),
+                        );
+                    }
+                    return self.current.clone().ok_or_else(|| {
+                        "the command produced no expression to hand over".to_string()
+                    });
+                }
                 let expr = self.parse_expr(&text)?;
                 self.current = Some(expr.clone());
                 Ok(expr)
@@ -494,26 +550,53 @@ impl App {
     }
 
     /// Parse an expression in the default leaf type ([`Real`]), splicing the
-    /// stored names in as trees. The library's parse error (which points at
-    /// the offending position) becomes the message.
+    /// stored names in as trees and folding the value arithmetic (matrix and
+    /// vector products, sums, powers) the parse produced. The library's parse
+    /// error (which points at the offending position) becomes the message.
     fn parse_expr(&self, text: &str) -> Result<Expr<Real>, String> {
         let (template, splices) = self.template_with_names(text)?;
         let parsed = create_expr!(template).map_err(sym_err)?;
-        if splices.is_empty() {
-            return Ok(parsed);
-        }
-        // Trees, not text: each stored name's tree is grafted into the
-        // template at its placeholder leaf. This is what lets a matrix
-        // survive under a name — a matrix's *display* form is not
-        // re-parseable, and the text round-trip that the first substitution
-        // implementation relied on corrupted exactly that.
-        let replacements: Vec<Node<Real>> =
-            splices.iter().map(|expr| expr.tree().clone()).collect();
-        Ok(Expr::from_node(
+        let spliced = if splices.is_empty() {
             parsed
-                .tree()
-                .graft_number_leaves(PLACEHOLDER_BASE, &replacements),
-        ))
+        } else {
+            // Trees, not text: each stored name's tree is grafted into the
+            // template at its placeholder leaf. This is what lets a matrix
+            // survive under a name — a matrix's *display* form is not
+            // re-parseable, and the text round-trip that the first
+            // substitution implementation relied on corrupted exactly that.
+            let replacements: Vec<Node<Real>> =
+                splices.iter().map(|expr| expr.tree().clone()).collect();
+            Expr::from_node(
+                parsed
+                    .tree()
+                    .graft_number_leaves(PLACEHOLDER_BASE, &replacements),
+            )
+        };
+        spliced.fold_value_operators().map_err(sym_err)
+    }
+
+    /// Execute a command spelled inline — an argument like `:d :simp 2x^2`,
+    /// or the right side of a definition (`poly = :expand poly`). The command
+    /// runs with the session state as-is; the caller reads the result from
+    /// [`App::current`]. Nesting is capped so `:d :d :d ...` cannot recurse
+    /// forever.
+    fn run_inline(&mut self, command_text: &str) -> Result<Outcome, String> {
+        if self.inline_depth >= INLINE_COMMAND_MAX {
+            return Err(format!(
+                "commands nested more than {INLINE_COMMAND_MAX} deep are not supported"
+            ));
+        }
+        let command = command::parse_command_line(command_text)?
+            .ok_or_else(|| "missing the command".to_string())?;
+        if !produces_value(&command) {
+            return Err(
+                "that command does not produce an expression value — see :help".to_string(),
+            );
+        }
+        self.inline_depth += 1;
+        let outcome = self.run(command);
+        self.inline_depth -= 1;
+        outcome
     }
 
     /// Build the placeholder template for `text`.
@@ -620,7 +703,8 @@ impl App {
 const PLACEHOLDER_BASE: i64 = 9_000_000_000_000_000_000;
 
 /// Whether a command leaves an expression in `current` — the set that may
-/// appear on the right side of a definition (`poly = :simp poly`).
+/// appear on the right side of a definition (`poly = :simp poly`) or as a
+/// nested command argument (`:det :simp m`).
 const fn produces_value(command: &Command) -> bool {
     matches!(
         command,
@@ -678,6 +762,70 @@ fn sym_err<E: Display>(error: E) -> String {
     error.to_string()
 }
 
+/// Render one eigenvalue.
+///
+/// An approximate eigenvalue travels out of the solver as a bare float leaf —
+/// the isolated irrational root of the characteristic polynomial. Formatting
+/// it through the ordinary [`readable`] pass would let the readability fold
+/// replace it with a nearby fraction that is not a root of anything, so a
+/// bare float prints as a trimmed decimal with an approximation marker. Exact
+/// eigenvalues (rational roots, radical forms) print as themselves.
+fn eigen_value_text(expr: &Expr<Real>) -> String {
+    if expr.is_float_leaf() {
+        let digits = expr
+            .evaluate(0.0_f64)
+            .value()
+            .map(|value| format!("{value:.12}"));
+        return format!(
+            "≈ {}",
+            digits.unwrap_or_else(|| expr.to_string())
+        );
+    }
+    expr.to_string()
+}
+
+/// Render one eigenvector, as a one-entry-per-line column.
+///
+/// Eigenvectors found for an approximate eigenvalue are themselves only
+/// known approximately, and the FP128 residues their null-space read-off
+/// leaves fold into unwieldy exact fractions; such a vector prints as
+/// ≈-marked decimal entries. Vectors of exact eigenvalues keep their exact
+/// tree, tidied entry by entry.
+fn eigenvector_text(vector: &Expr<Real>, approximate: bool) -> String {
+    if !approximate {
+        return readable(vector.clone()).to_string();
+    }
+    let entries = match vector.as_matrix() {
+        Some(matrix) if matrix.columns() == 1 => (0..matrix.rows())
+            .map(|row| matrix[row][0].clone())
+            .collect::<Vec<_>>(),
+        // Not a one-column matrix after all: fall back to the ordinary
+        // multi-line rendering.
+        _ => return readable(vector.clone()).to_string(),
+    };
+    let texts: Vec<String> = entries
+        .iter()
+        .map(|entry| match entry.clone().evaluate(0.0_f64).value() {
+            Some(value) => format!("≈ {value:.12}"),
+            // A symbolic entry cannot be approximated; show the tree.
+            None => readable(entry.clone()).to_string(),
+        })
+        .collect();
+    let width = texts
+        .iter()
+        .map(|text| text.chars().count())
+        .max()
+        .unwrap_or(0);
+    texts
+        .iter()
+        .map(|text| {
+            let pad = " ".repeat(width.saturating_sub(text.chars().count()));
+            format!("[{pad}{text}]")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Fold a linear-algebra answer into readable form.
 ///
 /// Composition commands return whole matrices whose entries are raw
@@ -714,7 +862,8 @@ symr -- symbolic calculus REPL over the symrust library
 
 A bare input parses an expression and makes it the current one. Most
 commands take an optional expression argument; without one they transform
-the current expression, so `2x^2`, `:d`, `:int 0 3` chains.
+the current expression, so `2x^2`, `:d`, `:int 0 3` chains. An argument may
+itself be a command (`:det :simp m`), nested up to 8 deep.
 
   <expr>                     parse, set current      e.g. 2x^2 + sin(x)
   :d [<expr>]                derivative
@@ -757,7 +906,9 @@ answer:
   :det / :dets [<M>]         determinant (steps)
   :inv / :invs [<M>]         inverse (steps)
   :rank / :nullity [<M>]     rank and nullity (do not change current)
-  :eigen / :eigens [<M>]     eigenvalues and eigenvectors (steps)
+  :eigen / :eigens [<M>]     eigenvalues and eigenvectors, a basis per
+                             eigenspace (steps). A non-diagonalisable
+                             matrix still shows its eigenvectors
   :lu / :lus [<M>]           LU factorisation, as the product L*U (steps)
   :qr / :qrs [<M>]           QR factorisation, as the product Q*R (steps)
   :diag [<M>]                diagonalisation, as the product P*D*P^-1

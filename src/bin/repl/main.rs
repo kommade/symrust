@@ -119,6 +119,11 @@ fn run_line(app: &mut App, line: &str) -> bool {
 /// onto the first row would bury it in the middle of the shape.
 fn print_outcome(outcome: &Outcome) {
     match outcome {
+        Outcome::Binding { name, value_text } if value_text.contains('\n') => {
+            println!("{name} =");
+            println!("{}", value_text.trim_end());
+        }
+        Outcome::Binding { name, value_text } => println!("{name} = {value_text}"),
         Outcome::Value(text) if text.contains('\n') => {
             println!("=");
             println!("{}", text.trim_end());
