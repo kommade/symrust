@@ -36,7 +36,11 @@ generic_const = []
 # Dependency feature for the `symr` REPL binary (src/bin/repl). Declared with
 # `dep:` so enabling it never exposes `rustyline` through the library itself:
 # the only consumer of the dependency is the binary via `required-features`.
-repl = ["dep:rustyline"]
+# The binary also turns on every library feature — it is the crate's own
+# front end, so it carries the whole surface (exact algebraic roots, the
+# complex field) without imposing any of it on dependents, who never build
+# the bin target.
+repl = ["dep:rustyline", "algebraic", "complex"]
 
 [[bin]]
 name = "symr"

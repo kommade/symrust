@@ -18,6 +18,10 @@ pub use error::ExprError;
 pub use evaluate::{Evaluable, Evaluated};
 pub use limit::Limit;
 
+mod closed_form;
+#[cfg(feature = "algebraic")]
+pub mod roots;
+
 /// A struct representing a mathematical expression.
 ///
 /// The expression tree is generic over its leaf number type `T`, which defaults

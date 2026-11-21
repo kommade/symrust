@@ -15,6 +15,7 @@
 //!
 //! Enabled by the `algebraic` feature.
 
+use super::factorization::find_rational_root;
 use super::{polynomial::Poly, rational::Rat};
 use crate::math::structs::expr::node::Node;
 
@@ -778,5 +779,84 @@ impl Poly {
             .collect();
         roots.sort();
         roots
+    }
+
+    /// Every distinct real root, preferring exact rational form.
+    ///
+    /// Rational roots are found by the rational-root theorem and returned as
+    /// exact [`Rat`] values; what remains after they are divided out is handed
+    /// to [`Poly::real_roots`] and returned as [`RealAlgebraic`] isolations.
+    /// The result is ordered by value from smallest to largest.
+    ///
+    /// Returns an empty vector for a constant or zero polynomial.
+    #[must_use]
+    pub fn exact_real_roots(&self) -> Vec<RealRoot> {
+        let mut rationals: Vec<Rat> = Vec::new();
+        let mut remaining = self.clone();
+        while let Some(degree) = remaining.degree() {
+            if degree == 0 || remaining.is_zero() {
+                break;
+            }
+            // The rational-root theorem delivers every rational root exactly;
+            // dividing each linear factor out as it is found drives the
+            // polynomial down to its irrational part.
+            let Some(root) = find_rational_root(&remaining) else {
+                break;
+            };
+            let linear = Poly::new(vec![root.neg(), Rat::ONE]);
+            let Some(quotient) = remaining.div_exact(&linear) else {
+                break;
+            };
+            rationals.push(root);
+            remaining = quotient;
+        }
+        rationals.sort();
+        rationals.dedup();
+
+        let mut roots: Vec<RealRoot> = rationals.into_iter().map(RealRoot::Rational).collect();
+        if remaining.degree().is_some_and(|degree| degree >= 1) && !remaining.is_zero() {
+            for isolated in remaining.real_roots() {
+                roots.push(RealRoot::Isolated(isolated));
+            }
+        }
+        roots.sort_by(|left, right| {
+            left.to_f64()
+                .total_cmp(&right.to_f64())
+        });
+        roots
+    }
+}
+
+/// One real root of a polynomial: exact when the root is rational, isolated
+/// (and then carried by its defining polynomial and interval) otherwise.
+#[derive(Debug, Clone)]
+pub enum RealRoot {
+    /// A root that is an exact rational number.
+    Rational(Rat),
+    /// An irrational real root, exactly isolated between two rationals.
+    Isolated(RealAlgebraic),
+}
+
+impl RealRoot {
+    /// The numeric value of the root, exact for the rational case and a
+    /// ~15-digit approximation for the isolated case.
+    #[must_use]
+    pub fn to_f64(&self) -> f64 {
+        match self {
+            Self::Rational(value) => value.to_f64(),
+            Self::Isolated(root) => root.to_f64(),
+        }
+    }
+}
+
+impl std::fmt::Display for RealRoot {
+    /// Rational roots print exactly; the isolated ones print as a decimal
+    /// approximation prefixed with `≈`, their exact identity living in the
+    /// [`RealAlgebraic`] they carry.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Rational(value) => write!(f, "{value}"),
+            Self::Isolated(root) => write!(f, "≈ {}", root.to_f64()),
+        }
     }
 }

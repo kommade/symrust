@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use std::fmt::Display;
 
-
+use super::closed_form;
 use crate::math::numeric::{ExpressionScalar, FloatBridge, FloatType, Real, SymbolicLeaf};
 use crate::math::parse::lexer::{Const, Func, Op, Token};
 use crate::math::structs::expr::{Expr, Node, NodeInner, node::NodeValue};
@@ -264,14 +264,19 @@ where
             }
             _ => None,
         },
-        // Function values stay symbolic in the exact mode: `sin(pi / 6)`
-        // keeps its closed form instead of a decimal approximation, and the
-        // substituted parts around it are still folded.
-        Token::Function(_) if keep_irrationals => None,
-        Token::Function(func) => right_step
-            .value
-            .clone()
-            .map(|argument| apply_function(func, argument)),
+        // A function with a recognised closed form (`sin` at a rational
+        // multiple of π, `ln` at `e`) folds to its exact value in both modes:
+        // folding `sin(pi)` to exactly `0` is not a decimal decay. Everything
+        // else stays symbolic in the exact mode (`sqrt(1 / 4)` above) and
+        // folds numerically in the ordinary mode.
+        Token::Function(func) => match closed_form::of(func, &right_step.node) {
+            Some(value) => Some(T::from_real(value)),
+            None if keep_irrationals => None,
+            None => right_step
+                .value
+                .clone()
+                .map(|argument| apply_function(func, argument)),
+        },
         _ => None,
     };
 

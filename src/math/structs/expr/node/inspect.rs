@@ -393,9 +393,12 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                 // *scalar*, and a matrix node (a scalar times a matrix, say)
                 // simply has no scalar reading here. This is not unreachable:
                 // [`Expr::tidy`] runs evaluate on whole results, which can
-                // legitimately end in a matrix token.
+                // legitimately end in a matrix token. A free variable (letter
+                // other than the independent variable, which the `has_indp`
+                // gate above already excluded) and a formal root-sum token
+                // have no binding on this path either.
                 Token::Integral(..) | Token::DerivativeOf(..) | Token::Matrix(..)
-                | Token::Vector(..) => None,
+                | Token::Vector(..) | Token::Var(..) | Token::RootSum(..) => None,
                 _ => unreachable!("NodeInner::evaluate: unexpected token {token}"),
             },
             NodeValue::Operator(op_node) => match &op_node.token {

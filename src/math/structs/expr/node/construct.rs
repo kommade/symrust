@@ -127,6 +127,152 @@ impl<T: FloatType + Display> Node<T> {
     pub fn vector(vector: crate::math::algebra::linear::Vector<crate::math::structs::expr::Expr<T>>) -> Self {
         NodeInner::operand(Token::Vector(vector)).wrap()
     }
+
+    /// Rebuild this tree, replacing selected integer leaves with other trees.
+    ///
+    /// An integer leaf whose value is at least `base` is replaced by the tree
+    /// at `replacements[value - base]`. This is how a caller splices parsed
+    /// trees into a template composed at the text level: the placeholders are
+    /// ordinary integer leaves, so the template parses like any expression,
+    /// and the graft turns it into the composed tree without a round-trip
+    /// through rendered text — which matters for values such as matrices,
+    /// whose display form is not re-parseable.
+    ///
+    /// Matrix and vector tokens are entered as well, so a template may place
+    /// placeholders inside literal entries. A leaf whose index is past the end
+    /// of `replacements` is left untouched.
+    #[must_use]
+    pub fn graft_number_leaves(&self, base: i64, replacements: &[Self]) -> Self {
+        let borrowed = self.inner.borrow();
+        match &borrowed.value {
+            NodeValue::Operand(Token::Number(value)) if *value >= base => {
+                let index = (*value - base) as usize;
+                match replacements.get(index) {
+                    Some(replacement) => replacement.clone(),
+                    None => self.clone(),
+                }
+            }
+            NodeValue::Operand(crate::math::parse::lexer::Token::Matrix(matrix)) => {
+                let grafted: Vec<Vec<crate::math::structs::expr::Expr<T>>> = (0..matrix.rows())
+                    .map(|row| {
+                        (0..matrix.columns())
+                            .map(|column| {
+                                crate::math::structs::expr::Expr::from_node(
+                                    matrix[row][column]
+                                        .tree()
+                                        .graft_number_leaves(base, replacements),
+                                )
+                            })
+                            .collect()
+                    })
+                    .collect();
+                let rebuilt = crate::math::algebra::linear::Matrix::from_vec(
+                    matrix.rows(),
+                    matrix.columns(),
+                    grafted.into_iter().flatten().collect(),
+                );
+                match rebuilt {
+                    Some(rebuilt) => Node::matrix(rebuilt),
+                    None => self.clone(),
+                }
+            }
+            NodeValue::Operand(crate::math::parse::lexer::Token::Vector(vector)) => {
+                let grafted: Vec<_> = vector
+                    .as_slice()
+                    .iter()
+                    .map(|entry| {
+                        crate::math::structs::expr::Expr::from_node(
+                            entry.tree().graft_number_leaves(base, replacements),
+                        )
+                    })
+                    .collect();
+                Node::vector(crate::math::algebra::linear::Vector::from_vec(grafted))
+            }
+            NodeValue::Operator(op_node) => {
+                let left = op_node.left.graft_number_leaves(base, replacements);
+                let right = op_node.right.graft_number_leaves(base, replacements);
+                if left.shares_with(&op_node.left) && right.shares_with(&op_node.right) {
+                    return self.clone();
+                }
+                match &op_node.token {
+                    Token::Operator(op) => NodeInner::from_operation(op.clone(), left, right),
+                    Token::Function(func) => NodeInner::from_function(func.clone(), right),
+                    _ => self.clone(),
+                }
+            }
+            _ => self.clone(),
+        }
+    }
+    /// Rebuild this tree, replacing every occurrence of the variable `var`
+    /// (independent or free) with `replacement`.
+    ///
+    /// This is a structural splice, not a substitution through rendered text:
+    /// the replacement keeps whatever identity it was parsed with, so a
+    /// spliced-in named constant stays a constant and the exact evaluator's
+    /// closed-form table can still recognise it (`sin(pi)` spliced structurally
+    /// folds to exactly `0` where a float-spliced `sin(3.14159…)` cannot).
+    /// Matrix and vector tokens are entered as well, so entries can hold the
+    /// variable.
+    #[must_use]
+    pub fn graft_variable(&self, var: char, replacement: &Self) -> Self {
+        let borrowed = self.inner.borrow();
+        match &borrowed.value {
+            NodeValue::Operand(Token::Var(letter)) | NodeValue::Operand(Token::Indp(letter))
+                if *letter == var =>
+            {
+                replacement.clone()
+            }
+            NodeValue::Operand(crate::math::parse::lexer::Token::Matrix(matrix)) => {
+                let grafted: Vec<Vec<crate::math::structs::expr::Expr<T>>> = (0..matrix.rows())
+                    .map(|row| {
+                        (0..matrix.columns())
+                            .map(|column| {
+                                crate::math::structs::expr::Expr::from_node(
+                                    matrix[row][column].tree().graft_variable(var, replacement),
+                                )
+                            })
+                            .collect()
+                    })
+                    .collect();
+                let rebuilt = crate::math::algebra::linear::Matrix::from_vec(
+                    matrix.rows(),
+                    matrix.columns(),
+                    grafted.into_iter().flatten().collect(),
+                );
+                match rebuilt {
+                    Some(rebuilt) => Node::matrix(rebuilt),
+                    None => self.clone(),
+                }
+            }
+            NodeValue::Operand(crate::math::parse::lexer::Token::Vector(vector)) => {
+                let grafted: Vec<_> = vector
+                    .as_slice()
+                    .iter()
+                    .map(|entry| {
+                        crate::math::structs::expr::Expr::from_node(
+                            entry.tree().graft_variable(var, replacement),
+                        )
+                    })
+                    .collect();
+                Node::vector(crate::math::algebra::linear::Vector::from_vec(grafted))
+            }
+            NodeValue::Operator(op_node) => {
+                let left = op_node.left.graft_variable(var, replacement);
+                let right = op_node.right.graft_variable(var, replacement);
+                if left.shares_with(&op_node.left) && right.shares_with(&op_node.right) {
+                    return self.clone();
+                }
+                match &op_node.token {
+                    Token::Operator(op) => NodeInner::from_operation(op.clone(), left, right),
+                    Token::Function(func) => {
+                        NodeInner::from_function(func.clone(), right)
+                    }
+                    _ => self.clone(),
+                }
+            }
+            _ => self.clone(),
+        }
+    }
     /// A binary operation node, e.g. `left + right`.
     #[must_use]
     pub fn operate(op: Op, left: Self, right: Self) -> Self {
