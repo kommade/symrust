@@ -119,6 +119,9 @@ pub enum Command {
     },
     /// A vector rewritten as its one-column matrix.
     ToMatrix(Option<String>),
+    /// The real roots of a polynomial in the independent variable: rational
+    /// roots exact, irrational roots reported as isolated algebraic numbers.
+    Roots(Option<String>),
     /// Print the command reference.
     Help,
     /// Leave the REPL.
@@ -147,14 +150,28 @@ pub fn parse_line(line: &str) -> Result<Option<Command>, String> {
     Ok(Some(Command::Expression(line.to_string())))
 }
 
-/// Words the lexer owns: function and constant spellings. A stored name must
-/// differ from all of these, or substitution would rewrite `sin(x)`'s `sin`
-/// into an expression.
-pub const RESERVED: [&str; 21] = [
+/// Words the lexer owns, plus the session's automatic `ans` binding: a stored
+/// name must differ from all of these, or substitution would rewrite `sin(x)`'s
+/// `sin` into an expression or shadow the previous-answer register.
+pub const RESERVED: [&str; 22] = [
     "arcsin", "arccos", "arctan", "asin", "acos", "atan", "sqrt", "root",
     "sin", "si", "cos", "tan", "sec", "csc", "cot", "log", "ln", "erf",
-    "ei", "pi", "e",
+    "ei", "pi", "e", "ans",
 ];
+
+/// Parse a command given *without* the leading colon — the shape a
+/// definition's right side carries after `poly = ` has been stripped off
+/// `poly = :simp poly`.
+///
+/// `None` for a blank argument (nothing to run); a command otherwise.
+pub fn parse_command_line(text: &str) -> Result<Option<Command>, String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let (name, args) = split_name(text);
+    parse_command(&name.to_ascii_lowercase(), args.trim()).map(Some)
+}
 
 /// Split `name args` at the first whitespace; a bare `name` has no args.
 fn split_name(rest: &str) -> (&str, &str) {
@@ -215,6 +232,7 @@ fn parse_command(name: &str, args: &str) -> Result<Command, String> {
             Ok(Command::Orthogonal { left, right })
         }
         "tomat" | "vmat" => Ok(Command::ToMatrix(optional(args))),
+        "roots" | "polyroots" => Ok(Command::Roots(optional(args))),
         other => Err(format!("unknown command ':{other}' — type :help")),
     }
 }
@@ -660,5 +678,16 @@ mod tests {
         for word in RESERVED {
             assert!(word.chars().all(|c| c.is_ascii_alphabetic()));
         }
+        assert!(RESERVED.contains(&"ans"), "ans is session-reserved");
+    }
+
+    #[test]
+    fn roots_command_parse() {
+        assert_eq!(parse_line(":roots"), Ok(Some(Command::Roots(None))));
+        assert_eq!(
+            parse_line(":roots x ^ 2 - 2"),
+            Ok(Some(Command::Roots(Some("x ^ 2 - 2".into()))))
+        );
+        assert_eq!(parse_line(":polyroots"), Ok(Some(Command::Roots(None))));
     }
 }

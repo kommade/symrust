@@ -88,8 +88,8 @@ fn run_line(app: &mut App, line: &str) -> bool {
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 app.execute(command)
             })) {
-                Ok(Ok(Outcome::Print(text))) => println!("{text}"),
                 Ok(Ok(Outcome::Quit)) => return false,
+                Ok(Ok(outcome)) => print_outcome(&outcome),
                 Ok(Err(error)) => eprintln!("error: {error}"),
                 Err(panic) => {
                     let message = panic
@@ -108,4 +108,23 @@ fn run_line(app: &mut App, line: &str) -> bool {
         eprintln!("symr: could not flush output: {error}");
     }
     true
+}
+
+/// Print an outcome.
+///
+/// A value result is announced with `=`. When the value renders multi-line —
+/// a matrix, whose rows each end with a newline — the marker goes on its own
+/// line and the block follows whole, its trailing newline trimmed so the
+/// prompt (or the next output line) starts immediately after. Gluing `=`
+/// onto the first row would bury it in the middle of the shape.
+fn print_outcome(outcome: &Outcome) {
+    match outcome {
+        Outcome::Value(text) if text.contains('\n') => {
+            println!("=");
+            println!("{}", text.trim_end());
+        }
+        Outcome::Value(text) => println!("= {text}"),
+        Outcome::Remark(text) => println!("{text}"),
+        Outcome::Quit => {}
+    }
 }
