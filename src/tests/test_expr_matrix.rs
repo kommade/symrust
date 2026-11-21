@@ -153,6 +153,106 @@ fn eigenvalues_and_eigenvectors_are_reachable_on_an_expression() {
 }
 
 #[test]
+fn non_diagonalisable_matrix_still_has_eigenvectors() {
+    // λ = 2 with algebraic multiplicity 2 but geometric multiplicity 1: one
+    // eigenvector direction, and the matrix cannot be diagonalised — still,
+    // that one eigenvector exists and is found.
+    let expr = create_expr!("[[2, 1], [0, 2]]").unwrap();
+    let vectors = expr.eigenvectors().expect("eigenvectors still exist");
+    assert_eq!(vectors.len(), 1);
+    assert_entries(&vectors[0], &[&[1.0], &[0.0]]);
+
+    let spaces = expr
+        .eigenspaces()
+        .expect("the eigenvalue search stays exact");
+    assert_eq!(spaces.len(), 1);
+    assert_eq!(spaces[0].1.len(), 1);
+}
+
+#[test]
+fn irrational_eigenvalues_still_yield_their_eigenvectors() {
+    // The characteristic polynomial factors as (λ - 1)(λ² - 5λ - 2), so two
+    // eigenvalues are irrational; the shifted matrices carry float entries
+    // and the read-off has to see through their residues.
+    let expr = create_expr!("[[1, 2, 3], [0, 4, 6], [0, 1, 1]]").unwrap();
+    let vectors = expr
+        .eigenvectors()
+        .expect("three distinct (two irrational) eigenvalues");
+    assert_eq!(vectors.len(), 3);
+
+    // The exact eigenvalue λ = 1 has the x-axis as its eigenspace.
+    let spaces = expr.eigenspaces().expect("the eigenvalues all exist");
+    let exact = spaces
+        .iter()
+        .find(|(lambda, _)| !lambda.is_float_leaf())
+        .expect("the rational eigenvalue λ = 1");
+    assert_eq!(exact.1.len(), 1);
+    assert_entries(&exact.1[0], &[&[1.0], &[0.0], &[0.0]]);
+}
+
+#[test]
+fn matrix_division_multiplies_by_the_right_inverse() {
+    // M / N = M · N⁻¹.
+    let quotient = create_expr!("[[1, 2], [3, 4]] / [[1, 0], [0, 2]]")
+        .unwrap()
+        .fold_value_operators()
+        .expect("both operands are matrix values");
+    assert_entries(&quotient, &[&[1.0, 1.0], &[3.0, 2.0]]);
+}
+
+#[test]
+fn matrix_division_by_a_scalar_is_entrywise() {
+    let quotient = create_expr!("[[4, 8], [2, 6]] / 2")
+        .unwrap()
+        .fold_value_operators()
+        .expect("the divisor is a scalar");
+    assert_entries(&quotient, &[&[2.0, 4.0], &[1.0, 3.0]]);
+}
+
+#[test]
+fn singular_and_badly_shaped_divisors_are_refused() {
+    // A singular divisor has no inverse, so the quotient has no answer.
+    let error = create_expr!("[[1, 2], [3, 4]] / [[1, 1], [1, 1]]")
+        .unwrap()
+        .fold_value_operators()
+        .unwrap_err();
+    assert_eq!(
+        error,
+        ExprError::Undefined("the divisor matrix is singular, so it cannot be divided by")
+    );
+
+    // A non-square divisor cannot be inverted.
+    let error = create_expr!("[[1, 2], [3, 4]] / [[1, 0]]")
+        .unwrap()
+        .fold_value_operators()
+        .unwrap_err();
+    assert!(matches!(error, ExprError::Incompatible(_)));
+
+    // A scalar dividend has no matrix reading of division; the inverse
+    // spelling `n^-1 * 2` is the way to write it.
+    let error = create_expr!("2 / [[1, 0], [0, 1]]")
+        .unwrap()
+        .fold_value_operators()
+        .unwrap_err();
+    assert!(matches!(error, ExprError::Incompatible(_)));
+}
+
+#[test]
+fn division_by_a_zero_scalar_is_refused() {
+    // The literal `0` never leaves the parser (it reports DivisionByZero at
+    // construction), so this reaches the fold through a closed zero value
+    // instead.
+    let error = create_expr!("[[1, 2], [3, 4]] / (1 - 1)")
+        .unwrap()
+        .fold_value_operators()
+        .unwrap_err();
+    assert_eq!(
+        error,
+        ExprError::Undefined("cannot divide a matrix or a vector by zero")
+    );
+}
+
+#[test]
 fn solution_methods_work_on_an_expression() {
     let expr = create_expr!("[[1, 2], [3, 4]]").unwrap();
 

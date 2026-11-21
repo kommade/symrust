@@ -44,6 +44,11 @@ pub enum ExprError {
     ///
     /// The message names the reason, e.g. `"the matrix is singular"`.
     Undefined(&'static str),
+    /// A value operation (matrix addition, say) met shapes that do not fit.
+    ///
+    /// The message carries the shapes and the operation, e.g. "cannot add a
+    /// 2x2 matrix to a 2x3 matrix".
+    Incompatible(String),
     /// The expression is a compound value (an operator applied to children)
     /// where a single value was needed.
     NotAValue,
@@ -62,6 +67,7 @@ impl Display for ExprError {
                 write!(f, "the matrix is not square ({rows}x{columns})")
             }
             Self::Undefined(reason) => write!(f, "{reason}"),
+            Self::Incompatible(description) => write!(f, "{description}"),
             Self::NotAValue => write!(f, "the expression is not a single value"),
             Self::Malformed(detail) => write!(f, "malformed expression: {detail}"),
         }

@@ -21,6 +21,13 @@ pub use limit::Limit;
 mod closed_form;
 #[cfg(feature = "algebraic")]
 pub mod roots;
+// The eigen fallback inside the private matrix module, visible to the
+// matrix_steps renderer without opening the module itself up.
+#[cfg(feature = "algebraic")]
+pub(crate) use matrix::algebraic_eigenvalues;
+// The tolerant null-space read-off the eigenspace queries share with the
+// step-tracked eigen narrative.
+pub(crate) use matrix::null_space_basis;
 
 /// A struct representing a mathematical expression.
 ///

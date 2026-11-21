@@ -734,6 +734,12 @@ where
 /// solution that shows intermediate matrices must answer with a matrix too.
 /// The determinant is therefore carried as a `1 x 1` matrix on the last step,
 /// and [`determinant_steps`](Matrix::determinant_steps) unwraps it.
+///
+/// The method follows the shape, as the `Expr` version does: triangular
+/// matrices take the diagonal product, matrices up to
+/// [`DETERMINANT_COFACTOR_MAX`] expand along their first row with each
+/// minor's determinant as a nested solution, and larger matrices fall back to
+/// elimination.
 fn determinant_generic<T>(matrix: &Matrix<T>) -> Option<Solution<Matrix<T>, Matrix<T>>>
 where
     T: Matrixable + Display + Clone,
@@ -741,9 +747,179 @@ where
     if matrix.rows() != matrix.columns() {
         return None;
     }
+    let mut recorder = StepRecorder::new(matrix.clone(), "determinant");
+    // The running value is carried as a `1 x 1` matrix so every step's result
+    // type matches the solution's answer type.
+    let value = determinant_generic_tracked(matrix, &mut recorder);
+    Some(recorder.finish(scalar_matrix(value)))
+}
+
+/// The determinant of a plain-coefficient matrix, recorded onto `recorder`.
+fn determinant_generic_tracked<T>(
+    matrix: &Matrix<T>,
+    recorder: &mut StepRecorder<Matrix<T>, Matrix<T>>,
+) -> T
+where
+    T: Matrixable + Display + Clone,
+{
+    let size = matrix.rows();
+    if size == 1 {
+        recorder.record_decision(
+            "trivial",
+            || "a 1x1 determinant is its single entry".to_string(),
+        );
+        return matrix[0][0].clone();
+    }
+    if let Some(value) = triangular_determinant_generic(matrix, recorder) {
+        return value;
+    }
+    if size > DETERMINANT_COFACTOR_MAX {
+        recorder.record_decision(
+            "cofactor expansion",
+            || {
+                format!(
+                    "the matrix is {size}x{size}; cofactor expansion would open \
+                     {size} minors of size {} each and keep going, so the fallback \
+                     is elimination",
+                    size - 1
+                )
+            },
+        );
+        return determinant_generic_elimination(matrix, recorder);
+    }
+    if size == 2 {
+        let value = matrix[0][0].clone() * matrix[1][1].clone()
+            - matrix[0][1].clone() * matrix[1][0].clone();
+        recorder.record(
+            "2x2 determinant",
+            || {
+                format!(
+                    "det = a d - b c with a = {}, b = {}, c = {}, d = {}",
+                    matrix[0][0],
+                    matrix[0][1],
+                    matrix[1][0],
+                    matrix[1][1]
+                )
+            },
+            || scalar_matrix(value.clone()),
+        );
+        return value;
+    }
+    // Cofactor expansion along the first row.
+    let mut terms: Vec<String> = Vec::new();
+    for (column, entry) in matrix[0].iter().enumerate().take(size) {
+        if entry.is_zero_value() {
+            continue;
+        }
+        let sign = if column % 2 == 0 { "+" } else { "-" };
+        terms.push(format!(
+            "{sign} ({entry}) det(minor of row 1, column {})",
+            column + 1
+        ));
+    }
+    if terms.is_empty() {
+        recorder.record_decision(
+            "zero row",
+            || "row 1 is all zeros, so the determinant is 0".to_string(),
+        );
+        return T::additive_identity();
+    }
+    recorder.record_decision(
+        "cofactor expansion",
+        || format!("expand det along row 1: det = {}", terms.join(" ")),
+    );
+    let mut total = T::additive_identity();
+    for (column, cell) in matrix[0].iter().enumerate().take(size) {
+        let entry = cell.clone();
+        if entry.is_zero_value() {
+            continue;
+        }
+        let minor = matrix.minor(0, column);
+        let (minor_value, sub) = if minor.rows() == 1 {
+            (minor[0][0].clone(), None)
+        } else {
+            let mut nested: StepRecorder<Matrix<T>> = StepRecorder::new(
+                minor.clone(),
+                format!("determinant of the minor of row 1, column {}", column + 1),
+            );
+            let value = determinant_generic_tracked(&minor, &mut nested);
+            let solution = nested.finish(scalar_matrix(value.clone()));
+            (value, Some(solution))
+        };
+        if let Some(solution) = sub {
+            recorder.push_sub_solution(solution);
+        }
+        let product = entry.clone() * minor_value;
+        let signed = if column % 2 == 0 {
+            product
+        } else {
+            -product
+        };
+        let sign = if column % 2 == 0 { "+" } else { "-" };
+        let column_text = column + 1;
+        recorder.record(
+            "cofactor term",
+            || {
+                format!(
+                    "{sign} ({entry}) det(minor of row 1, column {column_text}) = {signed}"
+                )
+            },
+            || scalar_matrix(signed.clone()),
+        );
+        total = total + signed;
+    }
+    total
+}
+
+/// The determinant of a triangular plain-coefficient matrix, or `None` when
+/// the matrix is not triangular in either direction.
+fn triangular_determinant_generic<T>(
+    matrix: &Matrix<T>,
+    recorder: &mut StepRecorder<Matrix<T>, Matrix<T>>,
+) -> Option<T>
+where
+    T: Matrixable + Display + Clone,
+{
+    let size = matrix.rows();
+    let upper_triangular = (0..size)
+        .all(|row| (0..row).all(|column| matrix[row][column].is_zero_value()));
+    let lower_triangular = (0..size)
+        .all(|row| (row + 1..size).all(|column| matrix[row][column].is_zero_value()));
+    if !(upper_triangular || lower_triangular) {
+        return None;
+    }
+    let mut value = T::multiplicative_identity();
+    for i in 0..size {
+        value = value * matrix[i][i].clone();
+    }
+    let diagonal = (0..size)
+        .map(|index| matrix[index][index].to_string())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    recorder.record(
+        "multiply the diagonal",
+        || {
+            format!(
+                "the matrix is triangular, so the determinant is the product of \
+                 the diagonal entries: {diagonal}"
+            )
+        },
+        || scalar_matrix(value.clone()),
+    );
+    Some(value)
+}
+
+/// The elimination route for a large plain-coefficient matrix: the
+/// pre-cofactor implementation, kept as the large determinant fallback.
+fn determinant_generic_elimination<T>(
+    matrix: &Matrix<T>,
+    recorder: &mut StepRecorder<Matrix<T>, Matrix<T>>,
+) -> T
+where
+    T: Matrixable + Display + Clone,
+{
     let size = matrix.rows();
     let mut work = matrix.clone();
-    let mut recorder: StepRecorder<Matrix<T>> = StepRecorder::new(matrix.clone(), "determinant");
     let mut sign = 1i64;
 
     for i in 0..size {
@@ -753,7 +929,7 @@ where
                 "singular",
                 || format!("column {} has no non-zero pivot, so the determinant is 0", i + 1),
             );
-            return Some(recorder.finish(scalar_matrix(T::additive_identity())));
+            return T::additive_identity();
         };
         if pivot_row != i {
             let (a, b) = (i, pivot_row);
@@ -804,7 +980,7 @@ where
         "multiply the diagonal",
         || String::from("the determinant is the product of the diagonal, times the swap sign"),
     );
-    Some(recorder.finish(scalar_matrix(value)))
+    value
 }
 
 /// The `1 x 1` matrix holding `value`, used to carry a scalar determinant
@@ -1051,8 +1227,18 @@ where
     recorder.finish(matrix_expr(&work))
 }
 
-/// The determinant by Gaussian elimination, recording the steps.
-/// See [`Matrix::determinant_solution`].
+/// Cofactor expansion narrates at most this many levels of minors; larger
+/// matrices switch to elimination, whose row-operation narrative does not
+/// grow with the determinant's term count.
+const DETERMINANT_COFACTOR_MAX: usize = 5;
+
+/// The determinant, recorded step by step.
+///
+/// The method follows the shape: a triangular matrix's determinant is its
+/// diagonal product, a small matrix expands along its first row (each minor's
+/// own determinant a nested solution), and a large one falls back to
+/// elimination because cofactor expansion opens up more and more minors the
+/// bigger the matrix gets. See [`Matrix::determinant_solution`].
 #[must_use]
 fn determinant_tracked<T>(matrix: &Matrix<Expr<T>>) -> Option<Solution<Expr<T>, Expr<T>>>
 where
@@ -1061,9 +1247,178 @@ where
     if matrix.rows() != matrix.columns() {
         return None;
     }
+    let mut recorder = StepRecorder::new(matrix_expr(matrix), "determinant");
+    let value = determinant_expr_tracked(matrix, &mut recorder);
+    Some(recorder.finish(value))
+}
+
+/// The determinant of an `Expr` matrix, recorded onto `recorder`.
+fn determinant_expr_tracked<T>(
+    matrix: &Matrix<Expr<T>>,
+    recorder: &mut StepRecorder<Expr<T>>,
+) -> Expr<T>
+where
+    T: SymbolicLeaf,
+{
+    let size = matrix.rows();
+    if size == 1 {
+        recorder.record_decision(
+            "trivial",
+            || "a 1x1 determinant is its single entry".to_string(),
+        );
+        return matrix[0][0].clone();
+    }
+    if let Some(value) = triangular_determinant_expr(matrix, recorder) {
+        return value;
+    }
+    if size > DETERMINANT_COFACTOR_MAX {
+        recorder.record_decision(
+            "cofactor expansion",
+            || {
+                format!(
+                    "the matrix is {size}x{size}; cofactor expansion would open \
+                     {size} minors of size {} each and keep going, so the fallback \
+                     is elimination",
+                    size - 1
+                )
+            },
+        );
+        return determinant_expr_elimination(matrix, recorder);
+    }
+    if size == 2 {
+        let a = tidy(matrix[0][0].clone());
+        let b = tidy(matrix[0][1].clone());
+        let c = tidy(matrix[1][0].clone());
+        let d = tidy(matrix[1][1].clone());
+        let value = tidy(a.clone() * d.clone() - b.clone() * c.clone());
+        recorder.record(
+            "2x2 determinant",
+            || {
+                format!(
+                    "det = a d - b c with a = {a}, b = {b}, c = {c}, d = {d}"
+                )
+            },
+            || value.clone(),
+        );
+        return value;
+    }
+    // Cofactor expansion along the first row. The entries that are zero drop
+    // out of the sum, so the expansion sentence lists only the live terms.
+    let mut terms: Vec<String> = Vec::new();
+    for (column, cell) in matrix[0].iter().enumerate().take(size) {
+        let entry = tidy(cell.clone());
+        if entry.is_zero() {
+            continue;
+        }
+        let sign = if column % 2 == 0 { "+" } else { "-" };
+        terms.push(format!(
+            "{sign} ({entry}) det(minor of row 1, column {})",
+            column + 1
+        ));
+    }
+    if terms.is_empty() {
+        recorder.record_decision(
+            "zero row",
+            || "row 1 is all zeros, so the determinant is 0".to_string(),
+        );
+        return Expr::from_f64(0.0);
+    }
+    recorder.record_decision(
+        "cofactor expansion",
+        || format!("expand det along row 1: det = {}", terms.join(" ")),
+    );
+    let mut total = Expr::from_f64(0.0);
+    for (column, cell) in matrix[0].iter().enumerate().take(size) {
+        let entry = tidy(cell.clone());
+        if entry.is_zero() {
+            continue;
+        }
+        let minor = matrix.minor(0, column);
+        let (minor_value, sub) = if minor.rows() == 1 {
+            (minor[0][0].clone(), None)
+        } else {
+            let mut nested = StepRecorder::<Expr<T>>::new(
+                matrix_expr(&minor),
+                format!("determinant of the minor of row 1, column {}", column + 1),
+            );
+            let value = determinant_expr_tracked(&minor, &mut nested);
+            let solution = nested.finish(value.clone());
+            (value, Some(solution))
+        };
+        if let Some(solution) = sub {
+            recorder.push_sub_solution(solution);
+        }
+        let signed = if column % 2 == 0 {
+            tidy(entry.clone() * minor_value)
+        } else {
+            tidy(entry.clone() * minor_value * Expr::from_f64(-1.0))
+        };
+        let sign = if column % 2 == 0 { "+" } else { "-" };
+        let column_text = column + 1;
+        let entry_text = entry.to_string();
+        recorder.record(
+            "cofactor term",
+            || {
+                format!(
+                    "{sign} ({entry_text}) det(minor of row 1, column {column_text}) = {signed}"
+                )
+            },
+            || signed.clone(),
+        );
+        total = tidy(total + signed);
+    }
+    total
+}
+
+/// The determinant of a triangular matrix: the diagonal product, or `None`
+/// when the matrix is not triangular in either direction.
+fn triangular_determinant_expr<T>(
+    matrix: &Matrix<Expr<T>>,
+    recorder: &mut StepRecorder<Expr<T>>,
+) -> Option<Expr<T>>
+where
+    T: SymbolicLeaf,
+{
+    let size = matrix.rows();
+    let upper_triangular = (0..size)
+        .all(|row| (0..row).all(|column| matrix[row][column].is_zero()));
+    let lower_triangular = (0..size)
+        .all(|row| (row + 1..size).all(|column| matrix[row][column].is_zero()));
+    if !(upper_triangular || lower_triangular) {
+        return None;
+    }
+    let mut value = Expr::from_f64(1.0);
+    for i in 0..size {
+        value = tidy(value * matrix[i][i].clone());
+    }
+    let diagonal = (0..size)
+        .map(|index| tidy(matrix[index][index].clone()).to_string())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    recorder.record(
+        "multiply the diagonal",
+        || {
+            format!(
+                "the matrix is triangular, so the determinant is the product of \
+                 the diagonal entries: {diagonal}"
+            )
+        },
+        || value.clone(),
+    );
+    Some(value)
+}
+
+/// The elimination route for a large `Expr` matrix: the pre-cofactor
+/// implementation, kept as the fallback large determinants take.
+fn determinant_expr_elimination<T>(
+    matrix: &Matrix<Expr<T>>,
+    recorder: &mut StepRecorder<Expr<T>>,
+) -> Expr<T>
+where
+    T: SymbolicLeaf,
+{
     let size = matrix.rows();
     let mut work = matrix.clone();
-    let mut recorder = StepRecorder::new(matrix_expr(matrix), "determinant");
     let mut sign = 1i64;
     let mut swaps = 0usize;
 
@@ -1080,10 +1435,10 @@ where
                 },
                 || Expr::from_f64(0.0),
             );
-            return Some(recorder.finish(Expr::from_f64(0.0)));
+            return Expr::from_f64(0.0);
         };
         if pivot_row != i {
-            swap_rows(&mut work, i, pivot_row, &mut recorder, "choose pivot");
+            swap_rows(&mut work, i, pivot_row, recorder, "choose pivot");
             sign = -sign;
             swaps += 1;
         }
@@ -1094,7 +1449,7 @@ where
                 continue;
             }
             let multiple = entry / pivot_value.clone();
-            eliminate_row(&mut work, target, i, multiple, &mut recorder, "eliminate");
+            eliminate_row(&mut work, target, i, multiple, recorder, "eliminate");
         }
     }
 
@@ -1103,7 +1458,7 @@ where
     // how many swaps flipped the sign.
     let mut value = Expr::from_f64(sign as f64);
     for i in 0..size {
-        value = (value * work[i][i].clone()).simplify(false);
+        value = tidy(value * work[i][i].clone());
     }
     let diagonal = (0..size)
         .map(|index| work[index][index].to_string())
@@ -1127,7 +1482,7 @@ where
         },
         || value.clone(),
     );
-    Some(recorder.finish(value))
+    value
 }
 
 /// The inverse by Gauss-Jordan elimination of `[A | I]`, recording the steps.
@@ -1624,11 +1979,13 @@ where
 
 /// Eigenvalues and eigenvectors, composing the steps that compute them.
 ///
-/// The characteristic polynomial is a single step (the current implementation
-/// interpolates it numerically, which is not a cofactor expansion a reader would
-/// follow), each shifted matrix `A − λI` is a step, and the null space of each
-/// is itself a row reduction — recorded as a nested sub-solution. Returns `None`
-/// when the matrix is not diagonalisable over the coefficient type. See
+/// The characteristic polynomial is a single step, each shifted matrix
+/// `A − λI` is a step, the null space of each is a row reduction recorded as
+/// a nested sub-solution, and the eigenvectors the reduction's free columns
+/// give are recorded one per basis vector. A matrix that is not
+/// diagonalisable still goes through all of this — every eigenvalue has at
+/// least one eigenvector — and closes with a decision that says so. Returns
+/// `None` only when the eigenvalues cannot be found. See
 /// [`Matrix::eigen_solution`].
 #[must_use]
 fn eigen_tracked<T>(matrix: &Matrix<Expr<T>>) -> Option<Solution<Expr<T>, Expr<T>>>
@@ -1641,13 +1998,20 @@ where
     let size = matrix.rows();
 
     // Prefer the numeric path (it handles any size when the entries are
-    // rational); fall back to symbolic radicals for matrices with variables.
+    // rational); fall back to symbolic radicals, and beyond them to the
+    // algebraic root finder for exactly-known irrational roots.
     let (eigenvalues, polynomial_text) = match matrix.eigenvalues() {
         Some(values) => (values, None),
         None => {
             let polynomial = matrix.characteristic_polynomial()?;
-            let values = polynomial.roots()?;
             let text = describe_polynomial(&polynomial);
+            let values = match polynomial.roots() {
+                Some(roots) => Some(roots),
+                #[cfg(feature = "algebraic")]
+                None => crate::math::structs::expr::algebraic_eigenvalues(&polynomial),
+                #[cfg(not(feature = "algebraic"))]
+                None => None,
+            }?;
             (values, Some(text))
         }
     };
@@ -1672,6 +2036,7 @@ where
         },
     );
 
+    let mut eigenvector_count = 0usize;
     let mut seen: Vec<Expr<T>> = Vec::new();
     for lambda in eigenvalues {
         if seen.contains(&lambda) {
@@ -1693,7 +2058,66 @@ where
         // Its null space is a row reduction; record it as a nested solution.
         let reduction = row_reduce_tracked(&shifted, true);
         recorder.push_sub_solution(reduction);
+
+        // The eigenvectors themselves: one basis vector of the null space of
+        // `A - λI` per free column of its reduction. The read-off runs over a
+        // tolerance, because an approximate eigenvalue (an isolated root
+        // travels as a float leaf) leaves reduction residues the exact
+        // narrative's structural zero test cannot see through.
+        let basis = crate::math::structs::expr::null_space_basis(&shifted);
+        if basis.is_empty() {
+            recorder.record_decision(
+                "no eigenvector",
+                || {
+                    format!(
+                        "the rows of A - ({lambda})I reduced to full rank, so this \
+                         eigenvalue has no eigenvector — the value may be an \
+                         imprecise approximation"
+                    )
+                },
+            );
+        }
+        for vector in basis {
+            eigenvector_count += 1;
+            let described = column_matrix(vector.as_slice());
+            recorder.record(
+                "eigenvector",
+                || {
+                    format!(
+                        "solving (A - ({lambda})I) x = 0 with the free variables of \
+                         its reduced form: x is any nonzero multiple of the \
+                         column shown"
+                    )
+                },
+                || described.clone(),
+            );
+        }
     }
+
+    // Eigenvectors found versus the dimension of the space: equal counts
+    // mean they form a basis and the matrix is diagonalisable. Fewer is
+    // exactly the defective case — such a matrix still has every one of
+    // these eigenvectors, it only has no full eigenbasis to diagonalise
+    // with.
+    recorder.record_decision(
+        "diagonalisability",
+        || {
+            if eigenvector_count == size {
+                format!(
+                    "{size} independent eigenvectors were found across the \
+                     eigenvalues: they form a basis, so the matrix is \
+                     diagonalisable"
+                )
+            } else {
+                format!(
+                    "{eigenvector_count} eigenvector directions were found in the \
+                     {size}-dimensional space: they do not span it, so the matrix \
+                     is not diagonalisable — it still has exactly these \
+                     eigenvectors"
+                )
+            }
+        },
+    );
 
     Some(recorder.finish(matrix_expr(matrix)))
 }

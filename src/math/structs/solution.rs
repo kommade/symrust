@@ -88,24 +88,23 @@ pub enum SolutionStep<T = Expr, S = T> {
 impl<T, S> SolutionStep<T, S> {
     /// Convert the step's displayed value to a different answer type.
     ///
-    /// A nested solution keeps its own step/answer pair and is carried over
-    /// unchanged; only the values this level displays are converted.
+    /// A nested solution keeps its own step/answer pair and is converted
+    /// recursively with the same function, so a mapped solution keeps its
+    /// whole narrative — only the displayed values change. The function
+    /// travels as `&dyn Fn` so the recursion is only a runtime loop: passing
+    /// a generic `f` down would keep wrapping it in fresh reference types
+    /// and never stop monomorphizing.
     #[must_use]
-    fn convert_result<S2>(self, f: &impl Fn(S) -> S2) -> SolutionStep<T, S2> {
+    fn convert_result<S2>(self, f: &dyn Fn(S) -> S2) -> SolutionStep<T, S2> {
         match self {
             SolutionStep::Elementary(step) => SolutionStep::Elementary(ElementaryStep::new(
                 step.step_name,
                 step.description,
                 step.step_result.map(f),
             )),
-            // A sub-solution has its own type pair, so it cannot be converted
-            // here. `map_result` is only used where a solution has no nested
-            // steps, and drops them otherwise.
-            SolutionStep::SubSolution(_) => SolutionStep::Elementary(ElementaryStep::new(
-                "nested solution",
-                "carried over from the original computation",
-                None,
-            )),
+            SolutionStep::SubSolution(solution) => {
+                SolutionStep::SubSolution(solution.map_result_dyn(f))
+            }
         }
     }
 }
@@ -200,18 +199,25 @@ impl<T, S> Solution<T, S> {
     ///
     /// This is how a computation whose steps are matrices can answer with a
     /// scalar: the steps stay as they are, and only the final value is
-    /// unwrapped. Each step's displayed value is converted the same way, so the
-    /// steps and the answer stay consistent. It *consumes* the solution — a
+    /// unwrapped. Each step's displayed value is converted the same way, so
+    /// the steps and the answer stay consistent. It *consumes* the solution — a
     /// transform of the record, not a mutation of it.
     #[must_use]
     pub fn map_result<S2>(self, f: impl Fn(S) -> S2) -> Solution<T, S2> {
+        self.map_result_dyn(&f)
+    }
+
+    /// The [`map_result`](Self::map_result) worker, taking the converting
+    /// function once behind `dyn` so nested solutions recurse at run time
+    /// instead of monomorphizing forever.
+    fn map_result_dyn<S2>(self, f: &dyn Fn(S) -> S2) -> Solution<T, S2> {
         Solution {
             start: self.start,
             problem_type: self.problem_type,
             steps: self
                 .steps
                 .into_iter()
-                .map(|step| step.convert_result(&f))
+                .map(|step| step.convert_result(f))
                 .collect(),
             result: f(self.result),
             result_comment: self.result_comment,
