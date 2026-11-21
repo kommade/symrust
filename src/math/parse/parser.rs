@@ -150,7 +150,10 @@ fn parse_vector_entries<T: FloatType + Display>(
     Ok(Vector::from_vec(entries))
 }
 
-/// Split a token slice on top-level commas.
+/// Split a token slice on top-level commas. Whitespace inside a literal is
+/// *not* an entry separator: `1 2` denotes the implicit product the parser
+/// reads everywhere else, so a comma is the only entry boundary that carries
+/// no ambiguity.
 fn split_on_commas<T>(tokens: &[Token<T>]) -> Vec<&[Token<T>]> {
     let mut parts = Vec::new();
     let mut depth = 0isize;
