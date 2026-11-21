@@ -1,6 +1,6 @@
 use crate::{math::calculus::expr::{
         Shape, add, call, div, float, function, is_constant, mul, negate, number, one, pow, shape,
-        split_constant, sqrt_arg, sub, zero,
+        split_constant, sqrt_arg, sub, sum_terms, zero,
     },
     math::numeric::SymbolicLeaf,
     math::parse::lexer::{Const, Func, Op, Token},
@@ -120,17 +120,40 @@ where
     R: Recorder<Expr<T>>,
     T: SymbolicLeaf,
 {
+    let (result, working) = nested_derivative(steps, child);
+    if let Some(solution) = working {
+        steps.record_sub_solution(|| solution);
+    }
+    result
+}
+
+/// Differentiate `child` without touching the parent recorder, returning the
+/// folded derivative and — when the working is worth showing — the captured
+/// sub-solution for the caller to attach wherever the narrative needs it.
+///
+/// The split exists for the term-by-term sum narrative: the parent wants to
+/// quote the derivative in its own `term` row FIRST and trail the working
+/// underneath, which needs computation and recording decoupled.
+type NestedDerivative<T> = (Node<T>, Option<Solution<Expr<T>, Expr<T>>>);
+
+fn nested_derivative<R, T>(steps: &mut R, child: &Node<T>) -> NestedDerivative<T>
+where
+    R: Recorder<Expr<T>>,
+    T: SymbolicLeaf,
+{
     if !steps.is_recording() || is_leaf_node(child) {
-        return child.clone().get_derivative(steps);
+        return (child.clone().get_derivative(steps), None);
     }
     let mut nested = StepRecorder::<Expr<T>, Expr<T>>::new(
         Expr::from_node(child.clone()),
         "derivative",
     );
     let result = child.clone().get_derivative(&mut nested);
-    let solution = nested.finish(Expr::from_node(result.clone()));
-    steps.record_sub_solution(|| solution);
-    result
+    // The nested answer carries the term's folded derivative: the working
+    // above stays raw, and the reader walks away with `12 x`, not `6 2 x`.
+    let tidied = Expr::from_node(result.clone()).tidy();
+    let solution = nested.finish(tidied.clone());
+    (tidied.tree().clone(), Some(solution))
 }
 
 /// Differentiate `expression`, writing every rule application into `steps`.
@@ -172,7 +195,7 @@ where
 {
     fn get_derivative(self, steps: &mut R) -> Self {
         let borrowed = self.inner.borrow();
-        let result = match borrowed.value {
+        match borrowed.value {
             _ if !borrowed.has_indp => zero(),
             NodeValue::Operand(Token::Indp(_)) => one(),
             _ => {
@@ -208,38 +231,97 @@ where
                 let borrowed = self.inner.borrow();
                 match &borrowed.value {
                     NodeValue::Operator(op_node) => match op_node.token {
-                        Token::Operator(Op::Add) => op_node
-                            .left
-                            .clone()
-                            .get_derivative(steps)
-                            .add(op_node.right.clone().get_derivative(steps)),
-                        Token::Operator(Op::Sub) => op_node
-                            .left
-                            .clone()
-                            .get_derivative(steps)
-                            .sub(op_node.right.clone().get_derivative(steps)),
-                        Token::Operator(Op::Mul | Op::ImplicitMul) => {
-                            return self.product_rule(steps);
+                        // A sum differentiates term by term, recorded the way
+                        // the integrator records linearity: the split is
+                        // stated once over the flattened terms (`a + b - c`,
+                        // not nested two-term chains), then each term's
+                        // derivative appears as its own row, with the term's
+                        // working nested beneath it when the term needs any.
+                        Token::Operator(Op::Add) | Token::Operator(Op::Sub) => {
+                            if let Some(terms) = sum_terms(&self) {
+                                let split = terms
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(index, (negated, term))| match (index == 0, negated) {
+                                        (true, false) => format!("d/dx ({term})"),
+                                        (true, true) => format!("- d/dx ({term})"),
+                                        (false, false) => format!("+ d/dx ({term})"),
+                                        (false, true) => format!("- d/dx ({term})"),
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                                steps.record_without_result(
+                                    "term by term",
+                                    || format!("d/dx ({}) = {}", self, split),
+                                    || Expr::from_node(self.clone()),
+                                );
+                                let mut acc: Option<Node<T>> = None;
+                                for (negated, term) in terms {
+                                    let term_text = if negated {
+                                        format!("-({})", term)
+                                    } else {
+                                        term.to_string()
+                                    };
+                                    // Compute the term's derivative first (its
+                                    // working captured, not yet attached), so
+                                    // the row below can quote the result and
+                                    // the row comes BEFORE its working.
+                                    let (derivative, working) =
+                                        nested_derivative(steps, &term);
+                                    let signed = if negated {
+                                        zero().sub(derivative.clone())
+                                    } else {
+                                        derivative.clone()
+                                    };
+                                    steps.record(
+                                        "term",
+                                        || format!("d/dx ({term_text})"),
+                                        || Expr::from_node(signed.clone()),
+                                    );
+                                    if let Some(solution) = working {
+                                        steps.record_sub_solution(|| solution);
+                                    }
+                                    acc = Some(match acc {
+                                        None => signed,
+                                        Some(previous) => {
+                                            if negated {
+                                                previous.sub(derivative)
+                                            } else {
+                                                previous.add(derivative)
+                                            }
+                                        }
+                                    });
+                                }
+                                return acc
+                                    .expect("sum_terms only returns some for two or more terms");
+                            }
+                            // A single collected term means the node is
+                            // `0 - u`: differentiate the two children the
+                            // plain way.
+                            let left = op_node.left.clone();
+                            let right = op_node.right.clone();
+                            if matches!(op_node.token, Token::Operator(Op::Add)) {
+                                left.get_derivative(steps).add(right.get_derivative(steps))
+                            } else {
+                                left.get_derivative(steps).sub(right.get_derivative(steps))
+                            }
                         }
-                        Token::Operator(Op::Div) => {
-                            return self.quotient_rule(steps);
-                        }
+                        Token::Operator(Op::Mul | Op::ImplicitMul) => self.product_rule(steps),
+                        Token::Operator(Op::Div) => self.quotient_rule(steps),
                         Token::Operator(Op::Pow) => {
                             if op_node.right.inner.borrow().has_indp {
-                                return self.exp_rule(steps);
+                                self.exp_rule(steps)
+                            } else {
+                                self.power_rule(steps)
                             }
-                            return self.power_rule(steps);
                         }
-                        Token::Function(_) => {
-                            return self.chain_rule(steps);
-                        }
+                        Token::Function(_) => self.chain_rule(steps),
                         _ => unreachable!(),
                     },
                     _ => unreachable!(),
                 }
             }
-        };
-        result
+        }
     }
     fn chain_rule(self, steps: &mut R) -> Self {
         let borrowed = self.inner.borrow();

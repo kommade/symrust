@@ -1788,13 +1788,13 @@ where
             let carrying = helpers::sub(uv.clone(), pending);
             self.step(
                 "assemble u v",
-                || format!("∫ u dv = u v − ∫ v du, with ∫ v du = ∫ {inner_text} dx to come"),
+                || format!("∫ u dv = u v − ∫ v du, with ∫ v du = ∫ {inner_text} dx"),
                 || carrying.clone(),
             );
             // The remaining integral, again as indented working, followed by
             // the combination its result feeds: u v − ∫ v du.
             let inner = match self.integrate_nested(&inner_integrand, || {
-                String::from("the remaining integral")
+                String::from("∫ v du")
             }) {
                 Ok(value) => value,
                 Err(IntegrationError::Timeout) => return Err(IntegrationError::Timeout),

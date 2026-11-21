@@ -670,7 +670,7 @@ fn by_parts_nests_its_sub_integrals() {
         "the v integral and the remaining integral should be sub-solutions:\n{rendered}"
     );
     assert!(rendered.contains("find v: sin(x)"), "{rendered}");
-    assert!(rendered.contains("the remaining integral: -cos(x)"), "{rendered}");
+    assert!(rendered.contains("∫ v du: -cos(x)"), "{rendered}");
     // The identity is quoted, and the assemble step's value carries the
     // pending integral: `=> -x cos(x) - ∫ -cos(x) dx`, not a bare `u v`.
     assert!(rendered.contains("∫ u dv = u v − ∫ v du"), "{rendered}");
