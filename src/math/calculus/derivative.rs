@@ -86,6 +86,53 @@ fn reads_worse_than<T: SymbolicLeaf>(candidate: &Expr<T>, reference: &Expr<T>) -
     !unwanted(&reference) && unwanted(&candidate)
 }
 
+/// Whether a node is a single operand (no operator, no function call), so its
+/// derivative can be stated inline in the parent's strategy text instead of
+/// being narrated in a block of its own.
+fn is_leaf_node<T: SymbolicLeaf>(node: &Node<T>) -> bool {
+    matches!(node.inner.borrow().value, NodeValue::Operand(_))
+}
+
+/// The derivative text of a leaf node: `1` for the independent variable, `0`
+/// for any other operand. `None` for anything composite.
+fn leaf_derivative_text<T: SymbolicLeaf>(node: &Node<T>) -> Option<String> {
+    if !is_leaf_node(node) {
+        return None;
+    }
+    Some(if node.inner.borrow().has_indp {
+        "1".to_string()
+    } else {
+        "0".to_string()
+    })
+}
+
+/// Differentiate `child`, recording its steps as a nested solution under a
+/// `derivative: <child>` heading.
+///
+/// This is what gives the derivative narrative its order: a rule states what
+/// it is about to do, and the sub-derivatives it needs appear indented below
+/// that statement — the way the antiderivative nests "find v" under
+/// integration by parts. A leaf is differentiated in place (its derivative
+/// was already stated inline), and when nothing is recording the derivative
+/// is simply taken.
+fn derivative_of_operand<R, T>(steps: &mut R, child: &Node<T>) -> Node<T>
+where
+    R: Recorder<Expr<T>>,
+    T: SymbolicLeaf,
+{
+    if !steps.is_recording() || is_leaf_node(child) {
+        return child.clone().get_derivative(steps);
+    }
+    let mut nested = StepRecorder::<Expr<T>, Expr<T>>::new(
+        Expr::from_node(child.clone()),
+        "derivative",
+    );
+    let result = child.clone().get_derivative(&mut nested);
+    let solution = nested.finish(Expr::from_node(result.clone()));
+    steps.record_sub_solution(|| solution);
+    result
+}
+
 /// Differentiate `expression`, writing every rule application into `steps`.
 fn differentiation<T>(expression: Expr<T>, steps: &mut impl Recorder<Expr<T>>) -> Expr<T>
 where
@@ -112,7 +159,7 @@ where
     calc_step!(
         steps,
         "simplify",
-        format!("Simplified the derivative to {}", simplified_result),
+        "expanded the rule products and collected the terms".to_string(),
         simplified_result.clone()
     );
     simplified_result
@@ -125,15 +172,29 @@ where
 {
     fn get_derivative(self, steps: &mut R) -> Self {
         let borrowed = self.inner.borrow();
-        let borrow_str = borrowed.to_string();
         let result = match borrowed.value {
             _ if !borrowed.has_indp => zero(),
             NodeValue::Operand(Token::Indp(_)) => one(),
             _ => {
                 let split = split_constant(&self);
                 if split.is_factored(&self) {
-                    let split_node = Expr::from_node(self.clone());
-                    calc_step!(steps, "constant factor", borrow_str.to_string(), split_node);
+                    // Name the factor and the dependent part: the split is
+                    // the whole rule here, and the dependent derivative
+                    // narrates itself below (or is stated inline when it is
+                    // a leaf).
+                    let factor_text = split.constant.to_string();
+                    let dependent_text = split.dependent.to_string();
+                    let inner_note = match leaf_derivative_text(&split.dependent) {
+                        Some(text) => format!(" and u' = {text}"),
+                        None => String::new(),
+                    };
+                    steps.record_without_result(
+                        "constant factor",
+                        || format!(
+                            "d/dx (k u) = k u' with k = {factor_text}, u = {dependent_text}{inner_note}"
+                        ),
+                        || Expr::from_node(self.clone()),
+                    );
                     return match split.constant_literal() {
                         Some(k) => split
                             .dependent
@@ -178,98 +239,115 @@ where
                 }
             }
         };
-        calc_step!(steps, "differentiate", borrow_str.to_string(), result.clone());
         result
     }
     fn chain_rule(self, steps: &mut R) -> Self {
         let borrowed = self.inner.borrow();
         if let NodeValue::Operator(op_node) = &borrowed.value
             && let Token::Function(f) = &op_node.token {
-                let result = match f {
+                let func = f.clone();
+                let arg = op_node.right.clone();
+                // Strategy first: the outer derivative's formula with the
+                // inner function named — and its derivative stated inline
+                // when the inner function is a leaf, instead of a block of
+                // its own saying `x => 1`.
+                let argument_text = arg.to_string();
+                let formula = match &func {
+                    Func::Sin => "d/dx sin(u) = cos(u) u'",
+                    Func::Cos => "d/dx cos(u) = -sin(u) u'",
+                    Func::Tan => "d/dx tan(u) = sec(u)^2 u'",
+                    Func::Csc => "d/dx csc(u) = -csc(u) cot(u) u'",
+                    Func::Sec => "d/dx sec(u) = sec(u) tan(u) u'",
+                    Func::Cot => "d/dx cot(u) = -csc(u)^2 u'",
+                    Func::Asin => "d/dx asin(u) = u' / sqrt(1 - u^2)",
+                    Func::Acos => "d/dx acos(u) = -u' / sqrt(1 - u^2)",
+                    Func::Atan => "d/dx atan(u) = u' / (1 + u^2)",
+                    Func::Sqrt => "d/dx sqrt(u) = u' / (2 sqrt(u))",
+                    Func::Root(_) => "d/dx u^(1/n) = (1/n) u^(1/n - 1) u'",
+                    Func::Ln => "d/dx ln(u) = u' / u",
+                    Func::Log(_) => "d/dx log_b(u) = u' / (u ln b)",
+                    Func::Erf => "d/dx erf(u) = 2 e^(-u^2) u' / sqrt(pi)",
+                    Func::Si => "d/dx si(u) = sin(u) u' / u",
+                    Func::Ei => "d/dx ei(u) = e^u u' / u",
+                };
+                let inner_note = match leaf_derivative_text(&arg) {
+                    Some(text) => format!(" and u' = {text}"),
+                    None => String::new(),
+                };
+                steps.record_without_result(
+                    "chain rule",
+                    || format!("{formula} with u = {argument_text}{inner_note}"),
+                    || Expr::from_node(self.clone()),
+                );
+                // The inner derivative, narrated under its own heading when
+                // it needs working out.
+                let inner_derivative = derivative_of_operand(steps, &arg);
+                let result = match &func {
                     Func::Sin => {
-                        let arg = op_node.right.clone();
                         let f_prime = call(Func::Cos, arg.clone());
-                        arg.get_derivative(steps).impl_mul(f_prime)
+                        inner_derivative.impl_mul(f_prime)
                     }
                     Func::Cos => {
-                        let arg = op_node.right.clone();
                         let f_prime = call(Func::Sin, arg.clone());
-                        arg.get_derivative(steps).negate().impl_mul(f_prime)
+                        inner_derivative.negate().impl_mul(f_prime)
                     }
                     Func::Tan => {
-                        let arg = op_node.right.clone();
                         let f_prime = call(Func::Sec, arg.clone()).pow(2);
-                        arg.get_derivative(steps).impl_mul(f_prime)
+                        inner_derivative.impl_mul(f_prime)
                     }
                     Func::Csc => {
-                        let arg = op_node.right.clone();
                         let f_prime =
                             call(Func::Csc, arg.clone()).impl_mul(call(Func::Cot, arg.clone()));
-                        arg.get_derivative(steps).negate().impl_mul(f_prime)
+                        inner_derivative.negate().impl_mul(f_prime)
                     }
                     Func::Sec => {
-                        let arg = op_node.right.clone();
                         let f_prime =
                             call(Func::Sec, arg.clone()).impl_mul(call(Func::Tan, arg.clone()));
-                        arg.get_derivative(steps).impl_mul(f_prime)
+                        inner_derivative.impl_mul(f_prime)
                     }
                     Func::Cot => {
-                        let arg = op_node.right.clone();
                         let f_prime = call(Func::Csc, arg.clone()).pow(2);
-                        arg.get_derivative(steps).negate().impl_mul(f_prime)
+                        inner_derivative.negate().impl_mul(f_prime)
                     }
                     Func::Asin => {
-                        let arg = op_node.right.clone();
                         let inner = one().sub(arg.clone().pow(2));
                         let f_prime = call(Func::Sqrt, inner);
-                        arg.get_derivative(steps).div(f_prime)
+                        inner_derivative.div(f_prime)
                     }
                     Func::Acos => {
-                        let arg = op_node.right.clone();
                         let inner = one().sub(arg.clone().pow(2));
                         let f_prime = call(Func::Sqrt, inner);
-                        arg.get_derivative(steps).negate().div(f_prime)
+                        inner_derivative.negate().div(f_prime)
                     }
                     Func::Atan => {
-                        let arg = op_node.right.clone();
                         let f_prime = one().add(arg.clone().pow(2));
-                        arg.get_derivative(steps).div(f_prime)
+                        inner_derivative.div(f_prime)
                     }
                     Func::Sqrt => {
-                        let arg = op_node.right.clone();
                         let f_prime = number(2).impl_mul(call(Func::Sqrt, arg.clone()));
-                        arg.get_derivative(steps).div(f_prime)
+                        inner_derivative.div(f_prime)
                     }
                     Func::Root(index) => {
                         // d/dx x^(1/n) = (1/n) x^(1/n − 1).
-                        let arg = op_node.right.clone();
                         let reciprocal = float(T::one() / index.clone());
                         let exponent = reciprocal.clone().sub(number(1));
                         let power = arg.clone().pow(exponent);
-                        arg.get_derivative(steps)
+                        inner_derivative
                             .impl_mul(power)
                             .impl_mul(reciprocal)
                     }
-                    Func::Ln => {
-                        let arg = op_node.right.clone();
-                        arg.clone().get_derivative(steps).div(arg)
-                    }
+                    Func::Ln => inner_derivative.div(arg),
                     Func::Log(base) => {
-                        let arg = op_node.right.clone();
                         let ln_base = call(Func::Ln, float(base.clone()));
-                        if !arg.inner.borrow().has_indp {
-                            arg.clone()
-                                .get_derivative(steps)
-                                .div(arg.impl_mul(ln_base))
+                        if arg.inner.borrow().has_indp {
+                            // u = x: u' = 1, so the derivative is 1 / (x ln b).
+                            inner_derivative.div(ln_base.impl_mul(arg))
                         } else {
-                            arg.clone()
-                                .get_derivative(steps)
-                                .div(ln_base.impl_mul(arg))
+                            inner_derivative.div(arg.impl_mul(ln_base))
                         }
                     }
                     Func::Erf => {
                         // d/dx erf(u) = 2 e^(-u²) u' / √π.
-                        let arg = op_node.right.clone();
                         let gaussian = pow(
                             Node::from_constant(Const::E),
                             negate(arg.clone().pow(2)),
@@ -277,45 +355,25 @@ where
                         let f_prime = number(2)
                             .div(call(Func::Sqrt, Node::from_constant(Const::Pi)))
                             .impl_mul(gaussian);
-                        arg.get_derivative(steps).impl_mul(f_prime)
+                        inner_derivative.impl_mul(f_prime)
                     }
                     Func::Si => {
                         // d/dx Si(u) = sin(u) u' / u.
-                        let arg = op_node.right.clone();
                         let f_prime = call(Func::Sin, arg.clone()).div(arg.clone());
-                        arg.get_derivative(steps).impl_mul(f_prime)
+                        inner_derivative.impl_mul(f_prime)
                     }
                     Func::Ei => {
                         // d/dx Ei(u) = e^u u' / u.
-                        let arg = op_node.right.clone();
                         let f_prime =
                             pow(Node::from_constant(Const::E), arg.clone()).div(arg.clone());
-                        arg.get_derivative(steps).impl_mul(f_prime)
+                        inner_derivative.impl_mul(f_prime)
                     }
                 }
                 .simplify(false, true);
-                calc_step!(
-                    steps,
-                    "chain rule",
-                    match f {
-                        Func::Sin => format!("d/dx sin(u) = cos(u) u' for {borrowed}"),
-                        Func::Cos => format!("d/dx cos(u) = -sin(u) u' for {borrowed}"),
-                        Func::Tan => format!("d/dx tan(u) = sec(u)^2 u' for {borrowed}"),
-                        Func::Csc => format!("d/dx csc(u) = -csc(u) cot(u) u' for {borrowed}"),
-                        Func::Sec => format!("d/dx sec(u) = sec(u) tan(u) u' for {borrowed}"),
-                        Func::Cot => format!("d/dx cot(u) = -csc(u)^2 u' for {borrowed}"),
-                        Func::Asin => format!("d/dx asin(u) = u' / sqrt(1 - u^2) for {borrowed}"),
-                        Func::Acos => format!("d/dx acos(u) = -u' / sqrt(1 - u^2) for {borrowed}"),
-                        Func::Atan => format!("d/dx atan(u) = u' / (1 + u^2) for {borrowed}"),
-                        Func::Sqrt => format!("d/dx sqrt(u) = u' / (2 sqrt(u)) for {borrowed}"),
-                        Func::Root(_) => format!("d/dx u^(1/n) = (1/n) u^(1/n - 1) u' for {borrowed}"),
-                        Func::Ln => format!("d/dx ln(u) = u' / u for {borrowed}"),
-                        Func::Log(_) => format!("d/dx log_b(u) = u' / (u ln b) for {borrowed}"),
-                        Func::Erf => format!("d/dx erf(u) = 2 e^(-u^2) u' / sqrt(pi) for {borrowed}"),
-                        Func::Si => format!("d/dx si(u) = sin(u) u' / u for {borrowed}"),
-                        Func::Ei => format!("d/dx ei(u) = e^u u' / u for {borrowed}"),
-                    },
-                    result.clone()
+                steps.record(
+                    "assemble",
+                    || "combine the outer and inner derivatives".to_string(),
+                    || Expr::from_node(result.clone()),
                 );
                 return result;
             }
@@ -331,8 +389,23 @@ where
                     !right.inner.borrow().has_indp || left.inner.borrow().has_indp,
                     "power_rule cannot be used for this node, try exp_rule"
                 );
+                let base_text = left.to_string();
+                let exponent_text = right.to_string();
+                let inner_note = match leaf_derivative_text(&left) {
+                    Some(text) => format!(" and u' = {text}"),
+                    None => String::new(),
+                };
                 let new_exp = right.clone().sub(one()).inner.borrow().evaluate();
-                let inner_derivative = left.clone().get_derivative(steps);
+                // Strategy first: the rule with this power's parts named, and
+                // the inner derivative stated inline when the base is a leaf.
+                steps.record_without_result(
+                    "power rule",
+                    || format!(
+                        "d/dx u^n = n u^(n-1) u' with u = {base_text}, n = {exponent_text}{inner_note}"
+                    ),
+                    || Expr::from_node(self.clone()),
+                );
+                let inner_derivative = derivative_of_operand(steps, &left);
                 let power_part = match new_exp {
                     None => panic!("evaluating the new exponent failed"),
                     Some(exp) if exp.is_negative() => panic!("new exponent is negative"),
@@ -345,11 +418,10 @@ where
                 // for a base such as `sin(x)` it must not be dropped — doing so
                 // silently differentiates `sin(x)^2` to `2 sin(x)`.
                 let result = power_part.impl_mul(inner_derivative);
-                calc_step!(
-                    steps,
-                    "power rule",
-                    format!("d/dx u^n = n u^(n-1) u' for {borrowed}"),
-                    result.clone()
+                steps.record(
+                    "assemble",
+                    || "combine n u^(n-1) with the inner derivative".to_string(),
+                    || Expr::from_node(result.clone()),
                 );
                 return result;
             }
@@ -365,20 +437,34 @@ where
                 );
                 let base = op_node.left.clone();
                 let exp = op_node.right.clone();
-                let result = match &base.inner.borrow().value {
-                    NodeValue::Operand(Token::Constant(Const::E)) => {
-                        mul(self.clone(), exp.get_derivative(steps))
-                    }
-                    _ => {
-                        let power_as_e = mul(call(Func::Ln, base.clone()), exp);
-                        mul(self.clone(), power_as_e.get_derivative(steps))
-                    }
+                let base_text = base.to_string();
+                let exponent_text = exp.to_string();
+                let inner_note = match leaf_derivative_text(&exp) {
+                    Some(text) => format!(" and u' = {text}"),
+                    None => String::new(),
                 };
-                calc_step!(
-                    steps,
+                steps.record_without_result(
                     "exponential rule",
-                    format!("d/dx b^u = b^u ln(b) u' for {borrowed}"),
-                    result.clone()
+                    || format!(
+                        "d/dx b^u = b^u ln(b) u' with b = {base_text}, u = {exponent_text}{inner_note}"
+                    ),
+                    || Expr::from_node(self.clone()),
+                );
+                let result = if matches!(
+                    base.inner.borrow().value,
+                    NodeValue::Operand(Token::Constant(Const::E))
+                ) {
+                    let exponent_derivative = derivative_of_operand(steps, &exp);
+                    mul(self.clone(), exponent_derivative)
+                } else {
+                    let power_as_e = mul(call(Func::Ln, base.clone()), exp);
+                    let derivative = derivative_of_operand(steps, &power_as_e);
+                    mul(self.clone(), derivative)
+                };
+                steps.record(
+                    "assemble",
+                    || "combine b^u with the exponent's derivative".to_string(),
+                    || Expr::from_node(result.clone()),
                 );
                 return result;
             }
@@ -390,15 +476,28 @@ where
             && matches!(op_node.token, Token::Operator(Op::Mul | Op::ImplicitMul)) {
                 let left = op_node.left.clone();
                 let right = op_node.right.clone();
-                let result = add(
-                    mul(left.clone(), right.clone().get_derivative(steps)),
-                    mul(left.get_derivative(steps), right),
-                );
-                calc_step!(
-                    steps,
+                let left_text = left.to_string();
+                let right_text = right.to_string();
+                // Strategy first: the rule with both factors named. Their
+                // derivatives follow as narrated blocks of their own (or are
+                // stated inline when a factor is a leaf).
+                steps.record_without_result(
                     "product rule",
-                    format!("d/dx (uv) = u'v + uv' for {borrowed}"),
-                    result.clone()
+                    || format!(
+                        "d/dx (u v) = u' v + u v' with u = {left_text}, v = {right_text}"
+                    ),
+                    || Expr::from_node(self.clone()),
+                );
+                let left_derivative = derivative_of_operand(steps, &left);
+                let right_derivative = derivative_of_operand(steps, &right);
+                let result = add(
+                    mul(left, right_derivative),
+                    mul(left_derivative, right),
+                );
+                steps.record(
+                    "assemble",
+                    || "combine u' v + u v'".to_string(),
+                    || Expr::from_node(result.clone()),
                 );
                 return result;
             }
@@ -410,18 +509,28 @@ where
             && matches!(op_node.token, Token::Operator(Op::Div)) {
                 let left = op_node.left.clone();
                 let right = op_node.right.clone();
+                let left_text = left.to_string();
+                let right_text = right.to_string();
+                steps.record_without_result(
+                    "quotient rule",
+                    || format!(
+                        "d/dx (u / v) = (u' v - u v') / v ^ 2 with u = {left_text}, v = {right_text}"
+                    ),
+                    || Expr::from_node(self.clone()),
+                );
+                let left_derivative = derivative_of_operand(steps, &left);
+                let right_derivative = derivative_of_operand(steps, &right);
                 let result = div(
                     sub(
-                        mul(left.clone().get_derivative(steps), right.clone()),
-                        mul(left, right.clone().get_derivative(steps)),
+                        mul(left_derivative, right.clone()),
+                        mul(left, right_derivative),
                     ),
                     pow(right, number(2)),
                 );
-                calc_step!(
-                    steps,
-                    "quotient rule",
-                    format!("d/dx (u/v) = (u'v - uv') / v^2 for {borrowed}"),
-                    result.clone()
+                steps.record(
+                    "assemble",
+                    || "combine (u' v - u v') / v ^ 2".to_string(),
+                    || Expr::from_node(result.clone()),
                 );
                 return result;
             }
