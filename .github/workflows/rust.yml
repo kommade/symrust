@@ -1,0 +1,130 @@
+name: CI & crates.io publish
+
+# Run the full test suite on every PR. Only publish to crates.io after the PR
+# is merged (when changes are pushed to the default branch).
+#
+# Notes:
+# - Tests run on pull_request events.
+# - Publish runs on pushes to `master` — change the branch name if the
+#   default branch is different.
+# - Publishing uses the repository secret CARGO_SECRET (mapped to
+#   CARGO_REGISTRY_TOKEN). Secrets must be set in the repository settings.
+# - The `symr` REPL binary is feature-gated (`repl`), so the publish step
+#   packs the lib target only; a regular `cargo publish` would try to build
+#   the bin and fail with an unpublishable optional dependency. `--no-verify`
+#   keeps the packed crate from re-running the suite the test job just ran.
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUSTUP_TOOLCHAIN: nightly
+
+jobs:
+  test:
+    name: Run tests on PRs
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+
+      - name: Cache cargo registry, git index and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      # The REPL feature pulls in the `symr` binary and turns on every library
+      # feature (algebraic, complex), so this single invocation covers the
+      # whole surface: lib, doc tests, integration tests and the binary's
+      # grammar tests all run. `--all-targets` additionally compiles the
+      # benchmarks.
+      - name: Run cargo tests (all targets, every feature)
+        run: cargo test --all-targets --features repl
+
+      - name: Run doc tests
+        run: cargo test --all-features --doc
+
+  publish:
+    name: Publish symrust to crates.io
+    runs-on: ubuntu-latest
+    # Only run publish on pushes to master (i.e., after a PR merge).
+    if: >
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/master'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+
+      - name: Cache cargo registry, git index and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-publish-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Check whether this version is already on crates.io
+        id: check-versions
+        run: |
+          manifest_version() { # $1 = manifest path
+            grep '^version' "$1" | head -1 | sed 's/version *= *"\(.*\)"/\1/'
+          }
+
+          published_version() { # $1 = crate name; empty string when never published
+            curl -fsSL "https://crates.io/api/v1/crates/$1" \
+              -H 'User-Agent: symrust-publish-check (github.com/kommade/symrust)' \
+              | jq -r '.crate.max_stable_version // ""' 2>/dev/null || echo ""
+          }
+
+          MANIFEST=$(manifest_version Cargo.toml)
+          PUBLISHED=$(published_version symrust)
+
+          echo "symrust: manifest=$MANIFEST published=${PUBLISHED:-<none>}"
+
+          # NOTE: the baseline for publishing is crates.io itself, not the
+          # previous commit — both sides of a git comparison are the same
+          # tree at this point, which would always read "unchanged".
+          if [ -n "$PUBLISHED" ] && [ "$MANIFEST" = "$PUBLISHED" ]; then
+            echo "symrust $MANIFEST is already on crates.io, skipping"
+            echo "skip_publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "symrust $MANIFEST is missing on crates.io, will publish"
+            echo "skip_publish=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish `symrust`
+        if: steps.check-versions.outputs.skip_publish != 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_SECRET }}
+        # `--no-verify`: the packed crate's optional `repl` dependency cannot
+        # run the bin target's tests during packaging (see the `repl` feature
+        # notes in Cargo.toml), and the test job above already ran the suite.
+        run: cargo publish --no-verify --allow-dirty

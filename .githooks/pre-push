@@ -1,0 +1,76 @@
+#!/bin/bash
+# Pre-push version-bump hook for symrust.
+#
+# Rule: for pushes that touch a Cargo.toml, the crate version in the pushed
+# commit must differ from origin/master's version. Bump `symrust` in
+# Cargo.toml (semver) before pushing; otherwise the push is rejected.
+#
+# Exemption: pushes that do NOT modify any Cargo.toml (docs, CI, tests, raw
+# source fixes) pass without a bump — otherwise CI adjustments to master
+# would be impossible without semver noise.
+#
+# Why compare against origin/master (instead of the destination ref)?
+# 1. For brand-new remote branches git reports an all-zeros remote OID, which
+#    is not diffable and makes the comparison reject every new-branch push
+#    with a bogus "version has not changed".
+# 2. Feature branches push repeatedly while master does not move, so master
+#    is the only stable baseline.
+#
+# Notes:
+# - git hands pre-push its arguments on standard input, one line per pushed
+#   ref: "<local ref> <local sha> <remote ref> <remote sha>".
+# - The comparison uses the locally known origin/master ref (updated by
+#   fetch/pull/push of master); the hook itself never touches the network.
+# - Install it into the working tree with:
+#       git config core.hooksPath .githooks
+#   (kept out of .git/hooks/, which no commit carries).
+
+zero=0000000000000000000000000000000000000000
+# Working-tree checkouts may use CRLF; strip the carriage return that the
+# `read` below would otherwise keep on the last field of each stdin line.
+CR=$(printf '\r')
+
+# Pick the master ref to compare against (fall back to main).
+master_ref=""
+if git rev-parse --verify --quiet origin/master >/dev/null 2>&1; then
+    master_ref="origin/master"
+elif git rev-parse --verify --quiet origin/main >/dev/null 2>&1; then
+    master_ref="origin/main"
+fi
+
+get_version() { # $1 = commit-ish, $2 = manifest path
+    git show "$1:$2" 2>/dev/null | grep "^version" | head -1 | sed 's/version *= *"\(.*\)"/\1/'
+}
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    remote_sha="${remote_sha%$CR}"
+
+    # Branch deletion: nothing to validate.
+    if [ "$local_sha" = "$zero" ]; then
+        continue
+    fi
+
+    # No master ref available locally: cannot compare, allow the push.
+    if [ -z "$master_ref" ]; then
+        continue
+    fi
+
+    # The bump rule only applies when a Cargo.toml actually changed.
+    if [ -z "$(git diff --name-only "$master_ref" "$local_sha" -- '*Cargo.toml')" ]; then
+        continue
+    fi
+
+    pushed_version=$(get_version "$local_sha" "Cargo.toml")
+    master_version=$(get_version "$master_ref" "Cargo.toml")
+
+    if [ -n "$pushed_version" ] && [ "$pushed_version" != "$master_version" ]; then
+        continue
+    fi
+
+    echo "Push rejected: no version bump relative to $master_ref."
+    echo "  symrust: pushed '${pushed_version:-?}' (master '${master_version:-?}')"
+    echo "Bump the version in Cargo.toml (semver), commit, and push again."
+    exit 1
+done
+
+exit 0
