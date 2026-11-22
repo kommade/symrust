@@ -366,7 +366,7 @@ fn factor_divisors(n: usize) -> Vec<usize> {
     let mut result = Vec::new();
     let mut d = 1;
     while d * d <= n {
-        if n.is_multiple_of(d) {
+        if n % d == 0 {
             result.push(d);
             if d != n / d {
                 result.push(n / d);
@@ -468,9 +468,9 @@ fn divisors(value: u128) -> Vec<i128> {
     let mut remaining = value;
     let mut candidate = 2u128;
     while candidate * candidate <= remaining {
-        if remaining.is_multiple_of(candidate) {
+        if remaining % candidate == 0 {
             let mut exponent = 0u32;
-            while remaining.is_multiple_of(candidate) {
+            while remaining % candidate == 0 {
                 remaining /= candidate;
                 exponent += 1;
             }
