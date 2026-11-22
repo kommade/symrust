@@ -33,9 +33,16 @@ pub use crate::math::structs::expr::{Evaluated, Expr, ExprError};
 pub use crate::math::structs::expr::node::Node;
 
 // The value types.
+//
+// `Complex` only exists under its feature, so its re-export is gated the same
+// way: an ungated path here would break every default-feature build (which is
+// also how a stable toolchain compiles the crate, `generic_const` being
+// nightly-only).
 pub use crate::math::algebra::rational::Rat;
 pub use crate::math::algebra::surd::Surd;
-pub use crate::math::numeric::{Complex, Evaluable, Real};
+pub use crate::math::numeric::{Evaluable, Real};
+#[cfg(feature = "complex")]
+pub use crate::math::numeric::Complex;
 
 // Calculus: the traits mix in and the answers that come back.
 pub use crate::math::calculus::antiderivative::Antiderivative;
