@@ -18,19 +18,23 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 use crate::math::algebra::rational::Rat;
 use crate::math::algebra::surd::{self, Surd};
 use crate::math::numeric::{ExactField, FloatType, Real, SymbolicLeaf};
-use crate::math::parse::lexer::{Op, Token};
+use crate::math::parse::lexer::{Const, Func, Op, Token};
 use crate::math::parse::{lexer::Lexer, parser::Parser};
 
 pub mod error;
 pub mod node;
 pub mod evaluate;
 pub mod limit;
+mod build;
 mod matrix;
 
 use node::{MulType, Node, NodeInner, NodeFunctions, NodeOperations, NodeValue};
 pub use error::ExprError;
 pub use evaluate::{Evaluable, Evaluated};
 pub use limit::Limit;
+pub use build::{
+    e, float, float_as, function, number, number_as, one, pi, symbol, symbol_as, x, zero, Symbol,
+};
 
 mod closed_form;
 #[cfg(feature = "algebraic")]
@@ -39,6 +43,9 @@ pub mod roots;
 // matrix_steps renderer without opening the module itself up.
 #[cfg(feature = "algebraic")]
 pub(crate) use matrix::algebraic_eigenvalues;
+// The interned variable-leaf table the symbol coercions and the parser's
+// operand loop share.
+pub(crate) use build::shared_leaf;
 // The tolerant null-space read-off the eigenspace queries share with the
 // step-tracked eigen narrative.
 pub(crate) use matrix::null_space_basis;
@@ -53,6 +60,16 @@ pub(crate) use matrix::null_space_basis;
 /// Trees are normally built through the [`create_expr!`][crate::create_expr]
 /// macro (or [`Expr::new`] for `Real`), which is the crate's preferred way of
 /// constructing expressions.
+///
+/// # Cloning and sharing
+///
+/// The tree is shared through immutable `Arc`-backed nodes: a node is frozen
+/// once built, so [`Clone for Expr`][Expr::clone] is a pointer bump and no
+/// rewrite ever deep-copies the subtrees it keeps — rewrites build fresh
+/// parents but reuse the frozen nodes below them. Holding several clones of
+/// one expression therefore costs one reference count per clone, not one copy
+/// of the tree, and the duplicated symbol produced by a [`Symbol`] shares its
+/// single allocation across every place it appears.
 #[derive(Debug)]
 pub struct Expr<T = Real> {
     pub(crate) tree: Node<T>,
@@ -213,8 +230,18 @@ impl<T: FloatType + Display> Expr<T> {
     /// for the default `Real` this is the historical `Expr::new`. This is the
     /// same path [`parse`](Self::parse) takes, kept under the shorter name for
     /// the default type.
-    pub fn new(str: String, indp_var: Option<char>) -> Result<Self, ExprError> {
+    pub fn new(str: String, indp_var: Option<char>) -> Result<Self, ExprError>
+    where
+        T: SymbolicLeaf,
+    {
         Self::parse(str, indp_var)
+    }
+
+    /// Check if this expression shares the same tree as another expression.
+    /// This checks if the underlying allocation is the same, not if the trees are 
+    /// structurally equal.
+    pub(crate) fn shares_tree(&self, other: &Self) -> bool {
+        self.tree.shares_with(&other.tree)
     }
 }
 
@@ -237,7 +264,15 @@ impl<T: FloatType + Display> Expr<T> {
     /// elements independent, what do they span, what is their rank — are
     /// read off the result with the matrix methods. Braces are
     /// illegal everywhere else in the grammar, so nothing else is affected.
-    pub fn parse(mut str: String, indp_var: Option<char>) -> Result<Self, ExprError> {
+    ///
+    /// Variable leaves come from the crate's intern table, so a parsed `x`
+    /// shares one allocation with every [`Symbol`] coercion of the same
+    /// letter and every other parse of it; this is why parsing requires a
+    /// [`SymbolicLeaf`] leaf type.
+    pub fn parse(mut str: String, indp_var: Option<char>) -> Result<Self, ExprError>
+    where
+        T: SymbolicLeaf,
+    {
         if str.contains('{') {
             str = str.replace('{', "[").replace('}', "]");
         }
@@ -256,6 +291,126 @@ impl<T: FloatType + Display> Expr<T> {
     #[must_use]
     pub fn tree(&self) -> &Node<T> {
         &self.tree
+    }
+}
+
+/// Generate one inherent method per lexer-function token.
+///
+/// Every `Func` variant the lexer can produce should be reachable as a method
+/// (`x.sin()`, `x.sqrt()`, …), so building an expression from Rust values
+/// never needs the raw [`Func`] enum. Parameterised variants (`root`, `log`)
+/// carry data and are hand-written next to the generated block.
+macro_rules! expr_func {
+    ($($name:ident => $variant:ident: $doc:expr),* $(,)?) => {
+        $(
+            #[doc = $doc]
+            #[must_use]
+            pub fn $name(self) -> Self {
+                Self::function(Func::<T>::$variant, self)
+            }
+        )*
+    };
+}
+
+impl<T: FloatType + Display> Expr<T> {
+    /// Create the zero expression.
+    #[must_use]
+    pub fn zero() -> Self {
+        Self::from_node(Node::zero())
+    }
+
+    /// Create the one expression.
+    #[must_use]
+    pub fn one() -> Self {
+        Self::from_node(Node::one())
+    }
+
+    /// Create an integer-literal expression.
+    #[must_use]
+    pub fn number(value: i64) -> Self {
+        Self::from_node(Node::number(value))
+    }
+
+    /// Create a float-literal expression.
+    #[must_use]
+    pub fn float(value: impl Into<T>) -> Self {
+        Self::from_node(Node::float(value))
+    }
+
+    /// Create the independent-variable expression for `letter`.
+    ///
+    /// Repeated calls — and every coercion of a [`Symbol`] — hand out the
+    /// same interned leaf allocation rather than building a fresh node each
+    /// time.
+    #[must_use]
+    pub fn symbol(letter: char) -> Self
+    where
+        T: SymbolicLeaf,
+    {
+        Self::from_node(build::shared_leaf::<T>(letter, true))
+    }
+
+    /// Create a named free-variable expression.
+    #[must_use]
+    pub fn var(letter: char) -> Self {
+        Self::from_node(Node::var(letter))
+    }
+
+    /// Create a named mathematical constant expression.
+    #[must_use]
+    pub fn constant(value: Const) -> Self {
+        Self::from_node(Node::from_constant(value))
+    }
+
+    /// Create the expression `pi`.
+    #[must_use]
+    pub fn pi() -> Self {
+        Self::constant(Const::Pi)
+    }
+
+    /// Create the expression `e`.
+    #[must_use]
+    pub fn e() -> Self {
+        Self::constant(Const::E)
+    }
+
+    /// Create a function application.
+    #[must_use]
+    pub fn function(function: Func<T>, argument: Self) -> Self {
+        Self::from_node(Node::call(function, argument.tree))
+    }
+
+    /// The `index`-th root of the expression, i.e. `$x^{1/index}$`.
+    ///
+    /// The token the lexer reads for this is `root_n(x)`.
+    #[must_use]
+    pub fn root(self, index: impl Into<T>) -> Self {
+        Self::function(Func::Root(index.into()), self)
+    }
+
+    /// The logarithm of the expression to the given `base`.
+    ///
+    /// The token the lexer reads for this is `log_n(x)`.
+    #[must_use]
+    pub fn log(self, base: impl Into<T>) -> Self {
+        Self::function(Func::Log(base.into()), self)
+    }
+
+    expr_func! {
+        sin => Sin: "The sine of the expression.",
+        cos => Cos: "The cosine of the expression.",
+        tan => Tan: "The tangent of the expression.",
+        sec => Sec: "The secant of the expression.",
+        csc => Csc: "The cosecant of the expression.",
+        cot => Cot: "The cotangent of the expression.",
+        asin => Asin: "The inverse sine of the expression.",
+        acos => Acos: "The inverse cosine of the expression.",
+        atan => Atan: "The inverse tangent of the expression.",
+        sqrt => Sqrt: "The square root of the expression, symbolic until it folds exactly.",
+        ln => Ln: "The natural logarithm of the expression.",
+        erf => Erf: "The Gauss error function of the expression.",
+        si => Si: "The sine integral of the expression.",
+        ei => Ei: "The exponential integral of the expression."
     }
 }
 
@@ -453,6 +608,18 @@ where
     }
 }
 
+impl<T: FloatType + Display> From<i64> for Expr<T> {
+    fn from(value: i64) -> Self {
+        Self::number(value)
+    }
+}
+
+impl<T: FloatType + Display> From<T> for Expr<T> {
+    fn from(value: T) -> Self {
+        Self::float(value)
+    }
+}
+
 impl<T: FloatType + Display> Add for Expr<T> {
     type Output = Self;
 
@@ -468,6 +635,22 @@ impl<T: FloatType + Display> Sub for Expr<T> {
     fn sub(self, other: Self) -> Self {
         let tree = self.tree.sub(other.tree);
         Self { tree }
+    }
+}
+
+impl<T: FloatType + Display> Add<i64> for Expr<T> {
+    type Output = Self;
+
+    fn add(self, other: i64) -> Self {
+        Self::from_node(self.tree.add(Node::number(other)))
+    }
+}
+
+impl<T: FloatType + Display> Sub<i64> for Expr<T> {
+    type Output = Self;
+
+    fn sub(self, other: i64) -> Self {
+        Self::from_node(self.tree.sub(Node::number(other)))
     }
 }
 
@@ -499,6 +682,35 @@ impl<T: FloatType + Display> Div for Expr<T> {
         Self { tree }
     }
 }
+// `bitxor` is deliberately not implemented for `Expr`: rustc parses `^` below
+// `+` and `*`, so `x ^ 2 + 1` desugars to `bitxor(x, 3)` — the wrong tree —
+// before any overload runs, and no type or attribute can make that grouping
+// fail loudly. See the comment in `build.rs` for the full reasoning.
+
+impl<T: FloatType + Display> Add<Expr<T>> for i64 {
+    type Output = Expr<T>;
+
+    fn add(self, other: Expr<T>) -> Expr<T> {
+        Expr::<T>::from_node(Node::number(self).add(other.tree))
+    }
+}
+
+impl<T: FloatType + Display> Sub<Expr<T>> for i64 {
+    type Output = Expr<T>;
+
+    fn sub(self, other: Expr<T>) -> Expr<T> {
+        Expr::<T>::from_node(Node::number(self).sub(other.tree))
+    }
+}
+
+impl<T: FloatType + Display> Mul<Expr<T>> for i64 {
+    type Output = Expr<T>;
+
+    fn mul(self, other: Expr<T>) -> Expr<T> {
+        Expr::<T>::from_node(Node::mul(Node::number(self), other.tree))
+    }
+}
+
 impl<T: SymbolicLeaf> Div<i64> for Expr<T> {
     type Output = Self;
 
@@ -511,8 +723,29 @@ impl<T: SymbolicLeaf> Div<i64> for Expr<T> {
 }
 
 impl<T: FloatType + Display> Expr<T> {
-    fn pow(self, other: Self) -> Self {
-        let tree = self.tree.pow(other.tree);
-        Self { tree }
+    /// The expression raised to `exponent`.
+    ///
+    /// The only spelling of the power operation: Rust parses `^` below `+`,
+    /// so `x ^ 2 + 1` would fold `2 + 1` first and silently build
+    /// `x ^ (2 + 1)` — which is why `^` is deliberately not implemented, and
+    /// this method, whose call binds tighter than the arithmetic operators,
+    /// reads as written.
+    ///
+    /// The exponent may be an integer, an [`Expr`], or the leaf type itself —
+    /// each converts through [`From`].
+    ///
+    /// # Examples
+    /// ```
+    /// use symrust::prelude::*;
+    /// let x = symbol('x');
+    /// let squared = x.pow(2);
+    /// assert_eq!(squared.to_string(), "x ^ 2");
+    /// assert_eq!((squared + 1).to_string(), "x ^ 2 + 1");
+    /// ```
+    #[must_use]
+    pub fn pow(self, exponent: impl Into<Self>) -> Self {
+        Self {
+            tree: self.tree.pow(exponent.into().tree),
+        }
     }
 }

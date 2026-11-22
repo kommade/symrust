@@ -1,5 +1,8 @@
 use super::EXAMPLE_FUNCTIONS;
 use crate::create_expr;
+use crate::math::numeric::Real;
+use crate::math::structs::expr::{symbol, symbol_as, Expr};
+use crate::math::parse::lexer::Func;
 
 #[test]
 fn create_expr() {
@@ -7,6 +10,106 @@ fn create_expr() {
         let expr = create_expr!(example.input).unwrap();
         assert_eq!(expr.to_latex().unwrap(), example.latex);
     }
+}
+
+#[test]
+fn declarative_expression_api() {
+    let x = symbol('x');
+    let polynomial = x.pow(2) + 2 * x + 1;
+    assert_eq!(polynomial.to_string(), "x ^ 2 + 2 x + 1");
+    assert_eq!(x.pow(x).to_string(), "x ^ x");
+    assert_eq!((1 + x).to_string(), "1 + x");
+    assert_eq!((1 - x).to_string(), "1 - x");
+    assert_eq!((x / 2).to_string(), "x / 2");
+    assert_eq!((x + Expr::<Real>::number(5)).to_string(), "x + 5");
+
+    let y = symbol_as::<f64>('y');
+    let y_expr: Expr<f64> = y.into();
+    assert_eq!(y_expr.to_string(), "y");
+    let typed_polynomial = y * 2 + 1;
+    let _: Expr<f64> = typed_polynomial;
+
+    let x = Expr::<Real>::symbol('x');
+    assert_eq!(x.to_string(), "x");
+
+    let polynomial = Expr::<Real>::number(2)
+        * Expr::<Real>::symbol('x')
+        * Expr::<Real>::symbol('x')
+        + Expr::<Real>::number(1);
+    assert_eq!(polynomial.simplify(true).to_string(), "2 x ^ 2 + 1");
+
+    let sine = Expr::<Real>::function(
+        Func::<Real>::Sin,
+        Expr::<Real>::symbol('x'),
+    );
+    assert_eq!(sine.to_string(), "sin(x)");
+
+    assert_eq!(create_expr!("2x^2 + sin(x)").unwrap().to_string(), "2 x ^ 2 + sin(x)");
+    let typed = create_expr!("2t^2", 't'; f64).unwrap();
+    let _: Expr<f64> = typed;
+}
+
+#[test]
+fn function_tokens_have_methods() {
+    let x = symbol('x');
+
+    assert_eq!(x.sin().to_string(), "sin(x)");
+    assert_eq!(x.cos().to_string(), "cos(x)");
+    assert_eq!(x.tan().to_string(), "tan(x)");
+    assert_eq!(x.sec().to_string(), "sec(x)");
+    assert_eq!(x.csc().to_string(), "csc(x)");
+    assert_eq!(x.cot().to_string(), "cot(x)");
+    assert_eq!(x.asin().to_string(), "asin(x)");
+    assert_eq!(x.acos().to_string(), "acos(x)");
+    assert_eq!(x.atan().to_string(), "atan(x)");
+    assert_eq!(x.sqrt().to_string(), "sqrt(x)");
+    assert_eq!(x.ln().to_string(), "ln(x)");
+    assert_eq!(x.erf().to_string(), "erf(x)");
+    assert_eq!(x.si().to_string(), "si(x)");
+    assert_eq!(x.ei().to_string(), "ei(x)");
+
+    // The parameterised tokens match what the lexer reads for the same call.
+    assert_eq!(x.root(3i64).to_string(), create_expr!("root_3(x)").unwrap().to_string());
+    assert_eq!(x.log(2i64).to_string(), create_expr!("log_2(x)").unwrap().to_string());
+
+    // The same token methods exist on built expressions, and chain.
+    assert_eq!(x.pow(2).sqrt().to_string(), "sqrt(x ^ 2)");
+    assert_eq!(x.ln().pow(2).sqrt().to_string(), "sqrt(ln(x) ^ 2)");
+}
+
+#[test]
+fn symbol_coercions_share_one_leaf_allocation() {
+    use crate::math::structs::expr::node::NodeValue;
+
+    let x = symbol('x');
+    let first = Expr::<Real>::from(x);
+    let second = Expr::<Real>::from(x);
+    assert!(first.shares_tree(&second));
+
+    // Both operands of `x + x` are pointers into the same interned leaf.
+    let sum = x + x;
+    let NodeValue::Operator(op) = &sum.tree().inner.borrow().value else {
+        panic!("an addition builds an operator node");
+    };
+    assert!(op.left.inner.shared_with(&op.right.inner));
+    assert!(op.left.inner.shared_with(&first.tree().inner));
+
+    // The parser path interns too: both operands of a parsed sum point at the
+    // one allocation, and a parsed `x` is the node the coercion produces.
+    let parsed = create_expr!("x + x").unwrap();
+    let NodeValue::Operator(parsed_op) = &parsed.tree().inner.borrow().value else {
+        panic!("a parsed sum builds an operator node");
+    };
+    assert!(parsed_op.left.inner.shared_with(&parsed_op.right.inner));
+    assert!(parsed_op.left.inner.shared_with(&first.tree().inner));
+
+    // Free variables intern under their own kind, shared per letter.
+    let free = create_expr!("a + a").unwrap();
+    let NodeValue::Operator(free_op) = &free.tree().inner.borrow().value else {
+        panic!("a parsed sum builds an operator node");
+    };
+    assert!(free_op.left.inner.shared_with(&free_op.right.inner));
+    assert!(!free_op.left.inner.shared_with(&op.left.inner));
 }
 
 #[test]

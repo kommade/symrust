@@ -108,6 +108,19 @@ impl<T> Shared<T> {
     pub(crate) fn shared_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.inner, &other.inner)
     }
+
+    /// The handle's underlying reference-counted allocation, so shared-leaf
+    /// interning can clone the `Arc` and rebuild handles over one allocation.
+    pub(crate) fn arc(&self) -> &Arc<NodeInner<T>> {
+        &self.inner
+    }
+
+    /// A handle over an existing allocation: [`Self::arc`]'s counterpart,
+    /// building a second `Shared` — and so a second `Node` — that points at
+    /// the same frozen payload.
+    pub(crate) fn from_arc(inner: Arc<NodeInner<T>>) -> Self {
+        Self { inner }
+    }
 }
 
 // The tree crosses threads whenever its leaf data does.

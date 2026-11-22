@@ -1,6 +1,6 @@
 [package]
 name = "symrust"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 authors = ["kommade"]
 # The edition floor is 1.85; the nightly-only features are opt-in behind the

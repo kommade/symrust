@@ -100,21 +100,34 @@ pub(crate) fn poly_text(coefficients: &[crate::math::algebra::rational::Rat], sy
     }
 }
 
+/// A supported mathematical function that can be used as an expression node.
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Func<T = Real> {
+    /// The sine function.
     Sin,
+    /// The cosine function.
     Cos,
+    /// The tangent function.
     Tan,
+    /// The secant function.
     Sec,
+    /// The cosecant function.
     Csc,
+    /// The cotangent function.
     Cot,
+    /// The inverse sine function.
     Asin,
+    /// The inverse cosine function.
     Acos,
+    /// The inverse tangent function.
     Atan,
+    /// The square-root function.
     Sqrt,
-    /// The `n`-th root, `root_n(x)` (i.e. `x^(1/n)`). Carries the index `n`.
+    /// The indexed root function, `root_n(x)` (i.e. `x^(1/n)`).
     Root(T),
+    /// The logarithm with the stored base.
     Log(T),
+    /// The natural logarithm.
     Ln,
     /// The Gauss error function, `erf(x) = 2/√π · ∫₀ˣ e^(-t²) dt`.
     Erf,
@@ -184,13 +197,17 @@ impl Display for Op {
     }
 }
 
+/// A named mathematical constant.
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Const {
+    /// The constant pi.
     Pi,
+    /// Euler's number.
     E,
 }
 
 impl Const {
+    /// Convert this named constant to the requested float leaf type.
     pub fn get_value<T: FloatType>(&self) -> T {
         match self {
             Self::Pi => T::pi(),

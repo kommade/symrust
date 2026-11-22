@@ -17,6 +17,12 @@
 //!     "(x ^ 2) (e ^ x) - 2 x e ^ x + 2 e ^ x"
 //! );
 //!
+//! // Or build an expression from Rust values: the symbol is `Copy`, so one
+//! // variable serves every occurrence without clones.
+//! let x = symbol('x');
+//! let quadratic = x.pow(2) + 2 * x + 1;
+//! assert_eq!(quadratic.to_string(), "x ^ 2 + 2 x + 1");
+//!
 //! let matrix = Matrix::from_vec(
 //!     2,
 //!     2,
@@ -27,10 +33,14 @@
 //! ```
 
 pub use crate::create_expr;
+pub use crate::math::structs::expr::{
+    e, number, number_as, one, pi, symbol, symbol_as, x, zero, Symbol,
+};
 
 // The expression tree and its accessors.
 pub use crate::math::structs::expr::{Evaluated, Expr, ExprError};
 pub use crate::math::structs::expr::node::Node;
+pub use crate::math::parse::lexer::{Const, Func};
 
 // The value types.
 //
