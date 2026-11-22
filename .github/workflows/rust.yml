@@ -13,6 +13,12 @@ name: CI & crates.io publish
 #   packs the lib target only; a regular `cargo publish` would try to build
 #   the bin and fail with an unpublishable optional dependency. `--no-verify`
 #   keeps the packed crate from re-running the suite the test job just ran.
+# - Beyond the feature-complete nightly runs, the nightly-only code paths are
+#   cfg-gated off for library users, so CI also compiles the default (and
+#   `complex`) feature sets on stable Rust. Everything that runs
+#   `--features repl` implies `complex` and would happily build an ungated
+#   re-export or other default-path breakage — a mistake a stable check makes
+#   impossible to merge.
 on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
@@ -65,6 +71,25 @@ jobs:
 
       - name: Run doc tests
         run: cargo test --all-features --doc
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+
+      # `repl` implies every library feature, so a compile break on the
+      # default feature set (an ungated re-export of a feature-gated type,
+      # for example) is invisible to the steps above. Check the paths a
+      # library user actually builds — plain, and with `complex` on its own —
+      # under stable Rust, which is also the honest MSRV probe. The step
+      # env pins the toolchain for these invocations only; the job env keeps
+      # nightly for everything else.
+      - name: Check stable builds of the user-facing feature sets
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: |
+          cargo check --lib
+          cargo check --lib --features complex
 
   publish:
     name: Publish symrust to crates.io
