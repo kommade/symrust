@@ -215,21 +215,25 @@ impl Real {
 
     // --- predicates -----------------------------------------------------
 
+    /// `true` for exactly zero.
     #[must_use]
     pub fn is_zero(&self) -> bool {
         self.0.is_zero()
     }
 
+    /// `true` for a quiet NaN.
     #[must_use]
     pub fn is_nan(&self) -> bool {
         self.0.is_nan()
     }
 
+    /// `true` for +∞ or −∞.
     #[must_use]
     pub fn is_infinite(&self) -> bool {
         self.0.is_inf()
     }
 
+    /// `true` for a finite, normalized non-zero value.
     #[must_use]
     pub fn is_normal(&self) -> bool {
         self.0.is_normal()
@@ -260,11 +264,13 @@ impl Real {
         (self.clone() - other.clone()).abs() <= Self::epsilon()
     }
 
+    /// `true` when the value is `1` (within tolerance).
     #[must_use]
     pub fn is_one(&self) -> bool {
         self.float_equal(&Self::one())
     }
 
+    /// `true` when the value is `-1` (within tolerance).
     #[must_use]
     pub fn is_neg_one(&self) -> bool {
         self.float_equal(&Self::neg_one())
@@ -278,16 +284,19 @@ impl Real {
 
     // --- rounding -------------------------------------------------------
 
+    /// Truncate towards zero.
     #[must_use]
     pub fn trunc(&self) -> Self {
         Self(self.0.trunc())
     }
 
+    /// Round to the nearest integer (halves away from zero).
     #[must_use]
     pub fn round(&self) -> Self {
         Self(self.0.round())
     }
 
+    /// The absolute value.
     #[must_use]
     pub fn abs(&self) -> Self {
         Self(self.0.abs())
@@ -328,6 +337,8 @@ impl Real {
 
     // --- powers ---------------------------------------------------------
 
+    /// `self ^ exponent`, with an exact integer-power path at a negative base
+    /// (the engine's own `pow` is NaN there).
     #[must_use]
     pub fn pow(self, exponent: &Self) -> Self {
         // `arpfloat`'s `pow` is `exp(exponent · log(self))`, which is NaN at a
@@ -354,6 +365,7 @@ impl Real {
         Self(self.0.powi(n))
     }
 
+    /// The principal square root.
     #[must_use]
     pub fn sqrt(self) -> Self {
         Self(self.0.sqrt())
@@ -361,16 +373,19 @@ impl Real {
 
     // --- elementary functions -------------------------------------------
 
+    /// The sine of `self` (radians).
     #[must_use]
     pub fn sin(self) -> Self {
         Self(self.0.sin())
     }
 
+    /// The cosine of `self` (radians).
     #[must_use]
     pub fn cos(self) -> Self {
         Self(self.0.cos())
     }
 
+    /// The tangent of `self` (radians).
     #[must_use]
     pub fn tan(self) -> Self {
         Self(self.0.tan())
@@ -388,8 +403,20 @@ impl Real {
         Self::ln(self) / Self::ln(base)
     }
 
+    /// The natural exponential `e^self`.
+    ///
+    /// The engine's own exp is NaN at the infinities; the limits are the
+    /// textbook `0` and `+inf`, and leaving a NaN here knocks every bound
+    /// evaluation at infinity off the substitution path into numeric probing.
     #[must_use]
     pub fn exp(self) -> Self {
+        if self.is_infinite() {
+            return if self.is_negative() {
+                Self::zero()
+            } else {
+                Self::infinity()
+            };
+        }
         Self(self.0.exp())
     }
 

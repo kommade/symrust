@@ -131,9 +131,9 @@ where
     ///
     /// [`ExprError::NotAMatrix`] when the expression is not a matrix.
     pub fn r#ref(&self) -> Result<Self, ExprError> {
-        Ok(Expr::from_node(Node::matrix(
+        Ok(tidied_matrix(
             self.matrix_or_error()?.r#ref(),
-        )))
+        ))
     }
 
     /// The reduced row echelon form of this matrix.
@@ -142,9 +142,9 @@ where
     ///
     /// [`ExprError::NotAMatrix`] when the expression is not a matrix.
     pub fn rref(&self) -> Result<Self, ExprError> {
-        Ok(Expr::from_node(Node::matrix(
+        Ok(tidied_matrix(
             self.matrix_or_error()?.rref(),
-        )))
+        ))
     }
 
     /// The rank of this matrix, i.e. the dimension of its column space.
@@ -165,15 +165,108 @@ where
         Ok(self.matrix_or_error()?.nullity())
     }
 
+    /// A basis of the column space of this matrix.
+    ///
+    /// A minimal independent spanning set, given in canonical reduced form:
+    /// the columns stacked as rows, exactly reduced, and the non-zero rows
+    /// read back as vectors — vectors of the same length as the matrix's
+    /// columns and spanning exactly the same subspace. Each returned as its
+    /// one-column matrix, the way eigenspace bases are presented.
+    ///
+    /// # Examples
+    /// ```
+    /// use symrust::create_expr;
+    ///
+    /// // The second column is twice the first: the space is one-dimensional.
+    /// let expr = create_expr!("[[1, 2], [3, 6]]").unwrap();
+    /// let basis = expr.column_space().unwrap();
+    /// assert_eq!(basis.len(), 1);
+    /// let entries = basis[0].as_matrix().unwrap();
+    /// assert_eq!(entries[0][0].to_string(), "1");
+    /// assert_eq!(entries[1][0].to_string(), "3");
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// [`ExprError::NotAMatrix`] when the expression is not a matrix.
+    pub fn column_space(&self) -> Result<Vec<Self>, ExprError> {
+        Ok(self
+            .matrix_or_error()?
+            .col_space()
+            .span_basis()
+            .iter()
+            .map(|vector| Self::from_matrix(vector.to_matrix()))
+            .collect())
+    }
+
+    /// A basis of the row space of this matrix: the canonical reduced rows
+    /// that none of the original rows could be dropped from anymore, each
+    /// returned as its own one-row matrix — a row space lives in row-land, so
+    /// the basis vectors are rows, not columns.
+    ///
+    /// # Examples
+    /// ```
+    /// use symrust::create_expr;
+    ///
+    /// // The second row is twice the first: one row spans.
+    /// let expr = create_expr!("[[1, 2], [2, 4]]").unwrap();
+    /// let basis = expr.row_space().unwrap();
+    /// assert_eq!(basis.len(), 1);
+    /// let entries = basis[0].as_matrix().unwrap();
+    /// assert_eq!(entries[0][0].to_string(), "1");
+    /// assert_eq!(entries[0][1].to_string(), "2");
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// [`ExprError::NotAMatrix`] when the expression is not a matrix.
+    pub fn row_space(&self) -> Result<Vec<Self>, ExprError> {
+        Ok(self
+            .matrix_or_error()?
+            .row_space()
+            .span_basis()
+            .iter()
+            .map(|vector| Self::from_matrix(Matrix::from_rows(vec![vector.iter().collect()])))
+            .collect())
+    }
+
+    /// A basis of the null space of this matrix: the solutions of
+    /// `A x = 0`, each returned as its one-column matrix. Empty when the
+    /// null space is trivial (full column rank).
+    ///
+    /// # Examples
+    /// ```
+    /// use symrust::create_expr;
+    ///
+    /// // Full column rank: only the zero vector is mapped to zero.
+    /// let expr = create_expr!("[[1, 0], [0, 1], [1, 1]]").unwrap();
+    /// assert!(expr.null_space().unwrap().is_empty());
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// [`ExprError::NotAMatrix`] when the expression is not a matrix.
+    pub fn null_space(&self) -> Result<Vec<Self>, ExprError> {
+        Ok(self
+            .matrix_or_error()?
+            .null_space()
+            .iter()
+            .map(|vector| Self::from_matrix(vector.to_matrix()))
+            .collect())
+    }
+
     /// The determinant of this matrix.
+    ///
+    /// The cofactor expansion the linear layer runs leaves the term trees
+    /// unfolded (`1 (4 5 - 0 1) - 2 (...)`), so the scalar folds to its
+    /// readable exact form before it is returned.
     ///
     /// # Errors
     ///
     /// [`ExprError::NotAMatrix`] when the expression is not a matrix, or
     /// [`ExprError::NotSquare`] when it is not square.
     pub fn det(&self) -> Result<Self, ExprError> {
-        let value = self.square_or_error()?.det();
-        Ok(value)
+        Ok(self.square_or_error()?.det().tidy())
     }
 
     /// The inverse of this matrix.
@@ -188,7 +281,7 @@ where
             .square_or_error()?
             .inv()
             .ok_or(ExprError::Undefined("the matrix is singular, so it has no inverse"))?;
-        Ok(Expr::from_node(Node::matrix(inverse)))
+        Ok(tidied_matrix(inverse))
     }
 
     /// The general left inverse of this matrix, with free parameters.
@@ -341,7 +434,9 @@ where
         Ok(spaces)
     }
 
-    /// The LU decomposition `L * U` of this matrix, which multiplies back to it.
+    /// The LU decomposition `L * U` of this matrix, which multiplies back to
+    /// it. Both factors fold to readable entries before the product is
+    /// formed, so the answer's multiplicands are readable too.
     ///
     /// # Errors
     ///
@@ -353,10 +448,15 @@ where
             .square_or_error()?
             .lu_factorisation()
             .ok_or(ExprError::Undefined("the matrix has a zero pivot, so it has no LU decomposition"))?;
-        Ok(Expr::from_node(Node::matrix(lower.mul_matrix(&upper))))
+        let lower = tidied_matrix(lower).as_matrix().unwrap_or_else(|| Matrix::from_rows(Vec::new()));
+        let upper = tidied_matrix(upper).as_matrix().unwrap_or_else(|| Matrix::from_rows(Vec::new()));
+        Ok(tidied_matrix(lower.mul_matrix(&upper)))
     }
 
-    /// The QR decomposition `Q * R` of this matrix, which multiplies back to it.
+    /// The QR decomposition `Q * R` of this matrix, which multiplies back to
+    /// it. Both factors fold to readable entries — Q is built from the
+    /// normalisation lengths' square roots, so without this it carries
+    /// unfolded radicals — before the product is formed.
     ///
     /// # Errors
     ///
@@ -367,36 +467,83 @@ where
         let (orthogonal, upper) = self.square_or_error()?.qr_factorisation().ok_or(
             ExprError::Undefined("the columns are linearly dependent, so there is no QR decomposition"),
         )?;
-        Ok(Expr::from_node(Node::matrix(
-            orthogonal.mul_matrix(&upper),
-        )))
+        let orthogonal = tidied_matrix(orthogonal)
+            .as_matrix()
+            .unwrap_or_else(|| Matrix::from_rows(Vec::new()));
+        let upper = tidied_matrix(upper).as_matrix().unwrap_or_else(|| Matrix::from_rows(Vec::new()));
+        Ok(tidied_matrix(orthogonal.mul_matrix(&upper)))
     }
 
     /// The diagonalisation `P * D * P^-1` of this matrix, which multiplies back
-    /// to it.
+    /// to it. Each factor folds to readable entries first: P holds the exact
+    /// eigenvectors, D the exact eigenvalues, and P⁻¹ the entrywise arithmetic
+    /// of the inversion, all of which read better folded than as raw trees.
+    ///
+    /// The factors are built directly from the eigenspaces, so matrices whose
+    /// eigenvalues are irrational radicals (`[[1, 2], [5, -1]]` has ±sqrt(11))
+    /// diagonalise too — the generic layer's reconstruction check would
+    /// declare them not diagonalisable, because unfolded surd arithmetic
+    /// never passes its structural zero test.
     ///
     /// # Errors
     ///
     /// [`ExprError::NotAMatrix`] when the expression is not a matrix,
     /// [`ExprError::NotSquare`] when it is not square, or
-    /// [`ExprError::Undefined`] when the matrix is not diagonalisable.
+    /// [`ExprError::Undefined`] when the eigenvalues cannot be found or the
+    /// eigenspaces do not span the whole space.
     pub fn diagonalize(&self) -> Result<Self, ExprError> {
-        let diagonalization = self
-            .square_or_error()?
-            .diagonalize()
-            .ok_or(ExprError::Undefined("the matrix is not diagonalisable"))?;
-        let (eigenvectors, diagonal) = diagonalization.into_parts();
+        let matrix = self.square_or_error()?;
+        let size = matrix.rows();
+        let spaces = self.eigenspaces()?;
+        // P's columns are the eigenspace basis vectors; D's diagonal repeats
+        // each eigenvalue once per column of its own eigenspace. A sum of
+        // basis sizes equal to the space's dimension means every eigenspace's
+        // geometric multiplicity equals its algebraic one — the sum can only
+        // balance that way — so P D P⁻¹ is A again.
+        let mut eigenvectors = Matrix::<Expr<T>>::new(size, size);
+        let mut diagonal: Vec<Expr<T>> = Vec::with_capacity(size);
+        let mut column = 0usize;
+        for (lambda, basis) in &spaces {
+            for vector in basis {
+                let entries = vector.as_matrix().ok_or(ExprError::NotAMatrix)?;
+                for row in 0..size {
+                    eigenvectors[row][column] = entries[row][0].clone();
+                }
+                diagonal.push(lambda.clone());
+                column += 1;
+            }
+        }
+        if column != size {
+            return Err(ExprError::Undefined("the matrix is not diagonalisable"));
+        }
         let diagonal_matrix = Matrix::from_diagonal(&diagonal);
         let inverse = eigenvectors.inv().ok_or(ExprError::Undefined(
             "the eigenvectors do not form an invertible basis",
         ))?;
-        Ok(Expr::from_node(Node::matrix(
-            eigenvectors.mul_matrix(&diagonal_matrix).mul_matrix(&inverse),
-        )))
+        let tidy = |matrix: Matrix<Expr<T>>| {
+            tidied_matrix(matrix).as_matrix().unwrap_or_else(|| Matrix::from_rows(Vec::new()))
+        };
+        let eigenvectors = tidy(eigenvectors);
+        let diagonal_matrix = tidy(diagonal_matrix);
+        let inverse = tidy(inverse);
+        Ok(tidied_matrix(
+            eigenvectors
+                .mul_matrix(&diagonal_matrix)
+                .mul_matrix(&inverse),
+        ))
     }
 
     /// The singular value decomposition `U * S * V^T` of this matrix, which
     /// multiplies back to it.
+    ///
+    /// Σ is rebuilt as the `m x n` diagonal the decomposition reports (the
+    /// singular values on the leading diagonal, zeros elsewhere): a *square*
+    /// diagonal of the value vector would not compose — `U` is `m x m` and
+    /// `Vᵀ` is `n x n`, so the middle factor must carry the matrix's own
+    /// shape for the product to be defined. Every factor folds to readable
+    /// entries before the product is formed, so the singular values keep
+    /// their radical forms (`3 sqrt(5)`) rather than the raw square-root
+    /// trees the linear layer builds.
     ///
     /// # Errors
     ///
@@ -409,10 +556,23 @@ where
             .svd()
             .ok_or(ExprError::Undefined("no singular value decomposition is available"))?;
         let (left, singular_values, right) = decomposition.into_parts();
-        let sigma = Matrix::from_diagonal(&singular_values);
-        Ok(Expr::from_node(Node::matrix(
+        let mut sigma = Matrix::new(left.rows(), right.rows());
+        for (position, value) in singular_values.iter().enumerate() {
+            if position < left.rows() && position < right.rows() {
+                sigma[position][position] = value.clone();
+            }
+        }
+        let tidy = |matrix: Matrix<Expr<T>>| {
+            tidied_matrix(matrix)
+                .as_matrix()
+                .unwrap_or_else(|| Matrix::from_rows(Vec::new()))
+        };
+        let left = tidy(left);
+        let sigma = tidy(sigma);
+        let right = tidy(right);
+        Ok(tidied_matrix(
             left.mul_matrix(&sigma).mul_matrix(&right.transpose()),
-        )))
+        ))
     }
 
     /// Fold value arithmetic between matrix, vector and scalar operands.
@@ -554,6 +714,32 @@ where
         self.square_or_error()?.eigen_solution().ok_or(ExprError::Undefined(
             "the eigenvalues cannot be computed exactly, so neither can the eigenvectors",
         ))
+    }
+
+    /// The diagonalisation, recording the steps.
+    ///
+    /// The narrative runs the full eigen analysis (the characteristic
+    /// polynomial, the shifts, the eigenspace reductions) as a nested block,
+    /// then assembles `P` from the eigenvector columns and `D` from the
+    /// matching eigenvalues, and closes with the product `P D P⁻¹`. Like
+    /// [`Expr::diagonalize`], the exact eigenspaces carry irrational
+    /// eigenvalues, so a matrix with radical eigenvalues shows its whole
+    /// story in radicals.
+    ///
+    /// # Errors
+    ///
+    /// [`ExprError::NotAMatrix`] when the expression is not a matrix,
+    /// [`ExprError::NotSquare`] when it is not square, or
+    /// [`ExprError::Undefined`] when the eigenvalues cannot be found or the
+    /// matrix is not diagonalisable.
+    pub fn diagonalize_solution(
+        &self,
+    ) -> Result<Solution<Expr<T>, Expr<T>>, ExprError> {
+        self.square_or_error()?.diagonalize_solution().ok_or(
+            ExprError::Undefined(
+                "the matrix is not diagonalisable: its eigenspaces do not span the whole space",
+            ),
+        )
     }
 }
 
@@ -1235,15 +1421,20 @@ fn fold_pow<T: SymbolicLeaf>(
 
 /// The eigenvalues of a symbolic characteristic polynomial read through the
 /// algebraic root finder, when every coefficient is an exact rational
-/// constant. Available only with the `algebraic` feature, like the machinery
-/// it delegates to.
+/// constant. Rational roots come off exactly; an irreducible quadratic
+/// remainder is solved by the quadratic formula and kept in exact radicals
+/// (`(19 + sqrt(181)) / 2`) rather than approximated; only what neither form
+/// reaches — an irreducible factor of degree three or more — is handed to
+/// Sturm isolation and travels as a float leaf. Available only with the
+/// `algebraic` feature, like the machinery it delegates to.
 #[cfg(feature = "algebraic")]
 pub(crate) fn algebraic_eigenvalues<T: SymbolicLeaf>(
     polynomial: &crate::math::algebra::symbolic_linear::ExprPoly<T>,
 ) -> Option<Vec<Expr<T>>> {
-    use crate::math::algebra::algebraic::RealRoot;
+    use crate::math::algebra::factorization::find_rational_root;
     use crate::math::algebra::polynomial::Poly;
     use crate::math::algebra::rational::Rat;
+    use crate::math::algebra::symbolic_linear::ExprPoly;
 
     let mut coefficients = Vec::new();
     for coefficient in polynomial.coefficients() {
@@ -1256,18 +1447,85 @@ pub(crate) fn algebraic_eigenvalues<T: SymbolicLeaf>(
         let value = tidy.evaluate(Real::nan()).value()?;
         coefficients.push(Rat::from_leaf(&value)?);
     }
-    let roots = Poly::new(coefficients).exact_real_roots();
-    Some(
-        roots
-            .iter()
-            .map(|root| match root {
-                RealRoot::Rational(value) => Expr::from_node(value.to_node()),
-                RealRoot::Isolated(root) => Expr::from_node(Node::float(
+
+    // Peel every rational root exactly, dividing its linear factor out as it
+    // is found; the polynomial that remains is the irrational part.
+    let mut rationals: Vec<Rat> = Vec::new();
+    let mut remaining = Poly::new(coefficients);
+    while let Some(degree) = remaining.degree() {
+        if degree == 0 || remaining.is_zero() {
+            break;
+        }
+        let Some(root) = find_rational_root(&remaining) else {
+            break;
+        };
+        let linear = Poly::new(vec![root.neg(), Rat::ONE]);
+        let Some(quotient) = remaining.div_exact(&linear) else {
+            break;
+        };
+        rationals.push(root);
+        remaining = quotient;
+    }
+    rationals.sort();
+    rationals.dedup();
+
+    let mut roots: Vec<Expr<T>> = rationals
+        .into_iter()
+        .map(|value| Expr::from_node(value.to_node()))
+        .collect();
+
+    // Solve the remainder exactly while radicals can. A linear factor's root
+    // is −b/a; a quadratic's conjugate pair is the quadratic formula — and
+    // since every rational root was already peeled, that pair is genuinely
+    // irrational, e.g. the `(19 ± sqrt(181)) / 2` of `λ² − 19λ + 45`. A
+    // quadratic with a negative discriminant has no real roots to contribute
+    // (the polynomial's real spectrum lives in its other factors), so it is
+    // skipped rather than written as a symbolic square root of a negative.
+    match remaining.degree() {
+        Some(1) | Some(2) => {
+            let factors: Vec<Expr<T>> = remaining
+                .coefficients()
+                .iter()
+                .map(|value| Expr::from_node(value.to_node()))
+                .collect();
+            let has_real_roots = if remaining.degree() == Some(2) {
+                // disc = b² − 4ac over the low-to-high coefficients.
+                let a = factors[2].clone();
+                let b = factors[1].clone();
+                let c = factors[0].clone();
+                let four = Expr::from_node(Rat::from_i64(4).to_node());
+                let discriminant =
+                    (b.clone() * b.clone() - four * a.clone() * c.clone()).tidy();
+                !discriminant
+                    .evaluate(f64::NAN)
+                    .value()
+                    .is_some_and(|value| value < 0.0)
+            } else {
+                true
+            };
+            if has_real_roots
+                && let Some(exact) = ExprPoly::new(factors).roots()
+            {
+                roots.extend(exact);
+            }
+        }
+        // Degree three or more: the radical form of a general cubic or
+        // quartic is unreadable and a quintic has none, so Sturm isolation
+        // answers with isolated (float-carried) roots.
+        _ => {
+            for root in remaining.real_roots() {
+                roots.push(Expr::from_node(Node::float(
                     T::from_real(Real::from_f64(root.to_f64())),
-                )),
-            })
-            .collect(),
-    )
+                )));
+            }
+        }
+    }
+
+    // prinum order: the eigenvalues are read small to large in the
+    // narratives and by the eigenspace grouping.
+    let numeric = |expr: &Expr<T>| expr.evaluate(f64::NAN).value().unwrap_or(f64::NAN);
+    roots.sort_by(|left, right| numeric(left).total_cmp(&numeric(right)));
+    Some(roots)
 }
 
 // ---------------------------------------------------------------------------

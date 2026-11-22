@@ -16,7 +16,8 @@
 //! Enabled by the `algebraic` feature.
 
 use super::factorization::find_rational_root;
-use super::{polynomial::Poly, rational::Rat};
+use super::{polynomial::Poly, rational::Rat, surd::{self, Surd}};
+use crate::math::numeric::ExactField;
 use crate::math::structs::expr::node::Node;
 
 /// An element of a multiquadratic field `Q(sqrt k1, ..., sqrt kt)`.
@@ -79,6 +80,8 @@ impl <const N: usize> Multiquadratic<N> where [(); 1 << N]: Sized {
         self.coeffs.iter().all(|coefficient| coefficient.is_zero())
     }
 
+    /// The numeric value of the element: each coefficient times the square
+    /// roots of its radicands.
     pub fn to_f64(&self) -> f64 {
         let mut total = 0.0;
         for (mask, coefficient) in self.coeffs.iter().enumerate() {
@@ -784,9 +787,11 @@ impl Poly {
     /// Every distinct real root, preferring exact rational form.
     ///
     /// Rational roots are found by the rational-root theorem and returned as
-    /// exact [`Rat`] values; what remains after they are divided out is handed
-    /// to [`Poly::real_roots`] and returned as [`RealAlgebraic`] isolations.
-    /// The result is ordered by value from smallest to largest.
+    /// exact [`Rat`] values; an irreducible quadratic remainder is solved by
+    /// the quadratic formula and returned as exact [`Surd`] radicals; what
+    /// neither form reaches — an irreducible factor of degree three or more —
+    /// goes to [`Poly::real_roots`] and the result is [`RealAlgebraic`]
+    /// isolations. The result is ordered by value from smallest to largest.
     ///
     /// Returns an empty vector for a constant or zero polynomial.
     #[must_use]
@@ -814,48 +819,93 @@ impl Poly {
         rationals.dedup();
 
         let mut roots: Vec<RealRoot> = rationals.into_iter().map(RealRoot::Rational).collect();
-        if remaining.degree().is_some_and(|degree| degree >= 1) && !remaining.is_zero() {
-            for isolated in remaining.real_roots() {
-                roots.push(RealRoot::Isolated(isolated));
+        match remaining.degree() {
+            // The peel above removed every rational root, so a quadratic
+            // remainder that survives is genuinely irreducible: its
+            // discriminant is positive and not a perfect square, and the two
+            // roots are exact quadratic radicals. The general quadratic,
+            // whose coefficients arrive low to high
+            // (`[c, b, a]` for `a x² + b x + c`), solves as
+            // `(-b ± √(b² - 4ac)) / (2a)`.
+            Some(2) if !remaining.is_zero() => {
+                let coefficients = remaining.coefficients();
+                let (c, b, a) = (coefficients[0], coefficients[1], coefficients[2]);
+                let four = Rat::from_i64(4);
+                if let Some(discriminant) = b.mul(b).and_then(|squared| {
+                    a.mul(c)
+                        .and_then(|product| product.mul(four))
+                        .and_then(|quadruple| squared.sub(quadruple))
+                })
+                    && !discriminant.is_negative()
+                    && !discriminant.is_zero()
+                    && let Some(radical) = surd::sqrt_rational(discriminant)
+                {
+                    // The discriminant of a peeled quadratic is never a
+                    // perfect square (those roots were rational and peeled),
+                    // so `sqrt_rational` leaves a genuine radical: a surd
+                    // with a nonzero radical part over a positive radicand.
+                    let denominator =
+                        Surd::rational(a.mul(Rat::from_i64(2)).unwrap_or(Rat::ONE));
+                    let base = Surd::rational(b.neg());
+                    // `Surd` is `Copy`, so both conjugates read `base` and
+                    // `radical` without bookkeeping.
+                    for numerator in [base + radical, base - radical] {
+                        roots.push(RealRoot::Radical(numerator / denominator));
+                    }
+                }
             }
+            // Degree three or more: the radical form of a general cubic or
+            // quartic is unreadable and a quintic has none, so Sturm
+            // isolation answers with isolated (float-carried) roots.
+            Some(degree) if !remaining.is_zero() && degree >= 3 => {
+                for isolated in remaining.real_roots() {
+                    roots.push(RealRoot::Isolated(isolated));
+                }
+            }
+            _ => {}
         }
         roots.sort_by(|left, right| {
-            left.to_f64()
-                .total_cmp(&right.to_f64())
+            left.to_f64().total_cmp(&right.to_f64())
         });
         roots
     }
 }
 
-/// One real root of a polynomial: exact when the root is rational, isolated
-/// (and then carried by its defining polynomial and interval) otherwise.
+/// One real root of a polynomial: exact when it is rational or a quadratic
+/// radical, isolated (and then carried by its defining polynomial and
+/// interval) otherwise.
 #[derive(Debug, Clone)]
 pub enum RealRoot {
     /// A root that is an exact rational number.
     Rational(Rat),
+    /// A root of an irreducible quadratic factor, carried exactly as
+    /// `a + b sqrt(k)`.
+    Radical(Surd),
     /// An irrational real root, exactly isolated between two rationals.
     Isolated(RealAlgebraic),
 }
 
 impl RealRoot {
-    /// The numeric value of the root, exact for the rational case and a
-    /// ~15-digit approximation for the isolated case.
+    /// The numeric value of the root, exact for the rational and radical
+    /// cases and a ~15-digit approximation for the isolated case.
     #[must_use]
     pub fn to_f64(&self) -> f64 {
         match self {
             Self::Rational(value) => value.to_f64(),
+            Self::Radical(surd) => surd.as_f64(),
             Self::Isolated(root) => root.to_f64(),
         }
     }
 }
 
 impl std::fmt::Display for RealRoot {
-    /// Rational roots print exactly; the isolated ones print as a decimal
-    /// approximation prefixed with `≈`, their exact identity living in the
-    /// [`RealAlgebraic`] they carry.
+    /// Rational and radical roots print exactly; the isolated ones print as
+    /// a decimal approximation prefixed with `≈`, their exact identity living
+    /// in the [`RealAlgebraic`] they carry.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Rational(value) => write!(f, "{value}"),
+            Self::Radical(surd) => write!(f, "{surd}"),
             Self::Isolated(root) => write!(f, "≈ {}", root.to_f64()),
         }
     }

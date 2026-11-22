@@ -455,6 +455,14 @@ where
     pub fn symbolic_left_inverse(
         &self,
     ) -> Result<(Matrix<Expr<T>>, Vec<Matrix<Expr<T>>>), ExprError> {
+        // Shape-check before reaching the linear layer: its `left_inverse`
+        // *asserts* the tall shape, and a user calling this on a wide matrix
+        // should see a plain error, not a panic message.
+        if self.rows() < self.columns() {
+            return Err(ExprError::Undefined(
+                "the matrix has no left inverse: it must be tall and of full column rank",
+            ));
+        }
         let particular = self.left_inverse().ok_or(ExprError::Undefined(
             "the matrix has no left inverse: it must be tall and of full column rank",
         ))?;
@@ -496,6 +504,14 @@ where
     pub fn symbolic_right_inverse(
         &self,
     ) -> Result<(Matrix<Expr<T>>, Vec<Matrix<Expr<T>>>), ExprError> {
+        // The wide-shape mirror of the left inverse's guard: `right_inverse`
+        // *asserts* the wide shape, so a tall matrix must fail as an error
+        // before it reaches that panic.
+        if self.columns() < self.rows() {
+            return Err(ExprError::Undefined(
+                "the matrix has no right inverse: it must be wide and of full row rank",
+            ));
+        }
         let particular = self.right_inverse().ok_or(ExprError::Undefined(
             "the matrix has no right inverse: it must be wide and of full row rank",
         ))?;

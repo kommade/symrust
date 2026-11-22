@@ -1,3 +1,17 @@
+//! The expression tree: the value type the whole library works over.
+//!
+//! An [`Expr`] is a parsed mathematical expression with a generic exact or
+//! floating leaf type. Build one from a string with [`Expr::new`] or the
+//! [`create_expr!`](crate::create_expr) macro, then evaluate it
+//! ([`evaluate`](Expr::evaluate), [`evaluate_exact`](Expr::evaluate_exact)),
+//! take limits ([`limit`]), differentiate and integrate it (see
+//! [`crate::math::calculus`]), or treat it as a matrix or a vector and feed
+//! it to the linear algebra ([`crate::math::algebra::linear`]).
+//!
+//! [`node`] holds the tree itself ([`Node`] and its rewrite rules);
+//! [`evaluate`] the evaluation modes; [`limit`] the limit solver;
+//! [`error`] the error type every fallible method reports.
+
 use std::fmt::Display;
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
@@ -91,9 +105,11 @@ impl<T: SymbolicLeaf> Neg for Expr<T> {
 /// with every generic algorithm in [`crate::math::algebra::linear`]. The
 /// conversions are deliberately lossy in the usual way for symbolic values —
 /// `as_f64` returns `NaN` when the expression cannot be folded to a number,
-/// the square roots build `sqrt` nodes rather than guessing a numeric root, and
-/// [`is_floating`](Self::is_floating) is `false` so the numeric-only SVD
-/// fallback is not applied to symbolic entries.
+/// and the square roots build `sqrt` nodes rather than guessing a numeric
+/// root. [`is_floating`](Self::is_floating) is `false` — an expression is not
+/// itself a float — but the numerical SVD fallback still runs for it (see
+/// [`svd_numeric_fallback`](Self::svd_numeric_fallback)): every real matrix
+/// has a singular value decomposition, and a numeric one beats none at all.
 ///
 /// The [`SymbolicLeaf`] bound is the whole story: it is exactly what makes
 /// `Expr<T>: ExactField` hold, without any per-site justification. The
@@ -156,6 +172,16 @@ where
     fn is_floating() -> bool {
         false
     }
+
+    /// The numeric SVD fallback runs for expression coefficients.
+    ///
+    /// An `Expr` entry always round-trips through `f64` into a plain float
+    /// leaf (unlike an exact type such as `Rat`, where the rounding overflows
+    /// the bounded arithmetic), so rotating expression matrices numerically is
+    /// sound — it trades the entries' exactness for availability.
+    fn svd_numeric_fallback() -> bool {
+        true
+    }
 }
 
 impl<T: FloatType + Display> Default for Expr<T> {
@@ -203,7 +229,18 @@ impl<T: FloatType + Display> Expr<T> {
     /// [`Expr::new`]. This is the constructor the [`create_expr!`][crate::create_expr]
     /// macro calls when a number type is supplied explicitly, e.g.
     /// `create_expr!("2x^2"; f64)`.
-    pub fn parse(str: String, indp_var: Option<char>) -> Result<Self, ExprError> {
+    ///
+    /// Braces mark a set of vectors (`{[1, 2], [3, 4]}`) — the way bases are
+    /// written. A set of vectors *is* the matrix whose rows are its elements,
+    /// so the braces simply remap to brackets: the literal parses exactly
+    /// like `[[1, 2], [3, 4]]`, and the linear-algebra questions — are the
+    /// elements independent, what do they span, what is their rank — are
+    /// read off the result with the matrix methods. Braces are
+    /// illegal everywhere else in the grammar, so nothing else is affected.
+    pub fn parse(mut str: String, indp_var: Option<char>) -> Result<Self, ExprError> {
+        if str.contains('{') {
+            str = str.replace('{', "[").replace('}', "]");
+        }
         let mut lexer = Lexer::<T>::new(str, indp_var);
         let lexed = lexer.lex()?;
         let mut parser = Parser::<T>::new(lexed);
@@ -306,10 +343,14 @@ where
     /// *closed* (variable-free) expression is reduced further here. Symbolic
     /// entries are returned simplified and otherwise untouched.
     ///
-    /// Exactness is preserved: an integer stays an integer, a fraction is
-    /// written as `p / q`, and a surd such as `sqrt(2)` is left alone rather
-    /// than folded into `1.4142…`. Only a value with no exact rational form —
-    /// because it was already a decimal leaf — stays a decimal.
+    /// Exactness is preserved: an integer stays an integer, a genuinely neat
+    /// fraction stays `p / q`, and a surd such as `sqrt(2)` is left alone
+    /// rather than folded into `1.4142…`. A rational fold is only taken when
+    /// it is *neat* — the recovered denominator sits within 64 — past which
+    /// the fraction is an artefact of the float engine's exact recovery (an
+    /// approximate value's nearest big-denominator fraction) and the tree
+    /// keeps the full-precision float instead; a decimal reading beats a
+    /// numerator nobody can divide in their head.
     ///
     /// # Examples
     ///
@@ -342,16 +383,20 @@ where
         if value.is_nan() || value.is_infinite() {
             return simplified;
         }
-        // Prefer an exact rational rendering so fractions stay fractions.
-        match Rat::from_leaf(&value) {
-            Some(rational) => Self::from_node(rational.to_node()),
-            // No exact rational form but the value is still finite: this
-            // happens for a float leaf that was already decimal, so keep the
-            // decimal.
-            None => Self::from_node(Node::float(value)),
+        // Prefer an exact rational rendering so fractions stay fractions —
+        // but only a readable one. A recovery with a large denominator is
+        // what an approximate value's float engine hands back; writing
+        // `281881 / 126585` for what is really `2.22681…` hides the number
+        // behind numerals, so the value keeps its full-precision float form.
+        if let Some(rational) = Rat::from_leaf(&value)
+            && rational.parts().1 <= 64
+        {
+            return Self::from_node(rational.to_node());
         }
+        // No neat rational form: the value is still finite and fully
+        // precise in the leaf, so keep it there — its display rounds.
+        Self::from_node(Node::float(value))
     }
-
     /// The expression as an exact surd `a + b sqrt(k)`, when it is purely
     /// rational arithmetic over `sqrt` of rationals.
     ///

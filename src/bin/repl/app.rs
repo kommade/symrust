@@ -391,6 +391,8 @@ impl App {
             Command::Diagonalize(argument) => {
                 self.transform(argument, |expr| expr.diagonalize().map_err(sym_err))
             }
+            Command::DiagonalizeSteps(argument) => self
+                .transform_steps(argument, |expr| expr.diagonalize_solution().map_err(sym_err)),
             Command::Svd(argument) => {
                 self.transform(argument, |expr| expr.svd().map_err(sym_err))
             }
@@ -429,6 +431,27 @@ impl App {
             }
             Command::ToMatrix(argument) => {
                 self.transform(argument, |expr| expr.to_matrix().map_err(sym_err))
+            }
+            Command::ColumnSpace(argument) => {
+                let expr = self.argument(argument)?;
+                space_outcome("column space", expr.column_space().map_err(sym_err))
+            }
+            Command::RowSpace(argument) => {
+                let expr = self.argument(argument)?;
+                space_outcome("row space", expr.row_space().map_err(sym_err))
+            }
+            Command::NullSpace(argument) => {
+                let expr = self.argument(argument)?;
+                space_outcome("null space", expr.null_space().map_err(sym_err))
+            }
+            Command::Independent(argument) => {
+                let expr = self.argument(argument)?;
+                let rows = expr.as_matrix().map_or(0, |matrix| matrix.rows());
+                let rank = expr.rank().map_err(sym_err)?;
+                let verdict = if rank == rows { "independent" } else { "dependent" };
+                Ok(Outcome::Remark(format!(
+                    "rank {rank} over {rows} vectors: the set is {verdict}"
+                )))
             }
             Command::Roots(argument) => {
                 let expr = self.argument(argument)?;
@@ -483,6 +506,11 @@ impl App {
     /// The general left or right inverse: a minimum-norm particular inverse
     /// plus one basis matrix per free parameter, which together span every
     /// inverse there is. The particular inverse becomes current.
+    ///
+    /// A matrix's rendering is one bracketed row per line, so a label that
+    /// runs a matrix in after `=` would bury its first row in the middle of
+    /// the sentence; every multi-line value here gets its own line, the way
+    /// bindings and step results handle it.
     fn inverse_family(
         &mut self,
         argument: Option<String>,
@@ -495,16 +523,13 @@ impl App {
             expr.symbolic_right_inverse().map_err(sym_err)?
         };
         let side = if left { "left" } else { "right" };
-        let mut output = format!(
-            "particular {side} inverse:\n= {}",
-            readable(particular.clone())
-        );
+        let mut output = labelled_value(&format!("particular {side} inverse"), &particular);
         if bases.is_empty() {
             output.push_str("\n(the inverse is unique — no free parameters)");
         }
         for (index, basis) in bases.iter().enumerate() {
-            output
-                .push_str(&format!("\nbasis {} = {}", index + 1, readable(basis.clone())));
+            output.push('\n');
+            output.push_str(&labelled_value(&format!("basis {}", index + 1), basis));
         }
         self.current = Some(particular);
         Ok(Outcome::Remark(output))
@@ -732,6 +757,7 @@ const fn produces_value(command: &Command) -> bool {
             | Command::Qr(_)
             | Command::QrSteps(_)
             | Command::Diagonalize(_)
+            | Command::DiagonalizeSteps(_)
             | Command::Svd(_)
             | Command::SvdSteps(_)
             | Command::LeftInverse(_)
@@ -857,6 +883,45 @@ fn readable(expr: Expr<Real>) -> Expr<Real> {
     expr.tidy()
 }
 
+/// Render `label = value`: one line when the value fits after the label (a
+/// scalar, or a one-row matrix that renders as a single line plus its
+/// terminator), and the value on its own lines when it is a block — the way
+/// bindings and step results handle a multi-line right side.
+fn labelled_value(label: &str, value: &Expr<Real>) -> String {
+    let text = readable(value.clone()).to_string();
+    if text.lines().count() > 1 {
+        format!("{label} =\n{}", text.trim_end())
+    } else {
+        format!("{label} = {}", text.trim_end())
+    }
+}
+
+/// The outcome for a subspace command: a labelled basis list, or the
+/// zero-dimensional note when the space holds only the zero vector. The
+/// current expression is never changed, so these read like `:rank`.
+fn space_outcome(
+    kind: &str,
+    vectors: Result<Vec<Expr<Real>>, String>,
+) -> Result<Outcome, String> {
+    let vectors = vectors?;
+    if vectors.is_empty() {
+        return Ok(Outcome::Remark(format!(
+            "the {kind} is zero-dimensional: only the zero vector lies in it"
+        )));
+    }
+    let count = vectors.len();
+    let mut output = format!(
+        "basis of the {kind} ({} vector{}):",
+        count,
+        if count == 1 { "" } else { "s" }
+    );
+    for (index, vector) in vectors.iter().enumerate() {
+        output.push('\n');
+        output.push_str(&labelled_value(&format!("basis {}", index + 1), vector));
+    }
+    Ok(Outcome::Remark(output))
+}
+
 const HELP: &str = "\
 symr -- symbolic calculus REPL over the symrust library
 
@@ -898,7 +963,9 @@ side is a command stores that command's result:
   :rm <name>                 remove one (aliases: :del, :undef)
 
 Matrices & vectors (comma-separated entries: [[1, 2], [3, 4]], [1, 2, 3]);
-a trailing `s` prints the full step-by-step solution instead of only the
+a set of vectors `{[1, 2], [3, 4]}` parses as the matrix whose rows are its
+elements, so a basis-set can be stored and probed like any matrix. A
+trailing `s` prints the full step-by-step solution instead of only the
 answer:
 
   :tp [<M>]                  transpose
@@ -911,9 +978,13 @@ answer:
                              matrix still shows its eigenvectors
   :lu / :lus [<M>]           LU factorisation, as the product L*U (steps)
   :qr / :qrs [<M>]           QR factorisation, as the product Q*R (steps)
-  :diag [<M>]                diagonalisation, as the product P*D*P^-1
+  :diag / :diags [<M>]       diagonalisation, as the product P*D*P^-1 (steps)
   :svd / :svds [<M>]         singular value decomposition, as U*S*V^T (steps)
   :linv / :rinv [<M>]        general left / right inverse, with parameters
+  :col / :row / :null [<M>]  basis of the column / row / null space
+                             (do not change current)
+  :indep [<M>]               whether the rows of a matrix (the elements of
+                             a set literal) are linearly independent
   :dot u v                   dot product (u defaults to the current vector)
   :norm / :unit [<v>]        squared Euclidean norm / unit-length check
   :orth u v                  orthogonality check (u defaults to current)

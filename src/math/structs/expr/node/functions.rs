@@ -20,11 +20,17 @@ use super::inspect::square_root_of_rational_square;
 /// an existing node and produce the node that results from applying an
 /// operation to it (usually one that still contains the original node).
 pub trait NodeOperations<T> {
+    /// The sum node, folding numeric leaves where possible.
     fn add(self, other: T) -> Self;
+    /// The difference node, folding numeric leaves where possible.
     fn sub(self, other: T) -> Self;
+    /// The product node with the explicit `*` operator.
     fn mul(self, other: T) -> Self;
+    /// The product node with the implicit-multiplication operator.
     fn impl_mul(self, other: T) -> Self;
+    /// The quotient node.
     fn div(self, other: T) -> Self;
+    /// The power node.
     fn pow(self, other: T) -> Self;
 }
 

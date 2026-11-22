@@ -95,6 +95,9 @@ pub enum Command {
     QrSteps(Option<String>),
     /// The diagonalisation `P * D * P^-1` of a diagonalisable matrix.
     Diagonalize(Option<String>),
+    /// The diagonalisation, printing the recorded eigen analysis and
+    /// assembly steps.
+    DiagonalizeSteps(Option<String>),
     /// The singular value decomposition, printed as `U * S * V^T`.
     Svd(Option<String>),
     /// The singular value decomposition, printing the recorded route.
@@ -119,6 +122,15 @@ pub enum Command {
     },
     /// A vector rewritten as its one-column matrix.
     ToMatrix(Option<String>),
+    /// A basis of the column space of a matrix (keeps the current matrix).
+    ColumnSpace(Option<String>),
+    /// A basis of the row space of a matrix (keeps the current matrix).
+    RowSpace(Option<String>),
+    /// A basis of the null space of a matrix (keeps the current matrix).
+    NullSpace(Option<String>),
+    /// Whether a matrix's rows — the elements of a set literal — are
+    /// linearly independent (prints a verdict, keeps the current matrix).
+    Independent(Option<String>),
     /// The real roots of a polynomial in the independent variable: rational
     /// roots exact, irrational roots reported as isolated algebraic numbers.
     Roots(Option<String>),
@@ -217,6 +229,7 @@ fn parse_command(name: &str, args: &str) -> Result<Command, String> {
         "qr" => Ok(Command::Qr(optional(args))),
         "qrs" => Ok(Command::QrSteps(optional(args))),
         "diag" => Ok(Command::Diagonalize(optional(args))),
+        "diags" => Ok(Command::DiagonalizeSteps(optional(args))),
         "svd" => Ok(Command::Svd(optional(args))),
         "svds" => Ok(Command::SvdSteps(optional(args))),
         "linv" => Ok(Command::LeftInverse(optional(args))),
@@ -232,6 +245,10 @@ fn parse_command(name: &str, args: &str) -> Result<Command, String> {
             Ok(Command::Orthogonal { left, right })
         }
         "tomat" | "vmat" => Ok(Command::ToMatrix(optional(args))),
+        "col" | "colspace" => Ok(Command::ColumnSpace(optional(args))),
+        "row" | "rowspace" => Ok(Command::RowSpace(optional(args))),
+        "null" | "nullspace" | "kernel" => Ok(Command::NullSpace(optional(args))),
+        "indep" | "independent" => Ok(Command::Independent(optional(args))),
         "roots" | "polyroots" => Ok(Command::Roots(optional(args))),
         other => Err(format!("unknown command ':{other}' — type :help")),
     }
@@ -570,6 +587,39 @@ mod tests {
         assert_eq!(parse_line(":linv"), Ok(Some(Command::LeftInverse(None))));
         assert_eq!(parse_line(":rinv"), Ok(Some(Command::RightInverse(None))));
         assert_eq!(parse_line(":vmat"), Ok(Some(Command::ToMatrix(None))));
+    }
+
+    #[test]
+    fn diagonalisation_commands_parse() {
+        assert_eq!(parse_line(":diag"), Ok(Some(Command::Diagonalize(None))));
+        assert_eq!(
+            parse_line(":diags m"),
+            Ok(Some(Command::DiagonalizeSteps(Some("m".into()))))
+        );
+    }
+
+    #[test]
+    fn subspace_commands_take_optional_matrices() {
+        assert_eq!(parse_line(":col"), Ok(Some(Command::ColumnSpace(None))));
+        assert_eq!(
+            parse_line(":colspace m"),
+            Ok(Some(Command::ColumnSpace(Some("m".into()))))
+        );
+        assert_eq!(parse_line(":row"), Ok(Some(Command::RowSpace(None))));
+        assert_eq!(
+            parse_line(":rowspace m"),
+            Ok(Some(Command::RowSpace(Some("m".into()))))
+        );
+        assert_eq!(parse_line(":null"), Ok(Some(Command::NullSpace(None))));
+        assert_eq!(
+            parse_line(":kernel m"),
+            Ok(Some(Command::NullSpace(Some("m".into()))))
+        );
+        assert_eq!(parse_line(":indep"), Ok(Some(Command::Independent(None))));
+        assert_eq!(
+            parse_line(":independent m"),
+            Ok(Some(Command::Independent(Some("m".into()))))
+        );
     }
 
     #[test]

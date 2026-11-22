@@ -935,6 +935,43 @@ fn an_odd_integral_over_centred_bounds_is_zero_without_a_search() {
     );
 }
 
+/// An odd integrand over the centred improper pair answers exactly zero at
+/// a single symmetry step, checked against a convergent antiderivative; the
+/// same odd integrand with a divergent antiderivative still reports the
+/// divergence.
+#[test]
+fn an_odd_improper_integral_over_infinite_bounds_is_zero() {
+    use crate::math::numeric::Real;
+
+    // ∫_{-∞}^{∞} x e^{-x²} dx = 0: odd, and the antiderivative -e^{-x²}/2
+    // converges at both ends.
+    let value = create_expr!("x e^(-x^2)")
+        .unwrap()
+        .integrate(Real::neg_infinity(), Real::infinity())
+        .expect("an odd integrand with a convergent antiderivative");
+    assert!(value.is_zero());
+
+    let solution = create_expr!("x e^(-x^2)")
+        .unwrap()
+        .integrate_solution(Real::neg_infinity(), Real::infinity())
+        .unwrap();
+    let symmetry = solution.steps().iter().any(|step| {
+        matches!(
+            step,
+            crate::math::structs::solution::SolutionStep::Elementary(elementary)
+                if elementary.step_name == "symmetry"
+        )
+    });
+    assert!(symmetry, "the narrative should note the parity: {solution}");
+
+    // x is odd too, but its antiderivative diverges at the end: the
+    // divergence has to survive the symmetry check.
+    assert!(create_expr!("x")
+        .unwrap()
+        .integrate(Real::neg_infinity(), Real::infinity())
+        .is_err());
+}
+
 /// A centred integral whose integrand is odd *and* transcendental takes the
 /// same shortcut (the sign flip registers on the probe), while a non-odd
 /// integrand over the same bounds still integrates through the search.

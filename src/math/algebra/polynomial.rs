@@ -33,26 +33,32 @@ impl fmt::Display for Poly {
 }
 
 impl Poly {
+    /// A polynomial in lowest terms: trailing zero coefficients are trimmed,
+    /// so the zero polynomial has no coefficients at all.
     pub fn new(coeffs: Vec<Rat>) -> Self {
         let mut poly = Self { coeffs };
         poly.trim();
         poly
     }
 
+    /// The zero polynomial, with no coefficients.
     pub fn zero() -> Self {
         Self { coeffs: Vec::new() }
     }
 
+    /// The constant polynomial `1`.
     pub fn one() -> Self {
         Self {
             coeffs: vec![Rat::ONE],
         }
     }
 
+    /// The constant polynomial carrying `value`.
     pub fn constant(value: Rat) -> Self {
         Self::new(vec![value])
     }
 
+    /// The polynomial `x`, the independent variable as its own polynomial.
     pub fn variable() -> Self {
         Self::new(vec![Rat::ZERO, Rat::ONE])
     }
@@ -63,26 +69,32 @@ impl Poly {
         }
     }
 
+    /// `true` when the polynomial is the zero polynomial (no coefficients).
     pub fn is_zero(&self) -> bool {
         self.coeffs.is_empty()
     }
 
+    /// The degree of the polynomial, or `None` for the zero polynomial.
     pub fn degree(&self) -> Option<usize> {
         self.coeffs.len().checked_sub(1)
     }
 
+    /// The coefficient of `x^index`, or zero past the degree.
     pub fn coeff(&self, index: usize) -> Rat {
         self.coeffs.get(index).copied().unwrap_or(Rat::ZERO)
     }
 
+    /// The coefficients in ascending degree order.
     pub fn coefficients(&self) -> &[Rat] {
         &self.coeffs
     }
 
+    /// The leading coefficient, or `None` for the zero polynomial.
     pub fn leading(&self) -> Option<Rat> {
         self.coeffs.last().copied()
     }
 
+    /// The coefficientwise sum, or `None` on coefficient overflow.
     pub fn add(&self, other: &Self) -> Option<Self> {
         let length = self.coeffs.len().max(other.coeffs.len());
         let mut coeffs = Vec::with_capacity(length);
@@ -92,6 +104,7 @@ impl Poly {
         Some(Self::new(coeffs))
     }
 
+    /// The coefficientwise difference, or `None` on coefficient overflow.
     pub fn sub(&self, other: &Self) -> Option<Self> {
         let length = self.coeffs.len().max(other.coeffs.len());
         let mut coeffs = Vec::with_capacity(length);
@@ -101,6 +114,7 @@ impl Poly {
         Some(Self::new(coeffs))
     }
 
+    /// The convolution product, or `None` on coefficient overflow.
     pub fn mul(&self, other: &Self) -> Option<Self> {
         if self.is_zero() || other.is_zero() {
             return Some(Self::zero());
@@ -116,6 +130,7 @@ impl Poly {
         Some(Self::new(coeffs))
     }
 
+    /// Every coefficient scaled by `factor`, or `None` on overflow.
     pub fn scale(&self, factor: Rat) -> Option<Self> {
         let mut coeffs = Vec::with_capacity(self.coeffs.len());
         for coefficient in &self.coeffs {
@@ -124,6 +139,8 @@ impl Poly {
         Some(Self::new(coeffs))
     }
 
+    /// The polynomial raised to `exponent` by repeated multiplication, or
+    /// `None` when the exponent exceeds the arithmetic's power budget.
     pub fn pow(&self, exponent: u32) -> Option<Self> {
         if exponent > 64 {
             return None;
@@ -135,6 +152,8 @@ impl Poly {
         Some(result)
     }
 
+    /// Euclidean division: the quotient and remainder of `self / divisor`,
+    /// or `None` when the divisor is zero (or a coefficient overflows).
     pub fn div_rem(&self, divisor: &Self) -> Option<(Self, Self)> {
         let divisor_degree = divisor.degree()?;
         let divisor_leading = divisor.leading()?;
@@ -160,6 +179,8 @@ impl Poly {
         Some((Self::new(quotient), remainder))
     }
 
+    /// The exact quotient when the division leaves no remainder, `None`
+    /// otherwise (or when the divisor is zero).
     pub fn div_exact(&self, divisor: &Self) -> Option<Self> {
         let (quotient, remainder) = self.div_rem(divisor)?;
         if remainder.is_zero() {
@@ -289,6 +310,7 @@ impl Poly {
         super::sturm::SturmSequence::new(self)
     }
 
+    /// Horner's evaluation at a rational point, or `None` on overflow.
     pub fn evaluate(&self, value: Rat) -> Option<Rat> {
         let mut result = Rat::ZERO;
         for coefficient in self.coeffs.iter().rev() {
@@ -307,6 +329,9 @@ impl Poly {
         Some(Self::new(coeffs))
     }
 
+    /// The odd part of the polynomial: the coefficient of every odd degree
+    /// must be zero, and the even-degree coefficients survive as the new
+    /// polynomial. `None` when an odd coefficient would be dropped.
     pub fn even_part(&self) -> Option<Self> {
         let mut coeffs = Vec::with_capacity(self.coeffs.len() / 2 + 1);
         for (degree, coefficient) in self.coeffs.iter().enumerate() {
@@ -355,6 +380,7 @@ impl Poly {
         }
     }
 
+    /// The termwise antiderivative, with zero as the constant of integration.
     pub fn integrate(&self) -> Option<Self> {
         let mut coeffs = vec![Rat::ZERO];
         for (degree, coefficient) in self.coeffs.iter().enumerate() {

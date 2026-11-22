@@ -1,24 +1,47 @@
 //! Symbolic antiderivatives (indefinite integrals).
 //!
 //! [`Antiderivative::get_antiderivative`] tries a sequence of techniques until
-//! one of them succeeds:
+//! one of them succeeds. The search runs roughly in this order:
 //!
-//! 1. Splitting sums and pulling out constant factors (linearity).
-//! 2. Powers, exponentials and the standard elementary functions, including
+//! 1. Linearity: splitting sums and pulling out constant factors.
+//! 2. Elementary shapes, each by the matching rule: small integer powers of
+//!    products are expanded first, `ln(u)^n` takes the standard reduction
+//!    formula, and the table covers powers, exponentials and the standard
 //!    functions of a linear argument (`power_of` and the rule table).
-//! 3. Rational functions: polynomial division and partial fractions over
-//!    repeated linear and irreducible quadratic factors. Any denominator is
-//!    factored over the rationals, and irreducible quartics are split into
-//!    quadratics over a quadratic extension such as `Q(sqrt(2))`.
-//! 4. Powers and products of trigonometric functions, including the reduction
-//!    formulas, product-to-sum identities and reciprocal forms.
-//! 5. Square roots of quadratics and their reciprocals.
-//! 6. Substitution (`f(g(x)) g'(x)`, `f'(x)/f(x)` and `f(x) f'(x)`).
-//! 7. Integration by parts with the LIATE heuristic.
+//! 3. Square roots of quadratics and their reciprocals.
+//! 4. Polynomials riding exponentials and trig products by the
+//!    undetermined-coefficients ansatz (`ansatz`): one exact linear solve over
+//!    the closed span instead of a by-parts level per degree.
+//! 5. The special-function families (`special`): the gaussian
+//!    `e^(a x² + b x + c)` with `a < 0` closes to `erf` (so `e^(-x²)` has the
+//!    antiderivative `erf(x) sqrt(pi) / 2`), and `sin(λx)/x`, `e^(λx)/x` close
+//!    to `Si(λx)`, `Ei(λx)`. These run ahead of the hyperexponential
+//!    certificate, whose non-elementarity proof would otherwise end the
+//!    search before the table speaks.
+//! 6. Trigonometric powers and products (`trig`), including reduction
+//!    formulas, product-to-sum identities and reciprocal forms, plus
+//!    `sin`/`cos` of a logarithm.
+//! 7. Rational functions (`rational`): the denominator is factored over the
+//!    rationals (irreducible quartics split over a quadratic extension such
+//!    as `Q(sqrt(2))`), repeated factor powers are peeled by Hermite
+//!    reduction, and the proper part is read off as partial fractions. A
+//!    rational function of a sine/cosine of one linear argument rationalises
+//!    through the Weierstrass substitution (`trig_weierstrass`).
+//! 8. The hyperexponential certificate (`hyperexponential`): for
+//!    `P(x)·e^(g(x))` the coefficient solve either produces `q·e^(g)` or
+//!    *proves* the integral non-elementary, so the refusal lands without
+//!    burning the search budget.
+//! 9. Substitution (`f(g(x)) g'(x)`, `f'(x)/f(x)` and `f(x) f'(x)`), with the
+//!    candidate substitutions enumerated and the smallest resulting integral
+//!    chosen, followed by the shaped substitutions: the linear base
+//!    `P(x)·(a x + b)^p`, Chebyshev's binomial differentials
+//!    `x^m (a + b x^n)^p` (`binomial`), and the Euler substitution for a
+//!    rational function of `x` and `sqrt(x² + p x + r)` (`sqrt_rational`).
+//! 10. Integration by parts with the LIATE heuristic, the last-resort rewrite.
 //!
 //! Every candidate is checked against the integrand with a numeric
 //! differentiation before it is returned. Because many elementary functions
-//! have no elementary antiderivative, integration returns a
+//! have no elementary antiderivative, integration returns an
 //! [`IntegrationError`] when no technique succeeds within the search budget
 //! instead of looping forever.
 //!
@@ -37,6 +60,22 @@
 //! let solution = expr.get_antiderivative_solution().unwrap();
 //! println!("{} steps, answer {}", solution.len(), solution.result());
 //! ```
+//!
+//! # Definite integrals
+//!
+//! [`Antiderivative::integrate`] evaluates `F(upper) - F(lower)` for the
+//! antiderivative `F` found above, with three extras:
+//!
+//! - An odd integrand over centred `[-a, a]` bounds is exactly zero (a
+//!   numeric parity probe decides, so no search runs).
+//! - An infinite bound is a limit: the improper integral converges when the
+//!   antiderivative has a finite limit there. When both limits are closed
+//!   forms the difference stays exact — `∫ e^(-x²)` over the whole line one
+//!   with bounds `±∞` answers `sqrt(pi)`, not its decimal — and whenever the
+//!   exactness cannot be certified the limits fall back to floating-point
+//!   values.
+//! - When the antiderivative search fails, an adaptive Gauss-Kronrod
+//!   quadrature still answers numeric definite integrals.
 
 mod ansatz;
 mod binomial;
@@ -56,13 +95,14 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::math::algebra::rational::Rat;
 use crate::math::numeric::{Real, SymbolicLeaf};
 use crate::{
     math::parse::lexer::{Func, Op, Token},
     math::structs::{
         expr::{
             Expr,
-            node::{Node, NodeFunctions, NodeInner},
+            node::{Node, NodeFunctions, NodeInner, NodeValue},
         },
         solution::{NoSteps, Recorder, Solution, StepRecorder},
     },
@@ -148,6 +188,12 @@ impl Display for IntegrationError {
 
 impl Error for IntegrationError {}
 
+/// Antidifferentiation: the integration search, the definite-integral
+/// evaluation, and the recorded forms of both.
+///
+/// The [`Antiderivative`] trait is the entry point; [`IntegratorContext`]
+/// tunes the search budget. Implementable for any expression-like type
+/// carrying exact arithmetic.
 pub trait Antiderivative<T> {
     /// Find the antiderivative of the expression.
     fn get_antiderivative(&self) -> Result<Self, IntegrationError>
@@ -169,6 +215,10 @@ pub trait Antiderivative<T> {
     fn get_antiderivative_solution(&self) -> Result<Solution<Self, Self>, IntegrationError>
     where
         Self: Sized;
+    /// Find the antiderivative with a custom search context.
+    ///
+    /// See [`IntegratorContext`] for the meaning of the context fields and
+    /// [`Antiderivative::get_antiderivative`] for examples.
     fn get_antiderivative_with_context(
         &self,
         context: IntegratorContext,
@@ -328,7 +378,7 @@ where
             return Ok(T::zero());
         }
         match self.get_antiderivative_with_context(context) {
-            Ok(antiderivative) => evaluate_definite_integral(&antiderivative, lower, upper),
+            Ok(antiderivative) => evaluate_definite_integral(&self.tree, &antiderivative, lower, upper),
             Err(error) => {
                 // A divergence diagnosis is stronger evidence than a numeric
                 // estimate; every other failure leaves the definite value
@@ -405,9 +455,55 @@ where
             antiderivative.clone(),
         );
 
+        // An odd integrand over centred improper bounds vanishes once the
+        // antiderivative converges at the end: the two limits are the SAME
+        // finite value (every antiderivative of an odd integrand is even), so
+        // the difference is exactly zero. For a divergent antiderivative —
+        // `x` over the whole line, say — the bound value below errors with
+        // the divergence, exactly like the unsymmetrised path.
+        let variable = crate::math::calculus::expr::independent_variable(&antiderivative.tree);
+        if odd_improper_centred(&self.tree, &lower, &upper) {
+            bound_value(&antiderivative, variable, &upper, &antiderivative_text)?;
+            recorder.push_step(
+                "symmetry",
+                format!(
+                    "f(-x) = -f(x) and the antiderivative has a finite limit at \
+                     both ends, so ∫_{{{}}}^{{{}}} f(x) dx = 0",
+                    lower, upper
+                ),
+                Expr::from_node(Node::<T>::float(T::zero())),
+            );
+            return Ok(recorder.finish(Expr::from_node(Node::<T>::float(T::zero()))));
+        }
+
         // Record both substitutions: `F(bound) = value`, or the limit when
         // substituting would hit an indeterminate form (see [`bound_value`]).
-        let variable = crate::math::calculus::expr::independent_variable(&antiderivative.tree);
+        // An improper pair whose limits are known exactly keeps the answer
+        // symbolic: the erf rule rewrites `erf(±inf)` to ±1 and the two
+        // rewritten bound trees subtract exactly, so `e^-x^2` over the whole
+        // line lands on `sqrt(pi)` instead of its decimal.
+        if let (Some(upper_tree), Some(lower_tree)) = (
+            exact_infinity_bound(&antiderivative, variable, &upper),
+            exact_infinity_bound(&antiderivative, variable, &lower),
+        ) && let Some(exact) =
+            exact_tree_difference(upper_tree.tree(), lower_tree.tree())
+        {
+            let upper_display = upper_tree.clone();
+            let lower_display = lower_tree.clone();
+            for (name, bound_display, tree) in [
+                ("substitute the upper bound", upper.to_string(), upper_display),
+                ("substitute the lower bound", lower.to_string(), lower_display),
+            ] {
+                recorder.push_step(
+                    name,
+                    format!(
+                        "lim_{{x -> {bound_display}}} {antiderivative_text} = {tree}"
+                    ),
+                    tree,
+                );
+            }
+            return Ok(recorder.finish(exact));
+        }
         let upper_value = bound_value(&antiderivative, variable, &upper, &antiderivative_text)?;
         let lower_value = bound_value(&antiderivative, variable, &lower, &antiderivative_text)?;
         for (name, bound_display, evaluation) in [
@@ -510,13 +606,255 @@ where
     }
 }
 
+/// The exact tree of the antiderivative at an infinite bound, when the
+/// variable's infinity behaviour is known exactly.
+///
+/// The only rule carried here is `erf`'s, because it is the one special
+/// function whose limits are constants: `lim_{x -> +inf} erf(x) = 1` and
+/// `lim_{x -> -inf} erf(x) = -1`. Every `erf(variable)` argument becomes that
+/// limit, and the variable may appear nowhere else — whether `x erf(x)`
+/// diverges while `x erf(x) + e^(-x^2) / sqrt(pi)` converges is beyond this
+/// rule, and such a bound falls back to the numeric limit. `None` hands the
+/// bound to [`bound_value`].
+fn exact_infinity_bound<T>(
+    antiderivative: &Expr<T>,
+    variable: char,
+    toward: &T,
+) -> Option<Expr<T>>
+where
+    T: SymbolicLeaf,
+{
+    if !toward.is_infinite() {
+        return None;
+    }
+    let limit: i64 = if toward.is_negative() { -1 } else { 1 };
+    // Every occurrence of the variable must be a direct `erf` argument — the
+    // counts below can only agree then, and the rewritten tree is closed,
+    // which is what makes the bound exact.
+    if count_variable(&antiderivative.tree, variable)
+        != count_erf_of_variable(&antiderivative.tree, variable)
+    {
+        return None;
+    }
+    let replaced = replace_erf_limits(&antiderivative.tree, variable, limit)?;
+    Some(Expr::from_node(replaced).simplify(false))
+}
+
+/// How many leaves of `node` are the independent variable itself.
+fn count_variable<T>(node: &Node<T>, variable: char) -> usize
+where
+    T: SymbolicLeaf,
+{
+    let borrow = node.inner.borrow();
+    match &borrow.value {
+        NodeValue::Operand(Token::Indp(c)) | NodeValue::Operand(Token::Var(c))
+            if *c == variable =>
+        {
+            1
+        }
+        NodeValue::Operand(_) => 0,
+        NodeValue::Operator(op) => {
+            count_variable(&op.left, variable) + count_variable(&op.right, variable)
+        }
+        NodeValue::Empty => 0,
+    }
+}
+
+/// How many functions are `erf` applied directly to the independent
+/// variable — the shapes the exact infinity rule can replace.
+fn count_erf_of_variable<T>(node: &Node<T>, variable: char) -> usize
+where
+    T: SymbolicLeaf,
+{
+    let borrow = node.inner.borrow();
+    match &borrow.value {
+        NodeValue::Operator(op) => {
+            let mut total = count_erf_of_variable(&op.left, variable)
+                + count_erf_of_variable(&op.right, variable);
+            if matches!(&op.token, Token::Function(Func::Erf)) && is_variable_leaf(&op.right, variable)
+            {
+                total += 1;
+            }
+            total
+        }
+        _ => 0,
+    }
+}
+
+/// Whether `node` is exactly the independent-variable leaf.
+fn is_variable_leaf<T>(node: &Node<T>, variable: char) -> bool
+where
+    T: SymbolicLeaf,
+{
+    matches!(
+        &node.inner.borrow().value,
+        NodeValue::Operand(Token::Indp(c)) | NodeValue::Operand(Token::Var(c))
+            if *c == variable
+    )
+}
+
+/// Replace every `erf(variable)` with its exact limit at the given infinity
+/// direction: `1` at +inf, `-1` at -inf. `None` when a rebuild is impossible
+/// (an operand the walk does not model — the numeric path takes over).
+fn replace_erf_limits<T>(node: &Node<T>, variable: char, limit: i64) -> Option<Node<T>>
+where
+    T: SymbolicLeaf,
+{
+    let borrow = node.inner.borrow();
+    match &borrow.value {
+        NodeValue::Operator(op) => {
+            if matches!(&op.token, Token::Function(Func::Erf)) && is_variable_leaf(&op.right, variable)
+            {
+                return Some(Node::from_number(limit));
+            }
+            let left = replace_erf_limits(&op.left, variable, limit)?;
+            let right = replace_erf_limits(&op.right, variable, limit)?;
+            let rebuilt = match &op.token {
+                Token::Function(func) => NodeInner::from_function(func.clone(), right),
+                Token::Operator(operator) => {
+                    NodeInner::from_operation(operator.clone(), left, right)
+                }
+                _ => return None,
+            };
+            Some(rebuilt)
+        }
+        _ => Some(node.clone()),
+    }
+}
+
+/// The exact difference of two exact bound trees, when both are a rational
+/// multiple of the same irrational base.
+///
+/// `erf(±inf) → ±1` turns `erf(x) sqrt(pi) / 2` into `±sqrt(pi) / 2`; both
+/// bounds share the `sqrt(pi)` base and differ only by their `±1/2` scale, so
+/// subtracting the scales is exact: `1/2 − (-1/2) = 1`, and the answer is the
+/// bare base `sqrt(pi)`. Composite shapes the split cannot read (`sqrt(2) +
+/// sqrt(3)`, say) decline with `None` and the numeric path answers instead.
+fn exact_tree_difference<T>(upper: &Node<T>, lower: &Node<T>) -> Option<Expr<T>>
+where
+    T: SymbolicLeaf,
+{
+    let (upper_scale, upper_base) = split_exact_constant(upper)?;
+    let (lower_scale, lower_base) = split_exact_constant(lower)?;
+    // Both bounds came from the same antiderivative, so the bases only ever
+    // differ by formatting quirks; a textual comparison is exact on the
+    // simplified trees.
+    if upper_base.to_string() != lower_base.to_string() {
+        return None;
+    }
+    let difference = upper_scale.sub(lower_scale)?;
+    if difference.is_zero() {
+        return Some(Expr::from_node(Node::zero()));
+    }
+    let (numerator, denominator) = difference.parts();
+    // The base alone, when the scales cancel to one whole unit.
+    if denominator == 1 && numerator == 1 {
+        return Some(Expr::from_node(upper_base));
+    }
+    let scale = Rat::new(numerator, denominator)?.to_node::<T>();
+    Some(Expr::from_node(NodeInner::from_operation(
+        Op::ImplicitMul,
+        scale,
+        upper_base,
+    )))
+}
+
+/// The rational scale and irrational base of a closed tree: `sqrt(pi) / 2`
+/// splits into `1/2 × sqrt(pi)`, a bare function node is `1 × itself`, and a
+/// pure rational is `itself × 1`. `None` when the tree does not have that
+/// shape — the exact folding then declines and the numeric path answers.
+fn split_exact_constant<T>(tree: &Node<T>) -> Option<(Rat, Node<T>)>
+where
+    T: SymbolicLeaf,
+{
+    let borrow = tree.inner.borrow();
+    if borrow.has_indp {
+        return None;
+    }
+    match &borrow.value {
+        NodeValue::Operand(Token::Number(value)) => {
+            Some((Rat::from_i64(*value), Node::one()))
+        }
+        NodeValue::Operand(Token::Rational(value)) => Some((*value, Node::one())),
+        // A function over constants (`sqrt(pi)`, `ln(2)`) is exactly itself;
+        // a float leaf has no exact reading.
+        NodeValue::Operator(op) if matches!(&op.token, Token::Function(_)) => {
+            Some((Rat::from_i64(1), tree.clone()))
+        }
+        NodeValue::Operand(_) => None,
+        NodeValue::Operator(op) => {
+            let Token::Operator(operator) = &op.token else {
+                return None;
+            };
+            // A negation `0 - rest` carries the rest's scale, negated.
+            if *operator == Op::Sub && op.left.inner.borrow().is_zero() {
+                let (scale, base) = split_exact_constant(&op.right)?;
+                return Some((scale.neg(), base));
+            }
+            if *operator == Op::Div {
+                let (scale, base) = split_exact_constant(&op.left)?;
+                let rat = match &op.right.inner.borrow().value {
+                    NodeValue::Operand(Token::Number(value)) => Rat::from_i64(*value),
+                    NodeValue::Operand(Token::Rational(value)) => *value,
+                    _ => return None,
+                };
+                return Some((scale.div(rat)?, base));
+            }
+            if operator.is_mul() {
+                // A literal beside a decomposable rest; two non-literal
+                // factors would need their bases equal, which the erf bounds
+                // never produce — decline rather than guess.
+                let literal = |node: &Node<T>| -> Option<Rat> {
+                    match &node.inner.borrow().value {
+                        NodeValue::Operand(Token::Number(value)) => Some(Rat::from_i64(*value)),
+                        NodeValue::Operand(Token::Rational(value)) => Some(*value),
+                        _ => None,
+                    }
+                };
+                if let Some(scale) = literal(&op.left) {
+                    let (rest_scale, base) = split_exact_constant(&op.right)?;
+                    return Some((scale.mul(rest_scale)?, base));
+                }
+                if let Some(scale) = literal(&op.right) {
+                    let (rest_scale, base) = split_exact_constant(&op.left)?;
+                    return Some((scale.mul(rest_scale)?, base));
+                }
+                return None;
+            }
+            None
+        }
+        NodeValue::Empty => None,
+    }
+}
+
 /// Evaluate `antiderivative` over `[lower, upper]` as `F(upper) - F(lower)`.
 ///
 /// A finite bound is a plain substitution, taking the limit when substitution
 /// lands on an indeterminate form. An infinite bound is a limit, which lets an
 /// improper integral converge; a bound whose limit is not finite makes the
 /// integral diverge and is reported as [`IntegrationError::Divergent`].
+/// Whether the bounds are the centred improper pair `(-inf, +inf)` and the
+/// integrand probes odd — the shape the exact-zero symmetry covers.
+///
+/// Finite centred bounds are settled before the search by
+/// [`odd_symmetric_zero`]; this covers the improper pair, where zero is only
+/// honest once the antiderivative's convergence at the end has been checked
+/// (its limit is evaluated by the caller before the answer is recorded).
+fn odd_improper_centred<T: SymbolicLeaf>(integrand: &Node<T>, lower: &T, upper: &T) -> bool {
+    if !lower.is_infinite() || !upper.is_infinite() {
+        return false;
+    }
+    // Only the properly centred pair: `-inf` below, `+inf` above. Other
+    // infinite pairings (`[-inf, 0]`, `[-inf, +inf]` with swapped signs) are
+    // not centred and get the ordinary treatment.
+    if !lower.is_negative() || upper.is_negative() {
+        return false;
+    }
+    probe_parity(integrand) == Some(Parity::Odd)
+}
+
 fn evaluate_definite_integral<B>(
+    integrand: &Node<B>,
     antiderivative: &Expr<B>,
     lower: B,
     upper: B,
@@ -525,6 +863,13 @@ where
     B: SymbolicLeaf,
 {
     let variable = crate::math::calculus::expr::independent_variable(&antiderivative.tree);
+    // Odd over the centred improper pair: the checked convergence of the
+    // antiderivative at one end makes the integral exactly zero (see the
+    // recorded path's symmetry step).
+    if odd_improper_centred(integrand, &lower, &upper) {
+        bound_value(antiderivative, variable, &upper, &antiderivative.to_string())?;
+        return Ok(B::zero());
+    }
     let antiderivative_text = antiderivative.to_string();
     let upper_value = bound_value(antiderivative, variable, &upper, &antiderivative_text)?;
     let lower_value = bound_value(antiderivative, variable, &lower, &antiderivative_text)?;
@@ -636,6 +981,8 @@ pub struct IntegratorContext {
 }
 
 impl IntegratorContext {
+    /// A context from the parts: the absolute deadline, the step budget, the
+    /// recursion depth and the nesting depth of integration by parts.
     pub fn new(deadline: Instant, steps: u64, depth: usize, parts_depth: usize) -> Self {
         Self {
             deadline,

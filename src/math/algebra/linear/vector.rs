@@ -156,6 +156,7 @@ impl <T> Vector<T> where T: Matrixable {
 }
 
 impl <T> Vector<T> where T: Matrixable {
+    /// The entries of the vector, top to bottom.
     pub fn iter(&self) -> impl Iterator<Item = T> + '_ {
         self.data.iter().cloned()
     }

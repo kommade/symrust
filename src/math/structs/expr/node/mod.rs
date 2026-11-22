@@ -27,7 +27,9 @@ use crate::{math::numeric::Real, math::parse::lexer::Token};
 /// [`NodeFunctions::distribute_expr`], so it is part of the public API.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MulType {
+    /// The distribution is a multiplication, written `*`.
     OpMul,
+    /// The distribution is a division, written `/`.
     OpDiv,
 }
 
@@ -63,6 +65,11 @@ pub(crate) struct NodeInner<T = Real> {
     pub(crate) has_func: bool,
 }
 
+/// One node of an expression tree: an operand leaf, an operator over two
+/// subtrees, or an empty placeholder.
+///
+/// A `Node` is cheap to clone and safe to share between trees — the payload
+/// is the immutable [`Shared`] allocation below.
 #[derive(Clone, Debug)]
 pub struct Node<T = Real> {
     pub(crate) inner: Shared<T>,

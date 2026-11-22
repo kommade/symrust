@@ -9,31 +9,45 @@ use super::traits::{MatrixIndex, MatrixOps, Matrixable, SquareMatrixOps};
 use crate::math::algebra::rational::Rat;
 use crate::math::algebra::surd::Surd;
 
+/// A matrix whose `N x M` shape is part of the type.
+///
+/// The runtime counterpart is [`Matrix`](super::Matrix), whose dimensions are
+/// values; entry access stays compile-time checked (`T: Matrixable` bounds
+/// the coefficients).
 pub struct StaticMatrix<T, const N: usize, const M: usize> where T: Matrixable {
     pub(crate) data: [[T; M]; N],
 }
 
 impl <T, const N: usize, const M: usize> StaticMatrix<T, N, M> where T: Matrixable {
+    /// Build from the `N` rows directly.
     pub fn new(data: [[T; M]; N]) -> Self {
         Self { data }
     }
 
+    /// Build from `N` row vectors, or `None` when a row has the wrong width.
     pub fn from_vec_matrix(vec: Vec<Vec<T>>) -> Option<Self> {
         Self::from_slice(&vec.into_iter().flatten().collect::<Vec<_>>())
     }
 
+    /// Build from `N` row vectors' concatenation without the length check;
+    /// mis-sized input is silently mis-shaped, so prefer [`from_vec_matrix`](Self::from_vec_matrix).
     pub fn from_unchecked_vec_matrix(vec: Vec<Vec<T>>) -> Self {
         Self::from_unchecked_slice(&vec.into_iter().flatten().collect::<Vec<_>>())
     }
 
+    /// Build from the row-major entries, or `None` when the count is not
+    /// exactly `N * M`.
     pub fn from_vec(vec: Vec<T>) -> Option<Self> {
         Self::from_slice(&vec)
     }
 
+    /// Build from the row-major entries without the length check.
     pub fn from_unchecked_vec(vec: Vec<T>) -> Self {
         Self::from_unchecked_slice(&vec)
     }
 
+    /// Build from the row-major entries, or `None` when the count is not
+    /// exactly `N * M`.
     pub fn from_slice(slice: &[T]) -> Option<Self> {
         if slice.len() != N * M {
             return None;
@@ -41,6 +55,8 @@ impl <T, const N: usize, const M: usize> StaticMatrix<T, N, M> where T: Matrixab
         Some(Self::from_iter(slice.iter().cloned()))
     }
 
+    /// Build from the row-major entries without the length check; a
+    /// mis-sized slice is silently mis-shaped, so prefer [`from_slice`](Self::from_slice).
     pub fn from_unchecked_slice(slice: &[T]) -> Self {
         Self::from_iter(slice.iter().cloned())
     }
@@ -59,6 +75,7 @@ impl <T, const N: usize, const M: usize> StaticMatrix<T, N, M> where T: Matrixab
 }
 
 impl <T, const N: usize> StaticMatrix<T, N, N> where T: Matrixable {
+    /// The `N x N` identity.
     pub fn identity() -> Self {
         let mut data = vec![T::default(); N * N];
         for i in 0..N {

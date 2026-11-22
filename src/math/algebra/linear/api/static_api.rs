@@ -26,6 +26,7 @@ use super::super::vector_set::VectorSet;
 /// Matrix multiplication for the statically sized matrices, where the inner
 /// dimensions are checked by the type system.
 pub trait StaticMatrixMul<T: Matrixable, const N: usize, const M: usize, const P: usize> {
+    /// The `N x M` by `M x P` product, an `N x P` matrix.
     fn mul_matrix(&self, rhs: &StaticMatrix<T, M, P>) -> StaticMatrix<T, N, P>;
 }
 
@@ -49,7 +50,9 @@ where
 
 /// The operations that only make sense on square matrices.
 pub trait StaticSquareMatrixFns<T: Matrixable, const N: usize> {
+    /// The determinant.
     fn det(&self) -> T;
+    /// The inverse, or `None` when the matrix is singular.
     fn inv(&self) -> Option<StaticMatrix<T, N, N>>;
     /// The matrix with `row` and `column` deleted, i.e. of size `N - 1`.
     fn minor(&self, row: usize, column: usize) -> StaticMatrix<T, { N - 1 }, { N - 1 }>
@@ -75,8 +78,11 @@ pub trait StaticSquareMatrixFns<T: Matrixable, const N: usize> {
     where
         [(); N - 1]: Sized;
 
+    /// The eigenvalues when every one stays in `T` (the lenient solver).
     fn eigenvalues(&self) -> Option<Vec<T>>;
 
+    /// A basis of one eigenspace per distinct eigenvalue, or `None` when an
+    /// eigenspace is trivial (an eigenvalue the null space does not answer).
     fn eigenvectors(&self) -> Option<VectorSet<T>>;
 
     /// Diagonalise `self`: find `P` and `D` with `P^-1 A P = D`.
@@ -160,6 +166,7 @@ impl <T, const N: usize> StaticSquareMatrixFns<T, N> for StaticMatrix<T, N, N> w
 }
 
 impl <T, const N: usize> StaticVector<T, N> where T: Matrixable {
+    /// The dot product of the two column vectors.
     pub fn dot_product(&self, rhs: &Self) -> T {
         let mut result = T::additive_identity();
         for row in 0..N {
@@ -168,20 +175,24 @@ impl <T, const N: usize> StaticVector<T, N> where T: Matrixable {
         result
     }
 
+    /// The squared Euclidean length `self · self`.
     pub fn norm_squared(&self) -> T {
         self.dot_product(self)
     }
 
+    /// `true` when the squared length is one.
     pub fn is_unit_vector(&self) -> bool {
         self.norm_squared() == T::multiplicative_identity()
     }
 
+    /// `true` when the dot product with `rhs` is zero.
     pub fn is_orthogonal_to(&self, rhs: &Self) -> bool {
         self.dot_product(rhs) == T::additive_identity()
     }
 }
 
 impl <T, const N: usize, const M: usize> StaticMatrix<T, N, M> where T: Matrixable {
+    /// The `M x N` transpose.
     pub fn transpose(&self) -> StaticMatrix<T, M, N> {
         let mut result = StaticMatrix::default();
         for row in 0..N {
@@ -206,13 +217,20 @@ impl <T, const N: usize, const M: usize> StaticMatrix<T, N, M> where T: Matrixab
         result
     }
 
+    /// Solve `self * x = rhs` in the `M` unknowns.
+    ///
+    /// Returns `None` when the system is inconsistent. The solution is a
+    /// [`Vector`] with one entry per column of `self`.
     pub fn solve_system(&self, rhs: &StaticVector<T, N>) -> Option<Vector<T>> {
         let matrix = VecMatrix::new(N, M, self.iter().cloned().collect());
         let solution = vec_solve_system(&matrix, &rhs.iter().cloned().collect::<Vec<_>>())?;
         Some(Vector::from_vec(solution))
     }
 
-    /// A basis of the column space. Each basis vector has `N` entries.
+    /// The spanning columns of `self`, in original order: every column whose
+    /// column in the reduced form is non-zero. Each vector has `N` entries;
+    /// when dependent columns survive, [`VectorSet::span_basis`] on the
+    /// result is the minimal independent basis of the same span.
     pub fn col_space(&self) -> VectorSet<T> {
         VectorSet::from_vectors(
             vec_column_space(&VecMatrix::new(N, M, self.iter().cloned().collect()))
@@ -222,7 +240,9 @@ impl <T, const N: usize, const M: usize> StaticMatrix<T, N, M> where T: Matrixab
         )
     }
 
-    /// A basis of the row space. Each basis vector has `M` entries.
+    /// The non-zero rows of the reduced form of `self`, spanning the same row
+    /// space. Each vector has `M` entries; [`VectorSet::span_basis`] on the
+    /// result is the minimal independent basis of the same span.
     pub fn row_space(&self) -> VectorSet<T> {
         VectorSet::from_vectors(
             vec_row_space(&VecMatrix::new(N, M, self.iter().cloned().collect()))
@@ -242,10 +262,13 @@ impl <T, const N: usize, const M: usize> StaticMatrix<T, N, M> where T: Matrixab
         )
     }
 
+    /// The rank of `self`: the dimension of its column space.
     pub fn rank(&self) -> usize {
         vec_rank(&VecMatrix::new(N, M, self.iter().cloned().collect()))
     }
 
+    /// The nullity of `self`: the columns minus the rank, the dimension of
+    /// the null space.
     pub fn nullity(&self) -> usize {
         M - self.rank()
     }
@@ -287,11 +310,14 @@ impl <T, const N: usize, const M: usize> StaticMatrix<T, N, M> where T: Matrixab
 }
 
 impl <T, const N: usize> StaticMatrix<T, N, N> where T: Matrixable {
+    /// The LU decomposition, or `None` when a zero pivot is hit.
     pub fn lu_factorisation(&self) -> Option<(StaticMatrix<T, N, N>, Self)> {
         let (l, u) = lu_factors(self)?;
         Some((l, u))
     }
 
+    /// The Gram-Schmidt QR decomposition, or `None` when a column is
+    /// linearly dependent on the earlier ones.
     pub fn qr_factorisation(&self) -> Option<(StaticMatrix<T, N, N>, StaticMatrix<T, N, N>)> {
         let (q, r) = qr_factors(self)?;
         Some((q, r))

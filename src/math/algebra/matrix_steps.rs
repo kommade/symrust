@@ -3,9 +3,15 @@
 //! The guiding rule is that a [`Solution`] should account for **every stage** of
 //! a computation: either decomposed into elementary steps, or recorded as a
 //! single named step when it cannot sensibly be decomposed.
-//!//! * **Elementary row operations** — row echelon form, determinant, inverse —
-//!   decompose into pivot selection, row swaps, row scaling and row
-//!   replacement, and each of those is recorded.
+//!
+//! * **Elementary row operations** — row echelon form, inverse, and the
+//!   determinant's large-matrix elimination fallback — decompose into pivot
+//!   selection, row swaps, row scaling and row replacement, and each of
+//!   those is recorded.
+//! * **The determinant.** Its default route is cofactor expansion along the
+//!   row or column with the most zeros (with the diagonal product for a
+//!   triangular matrix); only matrices past the cofactor cutoff fall back to
+//!   elimination.
 //! * **Gram–Schmidt QR** decomposes into normalising a column and
 //!   orthogonalising the following columns against it.
 //! * **Eigen-decomposition** composes steps already available: the shifted
@@ -52,7 +58,10 @@ impl<T> Matrix<Expr<T>> where T: SymbolicLeaf {
         row_reduce_tracked(self, normalise)
     }
 
-    /// The determinant by Gaussian elimination, recording the steps.
+    /// The determinant, recording the steps of the route the matrix's shape
+    /// picks: the diagonal product for a triangular matrix, cofactor
+    /// expansion along the sparsest row or column for a small one,
+    /// elimination past the cofactor cutoff.
     ///
     /// Returns `None` when the matrix is not square.
     #[must_use]
@@ -73,14 +82,19 @@ impl<T> Matrix<T>
 where
     T: Matrixable + Display + Clone,
 {
-    /// The determinant by Gaussian elimination, recording each elementary row
-    /// operation and the final diagonal product.
+    /// The determinant, recording each step of the route the matrix's shape
+    /// picks: the diagonal product for a triangular matrix, a folded `2x2`
+    /// cofactor expression, cofactor expansion along the sparsest row or
+    /// column up to `DETERMINANT_COFACTOR_MAX` (each minor's determinant a
+    /// nested solution), elimination beyond.
     ///
     /// Returns `None` when the matrix is not square.
     ///
-    /// Each step shows the matrix as it stands after the operation. The answer
-    /// is the scalar determinant, so the result type is `T` while the steps are
-    /// `Matrix<T>`; see [`Solution`]'s two type parameters.
+    /// Steps show the value each rule produced — the elimination snapshots
+    /// as full matrices, the term values as `1 x 1` matrices (see
+    /// `determinant_generic` for why). The answer is the scalar determinant,
+    /// so the result type is `T` while the steps are `Matrix<T>`; see
+    /// [`Solution`]'s two type parameters.
     ///
     /// # Examples
     /// ```
@@ -180,16 +194,17 @@ where
     /// null spaces that produce the eigenvectors.
     ///
     /// This is the **numeric** path: it works for any [`Matrixable`]
-    /// coefficient type, so a solution always exists when the matrix is
-    /// diagonalisable. Symbolic eigenvalues in radicals are a separate, richer
-    /// facility available only for [`Expr`](crate::math::structs::expr::Expr)
+    /// coefficient type, so a solution exists whenever every eigenvalue
+    /// stays in the coefficient type. Symbolic eigenvalues in radicals are a
+    /// separate, richer facility available only for
+    /// [`Expr`](crate::math::structs::expr::Expr)
     /// matrices; see [`Matrix::<Expr>::eigen_solution`].
     ///
     /// Each distinct eigenvalue contributes one step for the shift `A - λI` and
     /// a nested row reduction for its null space.
     ///
-    /// Returns `None` when the matrix is not square or not diagonalisable over
-    /// `T`.
+    /// Returns `None` when the matrix is not square or its eigenvalues cannot
+    /// be computed over `T`.
     ///
     /// # Examples
     /// ```
@@ -265,7 +280,13 @@ where
         || gram.clone(),
     );
 
-    // 2. Its eigen-decomposition, with all of its own steps.
+    // 2. Its eigen-decomposition, with all of its own steps. The block is
+    // the calculation that feeds "take square roots", so it gets a heading
+    // of its own and lands under it.
+    recorder.record_decision(
+        "diagonalise AᵀA",
+        || String::from("the singular values are the square roots of the eigenvalues of AᵀA, so diagonalise it first"),
+    );
     if let Some(eigen) = eigen_generic(&gram) {
         recorder.push_sub_solution(eigen);
     }
@@ -367,6 +388,19 @@ where
             "shift by the eigenvalue",
             || format!("formed A - ({lambda})I"),
             || snapshot.clone(),
+        );
+
+        // The eigenspace read-off gets its own heading, like the Expr path:
+        // the reduction below is the calculation, so it lands under the
+        // heading that asks for it rather than floating between shift steps.
+        recorder.record_decision(
+            "solve for the eigenspace",
+            || {
+                format!(
+                    "solving (A - ({lambda})I) x = 0 by reducing A - ({lambda})I; the \
+                     free columns of its reduced form give the basis"
+                )
+            },
         );
 
         // Its null space is a row reduction; record it as a nested solution.
@@ -728,18 +762,21 @@ where
     recorder.finish(work)
 }
 
-/// Generic Gaussian-elimination determinant that records every step.
+/// The recorded determinant of a plain-coefficient matrix.
 ///
-/// [`ElementaryStep`] can only display a value of the *answer* type, so a
-/// solution that shows intermediate matrices must answer with a matrix too.
-/// The determinant is therefore carried as a `1 x 1` matrix on the last step,
-/// and [`determinant_steps`](Matrix::determinant_steps) unwraps it.
+/// The route follows the matrix's shape, as the `Expr` version does: a
+/// triangular matrix takes the diagonal product, a 2x2 folds `a d - b c`,
+/// matrices up to `DETERMINANT_COFACTOR_MAX` expand along the row or column
+/// with the most zeros, and larger ones fall back to elimination.
 ///
-/// The method follows the shape, as the `Expr` version does: triangular
-/// matrices take the diagonal product, matrices up to
-/// [`DETERMINANT_COFACTOR_MAX`] expand along their first row with each
-/// minor's determinant as a nested solution, and larger matrices fall back to
-/// elimination.
+/// An elementary step may display a value of a type other than the one its
+/// computation ran over — `ElementaryStep<T, S>` keeps `T` only as a marker
+/// while the step yields `S`. One [`Solution`] still displays a single value
+/// type, though: every step's result and the final answer share `S`. The
+/// intermediate values here are `Matrix<T>`, so the scalar determinant is
+/// carried in that shared type as a `1 x 1` matrix, and
+/// [`determinant_steps`](Matrix::determinant_steps) unwraps it with
+/// `map_result`.
 fn determinant_generic<T>(matrix: &Matrix<T>) -> Option<Solution<Matrix<T>, Matrix<T>>>
 where
     T: Matrixable + Display + Clone,
@@ -752,6 +789,61 @@ where
     // type matches the solution's answer type.
     let value = determinant_generic_tracked(matrix, &mut recorder);
     Some(recorder.finish(scalar_matrix(value)))
+}
+
+/// The line a cofactor expansion should run along: the row or column with
+/// the most zero entries, the way the expansion is written by hand — zeros
+/// drop out of the sum, so the sparsest line opens the fewest minor
+/// determinants.
+///
+/// Returns `(is_row, index, zero_count)`. Ties keep a row over a column and
+/// the lowest index, so the choice is deterministic; a matrix without zeros
+/// still expands along row 1, exactly as before.
+fn expansion_axis<U>(matrix: &Matrix<U>, is_zero: impl Fn(&U) -> bool) -> (bool, usize, usize)
+where
+    U: Matrixable,
+{
+    let size = matrix.rows();
+    let mut best: (bool, usize, usize) = (true, 0, 0);
+    for row in 0..size {
+        let zeros = (0..size)
+            .filter(|&column| is_zero(&matrix[row][column]))
+            .count();
+        if zeros > best.2 {
+            best = (true, row, zeros);
+        }
+    }
+    for (column, slot) in matrix[0].iter().enumerate().take(size) {
+        let zeros = (0..size)
+            .filter(|&row| is_zero(&matrix[row][column]))
+            .count();
+        // Strictly greater: a column only wins where it beats every row, so
+        // equal zero counts leave the earlier row in place.
+        if zeros > best.2 {
+            let _ = slot;
+            best = (false, column, zeros);
+        }
+    }
+    best
+}
+
+/// Join signed terms into a readable sum: the first term keeps its own sign,
+/// later ones separate as ` + v` or ` - v`. A term such as `6` and a second
+/// at `-36` therefore read `6 - 36`, the way the sum is written by hand.
+fn join_signed_sum(parts: &[String]) -> String {
+    let mut text = String::new();
+    for (index, part) in parts.iter().enumerate() {
+        if index == 0 {
+            text.push_str(part);
+        } else if let Some(rest) = part.strip_prefix('-') {
+            text.push_str(" - ");
+            text.push_str(rest.trim_start());
+        } else {
+            text.push_str(" + ");
+            text.push_str(part);
+        }
+    }
+    text
 }
 
 /// The determinant of a plain-coefficient matrix, recorded onto `recorder`.
@@ -805,68 +897,100 @@ where
         );
         return value;
     }
-    // Cofactor expansion along the first row.
+    // Cofactor expansion along the row or column with the most zeros. The
+    // entries that are zero drop out of the sum, so the expansion sentence
+    // lists only the live terms of the sparsest line.
+    let (is_row, axis, zeros) = expansion_axis(matrix, |entry| entry.is_zero_value());
+    let line: Vec<(usize, usize)> = if is_row {
+        (0..size).map(|column| (axis, column)).collect()
+    } else {
+        (0..size).map(|row| (row, axis)).collect()
+    };
+    let kind = if is_row { "row" } else { "column" };
+    let line_text = format!("{kind} {}", axis + 1);
     let mut terms: Vec<String> = Vec::new();
-    for (column, entry) in matrix[0].iter().enumerate().take(size) {
-        if entry.is_zero_value() {
+    for &(row, column) in &line {
+        if matrix[row][column].is_zero_value() {
             continue;
         }
-        let sign = if column % 2 == 0 { "+" } else { "-" };
+        let sign = if (row + column) % 2 == 0 { "+" } else { "-" };
         terms.push(format!(
-            "{sign} ({entry}) det(minor of row 1, column {})",
+            "{sign} ({}) det(minor of row {}, column {})",
+            matrix[row][column],
+            row + 1,
             column + 1
         ));
     }
     if terms.is_empty() {
         recorder.record_decision(
-            "zero row",
-            || "row 1 is all zeros, so the determinant is 0".to_string(),
+            "zero line",
+            || format!("{line_text} is all zeros, so the determinant is 0"),
         );
         return T::additive_identity();
     }
     recorder.record_decision(
         "cofactor expansion",
-        || format!("expand det along row 1: det = {}", terms.join(" ")),
+        || {
+            format!(
+                "expand det along {line_text} ({} of {size} entries are zero): det = {}",
+                zeros,
+                terms.join(" ")
+            )
+        },
     );
     let mut total = T::additive_identity();
-    for (column, cell) in matrix[0].iter().enumerate().take(size) {
-        let entry = cell.clone();
+    let mut parts: Vec<String> = Vec::new();
+    for &(row, column) in &line {
+        let entry = matrix[row][column].clone();
         if entry.is_zero_value() {
             continue;
         }
-        let minor = matrix.minor(0, column);
+        let minor = matrix.minor(row, column);
         let (minor_value, sub) = if minor.rows() == 1 {
             (minor[0][0].clone(), None)
         } else {
             let mut nested: StepRecorder<Matrix<T>> = StepRecorder::new(
                 minor.clone(),
-                format!("determinant of the minor of row 1, column {}", column + 1),
+                format!(
+                    "determinant of the minor of row {}, column {}",
+                    row + 1,
+                    column + 1
+                ),
             );
             let value = determinant_generic_tracked(&minor, &mut nested);
             let solution = nested.finish(scalar_matrix(value.clone()));
             (value, Some(solution))
         };
+        let even = (row + column) % 2 == 0;
+        let product = entry.clone() * minor_value;
+        let signed = if even { product } else { -product };
+        let sign = if even { "+" } else { "-" };
+        let entry_text = entry.to_string();
+        let position = format!("minor of row {}, column {}", row + 1, column + 1);
+        // Heading first: the term row quotes the value the rule produced, and
+        // the minor's own working is indented underneath it — the same order
+        // the derivative narrative uses for its terms.
+        recorder.record(
+            "cofactor term",
+            || format!("{sign} ({entry_text}) det({position}) = {signed}"),
+            || scalar_matrix(signed.clone()),
+        );
         if let Some(solution) = sub {
             recorder.push_sub_solution(solution);
         }
-        let product = entry.clone() * minor_value;
-        let signed = if column % 2 == 0 {
-            product
-        } else {
-            -product
-        };
-        let sign = if column % 2 == 0 { "+" } else { "-" };
-        let column_text = column + 1;
-        recorder.record(
-            "cofactor term",
-            || {
-                format!(
-                    "{sign} ({entry}) det(minor of row 1, column {column_text}) = {signed}"
-                )
-            },
-            || scalar_matrix(signed.clone()),
-        );
+        parts.push(signed.to_string());
         total = total + signed;
+    }
+    // The closing step shows the whole sum forming: every signed minor term,
+    // then the total. A single-term expansion adds nothing, so its sum would
+    // only restate the one cofactor term.
+    if parts.len() > 1 {
+        let sum = join_signed_sum(&parts);
+        recorder.record(
+            "sum the terms",
+            || format!("det = {sum} = {total}"),
+            || scalar_matrix(total.clone()),
+        );
     }
     total
 }
@@ -1032,12 +1156,181 @@ impl<T> Matrix<Expr<T>> where T: SymbolicLeaf {
 
     /// Eigenvalues and eigenvectors, composing the steps that compute them.
     ///
-    /// Returns `None` when the matrix is not diagonalisable over the
-    /// coefficient type.
+    /// A matrix that is not diagonalisable still keeps its eigenvectors —
+    /// the narrative closes with a diagonalisability decision reporting how
+    /// many directions were found across the eigenvalues. Returns `None`
+    /// only when the eigenvalues cannot be found exactly.
     #[must_use]
     pub fn eigen_solution(&self) -> Option<Solution<Expr<T>, Expr<T>>> {
         eigen_tracked(self)
     }
+
+    /// The diagonalisation, composing the steps that compute it.
+    ///
+    /// The narrative is the full eigen analysis (the characteristic
+    /// polynomial, the shifts, the eigenspace reductions) as a nested block —
+    /// [`eigen_tracked`] carries irrational eigenvalues in exact radicals —
+    /// followed by the assembly of `P` (the eigenvector columns) and `D`
+    /// (the matching eigenvalues) and the product `P D P⁻¹`, which
+    /// reconstructs `A`. Returns `None` when the eigenspaces do not span the
+    /// whole space, i.e. the matrix is not diagonalisable.
+    #[must_use]
+    pub fn diagonalize_solution(&self) -> Option<Solution<Expr<T>, Expr<T>>> {
+        diagonalize_tracked(self)
+    }
+}
+
+/// One distinct eigenvalue with its eigenspace's basis columns.
+type EigenspacePairs<T> = Vec<(Expr<T>, Vec<Matrix<Expr<T>>>)>;
+
+/// Diagonalisation, composing the steps that compute it.
+///
+/// Reuses [`eigen_tracked`] for the analysis — its exact radicals carry
+/// irrational eigenvalues — then builds `P` from the eigenvector columns and
+/// `D` from the eigenvalue repeated once per column of its own eigenspace.
+/// The result is the product `P D P⁻¹`, which is `A` again; nothing else
+/// reconstructs the matrix and nothing less loses `P` and `D`.
+///
+/// Returns `None` when the eigenspaces found do not span the whole space
+/// (exactly the not-diagonalisable case) or `P` is not invertible.
+#[must_use]
+fn diagonalize_tracked<T>(
+    matrix: &Matrix<Expr<T>>,
+) -> Option<Solution<Expr<T>, Expr<T>>>
+where
+    T: SymbolicLeaf,
+{
+    if matrix.rows() != matrix.columns() {
+        return None;
+    }
+    let size = matrix.rows();
+    let eigen = eigen_tracked(matrix);
+
+    // The eigenspaces, by the same chain `eigen_tracked` runs: rational
+    // eigenvalues first, then the polynomial's radicals, then the algebraic
+    // root finder. Each distinct value contributes one basis vector per free
+    // column of its shift's reduced form.
+    let values = match matrix.eigenvalues() {
+        Some(values) => Some(values),
+        None => {
+            let polynomial = matrix.characteristic_polynomial()?;
+            match polynomial.roots() {
+                Some(roots) => Some(roots),
+                #[cfg(feature = "algebraic")]
+                None => crate::math::structs::expr::algebraic_eigenvalues(&polynomial),
+                #[cfg(not(feature = "algebraic"))]
+                None => None,
+            }
+        }
+    }?;
+    let mut columns: EigenspacePairs<T> = Vec::new();
+    let mut total = 0usize;
+    let mut seen: Vec<Expr<T>> = Vec::new();
+    for lambda in values {
+        if seen.contains(&lambda) {
+            continue;
+        }
+        seen.push(lambda.clone());
+        let mut shifted = matrix.clone();
+        for i in 0..size {
+            shifted[i][i] = (shifted[i][i].clone() - lambda.clone()).tidy();
+        }
+        let basis = crate::math::structs::expr::null_space_basis(&shifted);
+        let basis: Vec<Matrix<Expr<T>>> = basis
+            .iter()
+            .map(|vector| {
+                let mut column = Matrix::<Expr<T>>::new(size, 1);
+                for row in 0..size {
+                    column[row][0] = vector[row].clone();
+                }
+                column
+            })
+            .collect();
+        total += basis.len();
+        columns.push((lambda, basis));
+    }
+    if total != size {
+        return None;
+    }
+    // Nothing to push when the analysis failed (checked below), but the
+    // borrow must not outlive the Option.
+    let eigen = eigen?;
+
+    let mut recorder = StepRecorder::new(matrix_expr(matrix), "diagonalisation");
+    recorder.record_decision(
+        "diagonalise",
+        || String::from(
+            "P holds the eigenvectors as columns, D the matching eigenvalues on \
+             its diagonal, and P D P^(-1) is the matrix back",
+        ),
+    );
+    recorder.push_sub_solution(eigen);
+
+    // P: the eigenvector columns. D: each eigenvalue once per column of its
+    // own eigenspace.
+    let mut p = Matrix::<Expr<T>>::new(size, size);
+    let mut diagonal = Vec::with_capacity(size);
+    let mut column = 0usize;
+    for (lambda, basis) in &columns {
+        for vector in basis {
+            for row in 0..size {
+                p[row][column] = vector[row][0].clone();
+            }
+            diagonal.push(lambda.clone());
+            column += 1;
+        }
+    }
+    let d = Matrix::from_diagonal(&diagonal);
+    recorder.record_step(
+        "assemble P",
+        || format!("the {size} eigenvectors become the columns of P"),
+        || matrix_expr(&p),
+    );
+    recorder.record_step(
+        "assemble D",
+        || {
+            String::from(
+                "each eigenvalue repeats once per column of its own eigenspace, \
+                 so P^(-1) A P = D",
+            )
+        },
+        || matrix_expr(&d),
+    );
+
+    let inverse = p.inv()?;
+    let mut product = multiply_expr(&p, &d);
+    product = multiply_expr(&product, &inverse);
+    for row in 0..size {
+        let row_entries = &mut product[row];
+        for entry in row_entries.iter_mut().take(size) {
+            *entry = entry.clone().tidy();
+        }
+    }
+    recorder.record_step(
+        "form P D P^(-1)",
+        || String::from("multiplied the factors; the product reconstructs A"),
+        || matrix_expr(&product),
+    );
+    Some(recorder.finish(matrix_expr(matrix)))
+}
+
+/// The product of two expression matrices, entries left raw — the recorded
+/// step result is tidied per entry when the answer is read back out.
+fn multiply_expr<T>(left: &Matrix<Expr<T>>, right: &Matrix<Expr<T>>) -> Matrix<Expr<T>>
+where
+    T: SymbolicLeaf + Clone,
+{
+    let mut result = Matrix::<Expr<T>>::new(left.rows(), right.columns());
+    for row in 0..left.rows() {
+        for column in 0..right.columns() {
+            let mut total = Expr::<T>::from_node(Node::zero());
+            for k in 0..left.columns() {
+                total = total + left[row][k].clone() * right[k][column].clone();
+            }
+            result[row][column] = total;
+        }
+    }
+    result
 }
 
 /// Wrap a matrix as an expression so it can be recorded as a step result.
@@ -1235,10 +1528,10 @@ const DETERMINANT_COFACTOR_MAX: usize = 5;
 /// The determinant, recorded step by step.
 ///
 /// The method follows the shape: a triangular matrix's determinant is its
-/// diagonal product, a small matrix expands along its first row (each minor's
-/// own determinant a nested solution), and a large one falls back to
-/// elimination because cofactor expansion opens up more and more minors the
-/// bigger the matrix gets. See [`Matrix::determinant_solution`].
+/// diagonal product, a small matrix expands along its sparsest row or column
+/// (each minor's own determinant a nested solution), and a large one falls
+/// back to elimination because cofactor expansion opens up more and more
+/// minors the bigger the matrix gets. See [`Matrix::determinant_solution`].
 #[must_use]
 fn determinant_tracked<T>(matrix: &Matrix<Expr<T>>) -> Option<Solution<Expr<T>, Expr<T>>>
 where
@@ -1302,70 +1595,106 @@ where
         );
         return value;
     }
-    // Cofactor expansion along the first row. The entries that are zero drop
-    // out of the sum, so the expansion sentence lists only the live terms.
+    // Cofactor expansion along the row or column with the most zeros. The
+    // entries that are zero drop out of the sum, so the expansion sentence
+    // lists only the live terms of the sparsest line.
+    let (is_row, axis, zeros) = expansion_axis(matrix, |entry| tidy(entry.clone()).is_zero());
+    let line: Vec<(usize, usize)> = if is_row {
+        (0..size).map(|column| (axis, column)).collect()
+    } else {
+        (0..size).map(|row| (row, axis)).collect()
+    };
+    let kind = if is_row { "row" } else { "column" };
+    let line_text = format!("{kind} {}", axis + 1);
     let mut terms: Vec<String> = Vec::new();
-    for (column, cell) in matrix[0].iter().enumerate().take(size) {
-        let entry = tidy(cell.clone());
+    for &(row, column) in &line {
+        let entry = tidy(matrix[row][column].clone());
         if entry.is_zero() {
             continue;
         }
-        let sign = if column % 2 == 0 { "+" } else { "-" };
+        let sign = if (row + column) % 2 == 0 { "+" } else { "-" };
         terms.push(format!(
-            "{sign} ({entry}) det(minor of row 1, column {})",
+            "{sign} ({entry}) det(minor of row {}, column {})",
+            row + 1,
             column + 1
         ));
     }
     if terms.is_empty() {
         recorder.record_decision(
-            "zero row",
-            || "row 1 is all zeros, so the determinant is 0".to_string(),
+            "zero line",
+            || format!("{line_text} is all zeros, so the determinant is 0"),
         );
         return Expr::from_f64(0.0);
     }
     recorder.record_decision(
         "cofactor expansion",
-        || format!("expand det along row 1: det = {}", terms.join(" ")),
+        || {
+            format!(
+                "expand det along {line_text} ({} of {size} entries are zero): det = {}",
+                zeros,
+                terms.join(" ")
+            )
+        },
     );
     let mut total = Expr::from_f64(0.0);
-    for (column, cell) in matrix[0].iter().enumerate().take(size) {
-        let entry = tidy(cell.clone());
+    let mut parts: Vec<String> = Vec::new();
+    for &(row, column) in &line {
+        let entry = tidy(matrix[row][column].clone());
         if entry.is_zero() {
             continue;
         }
-        let minor = matrix.minor(0, column);
+        let minor = matrix.minor(row, column);
         let (minor_value, sub) = if minor.rows() == 1 {
             (minor[0][0].clone(), None)
         } else {
             let mut nested = StepRecorder::<Expr<T>>::new(
                 matrix_expr(&minor),
-                format!("determinant of the minor of row 1, column {}", column + 1),
+                format!(
+                    "determinant of the minor of row {}, column {}",
+                    row + 1,
+                    column + 1
+                ),
             );
             let value = determinant_expr_tracked(&minor, &mut nested);
             let solution = nested.finish(value.clone());
             (value, Some(solution))
         };
-        if let Some(solution) = sub {
-            recorder.push_sub_solution(solution);
-        }
-        let signed = if column % 2 == 0 {
+        let even = (row + column) % 2 == 0;
+        let signed = if even {
             tidy(entry.clone() * minor_value)
         } else {
             tidy(entry.clone() * minor_value * Expr::from_f64(-1.0))
         };
-        let sign = if column % 2 == 0 { "+" } else { "-" };
-        let column_text = column + 1;
+        let sign = if even { "+" } else { "-" };
         let entry_text = entry.to_string();
+        let position = format!("minor of row {}, column {}", row + 1, column + 1);
+        // Heading first: the term row quotes the value the rule produced, and
+        // the minor's own working is indented underneath it.
         recorder.record(
             "cofactor term",
             || {
                 format!(
-                    "{sign} ({entry_text}) det(minor of row 1, column {column_text}) = {signed}"
+                    "{sign} ({entry_text}) det({position}) = {signed}"
                 )
             },
             || signed.clone(),
         );
+        if let Some(solution) = sub {
+            recorder.push_sub_solution(solution);
+        }
+        parts.push(signed.to_string());
         total = tidy(total + signed);
+    }
+    // The closing step shows the whole sum forming: every signed minor term,
+    // then the total. A single-term expansion adds nothing, so its sum would
+    // only restate the one cofactor term.
+    if parts.len() > 1 {
+        let sum = join_signed_sum(&parts);
+        recorder.record(
+            "sum the terms",
+            || format!("det = {sum} = {total}"),
+            || total.clone(),
+        );
     }
     total
 }
@@ -1849,7 +2178,13 @@ where
         || matrix_expr(&gram),
     );
 
-    // 2. Its eigen-decomposition, with all of its own steps.
+    // 2. Its eigen-decomposition, with all of its own steps. The block is
+    // the calculation that feeds "take square roots", so it gets a heading
+    // of its own and lands under it.
+    recorder.record_decision(
+        "diagonalise AᵀA",
+        || String::from("the singular values are the square roots of the eigenvalues of AᵀA, so diagonalise it first"),
+    );
     if let Some(eigen) = eigen_tracked(&gram) {
         recorder.push_sub_solution(eigen);
     }
@@ -2020,7 +2355,7 @@ where
     // The characteristic polynomial, as one step: the eigenvalues are its roots.
     let root_list = eigenvalues
         .iter()
-        .map(ToString::to_string)
+        .map(|value| eigen_lambda_text(value))
         .collect::<Vec<_>>()
         .join(", ");
     // The characteristic polynomial as one decision: the eigenvalues are its
@@ -2045,14 +2380,28 @@ where
         seen.push(lambda.clone());
 
         // (A - λI) is a step in its own right.
+        let lambda_text = eigen_lambda_text(&lambda);
         let mut shifted = matrix.clone();
         for i in 0..size {
             shifted[i][i] = tidy(shifted[i][i].clone() - lambda.clone());
         }
         recorder.record(
             "shift by the eigenvalue",
-            || format!("formed A - ({lambda})I"),
+            || format!("formed A - ({lambda_text})I"),
             || matrix_expr(&shifted),
+        );
+
+        // The eigenvector read-off gets its own heading: the reduction below
+        // is the calculation, and the eigenvector rows after it quote its
+        // result, so the heading keeps each part in reading order.
+        recorder.record_decision(
+            "solve for the eigenspace",
+            || {
+                format!(
+                    "solving (A - ({lambda_text})I) x = 0 by reducing A - ({lambda_text})I; the \
+                     free columns of its reduced form give the basis"
+                )
+            },
         );
 
         // Its null space is a row reduction; record it as a nested solution.
@@ -2070,7 +2419,7 @@ where
                 "no eigenvector",
                 || {
                     format!(
-                        "the rows of A - ({lambda})I reduced to full rank, so this \
+                        "the rows of A - ({lambda_text})I reduced to full rank, so this \
                          eigenvalue has no eigenvector — the value may be an \
                          imprecise approximation"
                     )
@@ -2084,7 +2433,7 @@ where
                 "eigenvector",
                 || {
                     format!(
-                        "solving (A - ({lambda})I) x = 0 with the free variables of \
+                        "solving (A - ({lambda_text})I) x = 0 with the free variables of \
                          its reduced form: x is any nonzero multiple of the \
                          column shown"
                     )
@@ -2143,4 +2492,26 @@ where
     } else {
         terms.join(" + ")
     }
+}
+
+/// The text an eigenvalue prints as in the narrative.
+///
+/// An approximate eigenvalue — an isolated algebraic root travels as a bare
+/// float leaf — would otherwise dump its full FP128 expansion
+/// (`2.77318797646314330052064178744331`) into every header it appears in;
+/// it prints as a rounded decimal with the approximation marker instead,
+/// matching the `:eigen` output. Exact eigenvalues (rational roots,
+/// radical forms) print as themselves.
+fn eigen_lambda_text<T>(lambda: &Expr<T>) -> String
+where
+    T: SymbolicLeaf,
+{
+    use crate::math::parse::lexer::trimmed_decimal;
+    if lambda.is_float_leaf() {
+        return match lambda.evaluate(0.0_f64).value() {
+            Some(value) => format!("≈ {}", trimmed_decimal(value)),
+            None => lambda.to_string(),
+        };
+    }
+    lambda.to_string()
 }

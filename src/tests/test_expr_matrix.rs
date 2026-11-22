@@ -112,6 +112,39 @@ fn rank_and_nullity_of_a_matrix_expression() {
 }
 
 #[test]
+fn space_bases_are_reachable_on_an_expression() {
+    // Columns 1 and 3 are independent, column 2 is column 1 + column 3.
+    let matrix = create_expr!("[[1, 2, 1], [2, 3, 1], [0, 1, 1]]").unwrap();
+
+    let columns = matrix.column_space().expect("a matrix");
+    assert_eq!(columns.len(), 2, "rank 2: two spanning columns");
+    // The canonical reduced readout: (1, 0, 2) and (0, 1, -1) span exactly
+    // what the three columns span.
+    assert_entries(&columns[0], &[&[1.0], &[0.0], &[2.0]]);
+    assert_entries(&columns[1], &[&[0.0], &[1.0], &[-1.0]]);
+
+    // Rows 1 and 2 span; row 3 is a combination of them.
+    let rows = matrix.row_space().expect("a matrix");
+    assert_eq!(rows.len(), 2);
+    // Row-space bases are rows: one row of three entries, reduced form.
+    let row = rows[0].as_matrix().expect("a row matrix");
+    assert_eq!(row.rows(), 1);
+    assert_eq!(row.columns(), 3);
+    assert_entries(&rows[0], &[&[1.0, 0.0, -1.0]]);
+    assert_entries(&rows[1], &[&[0.0, 1.0, 1.0]]);
+
+    // The null space of this rank-2, 3-column matrix is one-dimensional.
+    // x = 1 gives (1, -1, 1): row1 - row2 + row3 = 0.
+    let null = matrix.null_space().expect("a matrix");
+    assert_eq!(null.len(), 1);
+    assert_entries(&null[0], &[&[1.0], &[-1.0], &[1.0]]);
+
+    // Full column rank: only the zero vector lies in the null space.
+    let injective = create_expr!("[[1, 0], [0, 1], [1, 1]]").unwrap();
+    assert!(injective.null_space().expect("a matrix").is_empty());
+}
+
+#[test]
 fn qr_and_lu_products_reconstruct_the_matrix() {
     let expr = create_expr!("[[1, 1], [1, 0]]").unwrap();
 
@@ -172,19 +205,25 @@ fn non_diagonalisable_matrix_still_has_eigenvectors() {
 #[test]
 fn irrational_eigenvalues_still_yield_their_eigenvectors() {
     // The characteristic polynomial factors as (λ - 1)(λ² - 5λ - 2), so two
-    // eigenvalues are irrational; the shifted matrices carry float entries
-    // and the read-off has to see through their residues.
+    // eigenvalues are irrational radicals; every read-off runs under a
+    // tolerance to see through reduction residues whatever form λ carries.
     let expr = create_expr!("[[1, 2, 3], [0, 4, 6], [0, 1, 1]]").unwrap();
     let vectors = expr
         .eigenvectors()
         .expect("three distinct (two irrational) eigenvalues");
     assert_eq!(vectors.len(), 3);
 
-    // The exact eigenvalue λ = 1 has the x-axis as its eigenspace.
+    // The rational eigenvalue λ = 1 has the x-axis as its eigenspace. The
+    // eigenvalues travel as exact radicals now, so λ = 1 is found by value.
     let spaces = expr.eigenspaces().expect("the eigenvalues all exist");
     let exact = spaces
         .iter()
-        .find(|(lambda, _)| !lambda.is_float_leaf())
+        .find(|(lambda, _)| {
+            lambda
+                .evaluate(0.0_f64)
+                .value()
+                .is_some_and(|value| (value - 1.0).abs() < 1e-9)
+        })
         .expect("the rational eigenvalue λ = 1");
     assert_eq!(exact.1.len(), 1);
     assert_entries(&exact.1[0], &[&[1.0], &[0.0], &[0.0]]);

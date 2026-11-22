@@ -47,6 +47,7 @@ fn assert_square<T: Matrixable>(matrix: &Matrix<T>, op: &str) {
 }
 
 impl <T> Matrix<T> where T: Matrixable {
+    /// The `columns x rows` transpose.
     pub fn transpose(&self) -> Self {
         let mut result = Self::new(self.columns, self.rows);
         for row in 0..self.rows {
@@ -132,7 +133,10 @@ impl <T> Matrix<T> where T: Matrixable {
         qr_factors(self)
     }
 
-    /// Basis of the column space: each basis vector has one entry per row.
+    /// The spanning columns of `self`, in original order: every column whose
+    /// column in the reduced form is non-zero. Each vector has one entry per
+    /// row; when dependent columns survive, [`VectorSet::span_basis`] on the
+    /// result is the minimal independent basis of the same span.
     pub fn col_space(&self) -> VectorSet<T> {
         VectorSet::from_vectors(
             vec_column_space(&VecMatrix::from(self))
@@ -142,7 +146,9 @@ impl <T> Matrix<T> where T: Matrixable {
         )
     }
 
-    /// Basis of the row space: each basis vector has one entry per column.
+    /// The non-zero rows of the reduced form of `self`, spanning the same row
+    /// space. Each vector has one entry per column; [`VectorSet::span_basis`]
+    /// on the result is the minimal independent basis of the same span.
     pub fn row_space(&self) -> VectorSet<T> {
         VectorSet::from_vectors(
             vec_row_space(&VecMatrix::from(self))
@@ -152,7 +158,8 @@ impl <T> Matrix<T> where T: Matrixable {
         )
     }
 
-    /// Basis of the null space: each basis vector has one entry per column.
+    /// The null space of `self`: one independent vector per free column of
+    /// the reduced form, each with one entry per column.
     pub fn null_space(&self) -> VectorSet<T> {
         VectorSet::from_vectors(
             vec_null_space(&VecMatrix::from(self))
@@ -162,10 +169,13 @@ impl <T> Matrix<T> where T: Matrixable {
         )
     }
 
+    /// The rank of `self`: the dimension of its column space.
     pub fn rank(&self) -> usize {
         vec_rank(&VecMatrix::from(self))
     }
 
+    /// The nullity of `self`: the columns minus the rank, the dimension of
+    /// the null space.
     pub fn nullity(&self) -> usize {
         self.columns - self.rank()
     }
@@ -321,24 +331,33 @@ impl <T> Matrix<T> where T: Matrixable {
 
 /// Square-matrix operations on the runtime-sized matrix.
 pub trait SquareMatrixFns<T: Matrixable>: Clone {
+    /// The determinant.
     fn det(&self) -> T;
+    /// The inverse, or `None` when the matrix is singular.
     fn inv(&self) -> Option<Self>
     where
         Self: Sized;
+    /// The `(rows-1) x (rows-1)` matrix with `row` and `column` deleted.
     fn minor(&self, row: usize, column: usize) -> Self
     where
         Self: Sized;
+    /// The cofactor `C_{row,column}`: the signed minor determinant.
     fn cofactor(&self, row: usize, column: usize) -> T;
+    /// The adjugate: the transposed cofactor matrix.
     fn adjugate(&self) -> Self
     where
         Self: Sized;
+    /// The eigenvalues when every one stays in `T` (the lenient solver).
     fn eigenvalues(&self) -> Option<Vec<T>>;
+    /// A basis of one eigenspace per distinct eigenvalue, or `None` when an
+    /// eigenspace comes back empty.
     fn eigenvectors(&self) -> Option<VectorSet<T>>;
 }
 
 /// Matrix multiplication for the runtime-sized matrix. Dimensions are checked
 /// when the product is formed, not by the type system.
 pub trait MatrixMul<T: Matrixable> {
+    /// The product `self · rhs`, panicking when the inner dimensions differ.
     fn mul_matrix(&self, rhs: &Matrix<T>) -> Matrix<T>;
 }
 

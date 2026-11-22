@@ -71,6 +71,13 @@ where
     }
 }
 
+/// An exact rational number: a signed `i128` numerator over a positive
+/// `i128` denominator, always in lowest terms.
+///
+/// Every arithmetic is `i128`-overflow-checked — the fallible inherent
+/// methods (`add`, `sub`, …) return `Option` on overflow, the operator
+/// impls unwrap them so expressions can panic loudly instead of silently
+/// wrapping.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rat {
     num: i128,
@@ -191,9 +198,12 @@ impl Display for Rat {
 }
 
 impl Rat {
+    /// The rational zero.
     pub const ZERO: Self = Self { num: 0, den: 1 };
+    /// The rational one.
     pub const ONE: Self = Self { num: 1, den: 1 };
 
+    /// The integer `value` as a rational.
     pub const fn from_i64(value: i64) -> Self {
         Self {
             num: value as i128,
@@ -201,6 +211,9 @@ impl Rat {
         }
     }
 
+    /// The rational `num/den` in lowest terms with a positive denominator,
+    /// or `None` on a zero denominator (`i128::MIN` numerators included,
+    /// since those cannot be negated) or on reduction overflow.
     pub fn new(num: i128, den: i128) -> Option<Self> {
         if den == 0 {
             return None;
@@ -353,6 +366,7 @@ impl Rat {
     }
 
     #[allow(clippy::should_implement_trait)]
+    /// The checked difference; `None` on `i128` overflow.
     pub fn sub(self, other: Self) -> Option<Self> {
         let left = self.num.checked_mul(other.den)?;
         let right = other.num.checked_mul(self.den)?;
@@ -360,6 +374,7 @@ impl Rat {
     }
 
     #[allow(clippy::should_implement_trait)]
+    /// The checked product; `None` on `i128` overflow.
     pub fn mul(self, other: Self) -> Option<Self> {
         Self::new(
             self.num.checked_mul(other.num)?,
@@ -368,6 +383,7 @@ impl Rat {
     }
 
     #[allow(clippy::should_implement_trait)]
+    /// The checked quotient; `None` on a zero divisor or `i128` overflow.
     pub fn div(self, other: Self) -> Option<Self> {
         if other.num == 0 {
             return None;
@@ -378,11 +394,13 @@ impl Rat {
         )
     }
 
+    /// The reciprocal `1/self`, or `None` when `self` is zero.
     pub fn recip(self) -> Option<Self> {
         Self::new(self.den, self.num)
     }
 
     #[allow(clippy::should_implement_trait)]
+    /// The negation (always exact; the denominator stays positive).
     pub fn neg(self) -> Self {
         Self {
             num: -self.num,
@@ -390,6 +408,9 @@ impl Rat {
         }
     }
 
+    /// The integer power, exact while the products stay inside `i128` and
+    /// the exponent within a hard cap; `None` otherwise (fractions become
+    /// reciprocals for negative exponents).
     pub fn pow(self, exponent: i64) -> Option<Self> {
         if exponent == 0 {
             return Some(Self::ONE);
@@ -411,10 +432,12 @@ impl Rat {
         }
     }
 
+    /// `true` when the value is exactly zero.
     pub fn is_zero(&self) -> bool {
         self.num == 0
     }
 
+    /// `true` when the value is exactly one.
     pub fn is_one(&self) -> bool {
         self.num == 1 && self.den == 1
     }
@@ -428,10 +451,14 @@ impl Rat {
         self.num < 0
     }
 
+    /// The value as the nearest `f64` (numerator and denominator through
+    /// their own `f64` readings).
     pub fn to_f64(&self) -> f64 {
         self.num as f64 / self.den as f64
     }
 
+    /// The value as the crate's FP128 float, exact when the rational is
+    /// dyadic and representable and otherwise rounded once from `f64`.
     pub fn to_float(&self) -> arpfloat::Float {
         // Exact when the rational fits a 113-bit significand over a power of
         // two; the f64 route would round three times (numerator, denominator,
@@ -541,6 +568,8 @@ impl Rat {
         }
     }
 
+    /// The `(numerator, denominator)` parts, always the stored canonical
+    /// form: lowest terms, positive denominator.
     pub fn parts(&self) -> (i128, i128) {
         (self.num, self.den)
     }

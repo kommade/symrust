@@ -213,6 +213,16 @@ impl<T: FloatType + Display> Node<T> {
     /// folds to exactly `0` where a float-spliced `sin(3.14159…)` cannot).
     /// Matrix and vector tokens are entered as well, so entries can hold the
     /// variable.
+    ///
+    /// # Examples
+    /// ```
+    /// use symrust::create_expr;
+    ///
+    /// let expr = create_expr!("x ^ 2 + 1").unwrap();
+    /// let replacement = create_expr!("pi").unwrap();
+    /// let grafted = expr.tree().graft_variable('x', replacement.tree());
+    /// assert!(grafted.to_string().contains("pi"));
+    /// ```
     #[must_use]
     pub fn graft_variable(&self, var: char, replacement: &Self) -> Self {
         let borrowed = self.inner.borrow();

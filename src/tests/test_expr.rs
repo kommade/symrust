@@ -123,7 +123,7 @@ fn surd_powers_collapse() {
     assert_eq!(create_expr!("sqrt(2)^2").unwrap().simplify(true).to_string(), "2");
     assert_eq!(
         create_expr!("sqrt(2)^-2").unwrap().simplify(true).to_string(),
-        ".5"
+        "0.5"
     );
     // A product of two reciprocals of the same surd is `1/a`.
     assert_eq!(
@@ -131,7 +131,7 @@ fn surd_powers_collapse() {
             .unwrap()
             .simplify(true)
             .to_string(),
-        ".5"
+        "0.5"
     );
     // An ODD power of a surd stays a surd (2^(3/2) is not an integer power).
     let odd = create_expr!("sqrt(2)^3").unwrap().simplify(true).to_string();

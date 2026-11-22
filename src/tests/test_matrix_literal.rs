@@ -66,6 +66,17 @@ fn mismatched_row_lengths_are_rejected() {
 }
 
 #[test]
+fn parses_a_set_literal_as_rows() {
+    // `{[1, 2], [3, 4]}` — a set of vectors, the way bases are written — is
+    // the row-stacked matrix the braces remap to.
+    let expr = create_expr!("{[1, 2], [3, 4]}").unwrap();
+    let matrix = matrix_of(&expr);
+    assert_eq!(matrix.rows(), 2);
+    assert_eq!(matrix.columns(), 2);
+    assert_eq!(matrix[1][1].to_string(), "4");
+}
+
+#[test]
 fn matrix_renders_as_latex_pmatrix() {
     let expr = create_expr!("[[1, 2], [3, 4]]").unwrap();
     let latex = expr.to_latex().unwrap();

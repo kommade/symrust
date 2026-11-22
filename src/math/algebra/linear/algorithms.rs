@@ -626,10 +626,13 @@ pub(crate) type SvdComponents<T> = (Matrix<T>, Matrix<T>, Vec<T>, Matrix<T>);
 ///    what keeps `Rat`/`Surd` results exact, but only succeeds when the
 ///    eigenvalues, eigenvectors and roots all stay in `T`.
 /// 2. **Numerical** (`svd_jacobi_of`): one-sided Jacobi rotations on the columns
-///    of `A`. This handles floating point (and any type whose values are
-///    representable as `f64` through `from_f64`/`as_f64`), which the exact
-///    route cannot. It is skipped for genuinely exact types because rotating
-///    them rounds through `f64` and would overflow.
+///    of `A`. Every real matrix has a singular value decomposition, so this
+///    route runs whenever the coefficient type can absorb `f64` rounding
+///    (see [`ExactField::svd_numeric_fallback`]): rotation angles are worked
+///    out in `f64` and rounded into `T`, which trades the entries' exactness
+///    for availability. Exact types (`Rat`, `Surd`) decline — a rounded
+///    factor overflows their bounded arithmetic — and a matrix whose entries
+///    have no numeric reading at all returns `None`.
 pub(crate) fn svd_of<T, M>(matrix: &M) -> Option<SvdComponents<T>>
 where
     T: Matrixable,
@@ -638,7 +641,7 @@ where
     if let Some(decomposition) = svd_exact_of(matrix) {
         return Some(decomposition);
     }
-    if T::is_floating() {
+    if T::svd_numeric_fallback() {
         return svd_jacobi_of(matrix);
     }
     None
@@ -738,8 +741,9 @@ where
 /// See [`svd_of`]. Each sweep picks a pair of columns of `A` that are not yet
 /// orthogonal and rotates the pair to orthogonalise them; the rotations
 /// accumulate into `V`, the final column norms are the singular values, and the
-/// normalised columns are `U`. Only used for floating `T` (see
-/// [`Matrixable::is_floating`]).
+/// normalised columns are `U`. Runs for any coefficient type with numeric
+/// entries (see [`svd_of`]); a matrix with symbolic entries has no numeric
+/// reading to rotate with and returns `None`.
 pub(crate) fn svd_jacobi_of<T, M>(matrix: &M) -> Option<SvdComponents<T>>
 where
     T: Matrixable,
@@ -747,6 +751,17 @@ where
 {
     let rows = matrix.row_count();
     let columns = matrix.column_count();
+
+    // Symbolic entries cannot take part in the rotations: their numeric
+    // reading is NaN, and a NaN angle would silently corrupt every value it
+    // touches. Refuse the whole computation instead.
+    for row in 0..rows {
+        for column in 0..columns {
+            if !matrix.entry(row, column).as_f64().is_finite() {
+                return None;
+            }
+        }
+    }
 
     // Work on owned copies so the rotations can rewrite entries in place.
     let mut work: Vec<Vec<T>> = (0..rows)
@@ -795,14 +810,22 @@ where
                 for row_values in work.iter_mut() {
                     let left_value = row_values[first].clone();
                     let right_value = row_values[second].clone();
-                    row_values[first] = cosine.clone() * left_value.clone() - sine.clone() * right_value.clone();
-                    row_values[second] = sine.clone() * left_value + cosine.clone() * right_value;
+                    row_values[first] = round_numeric(
+                        cosine.clone() * left_value.clone() - sine.clone() * right_value.clone(),
+                    );
+                    row_values[second] = round_numeric(
+                        sine.clone() * left_value + cosine.clone() * right_value,
+                    );
                 }
                 for row_values in right.iter_mut() {
                     let left_value = row_values[first].clone();
                     let right_value = row_values[second].clone();
-                    row_values[first] = cosine.clone() * left_value.clone() - sine.clone() * right_value.clone();
-                    row_values[second] = sine.clone() * left_value + cosine.clone() * right_value;
+                    row_values[first] = round_numeric(
+                        cosine.clone() * left_value.clone() - sine.clone() * right_value.clone(),
+                    );
+                    row_values[second] = round_numeric(
+                        sine.clone() * left_value + cosine.clone() * right_value,
+                    );
                 }
                 rotated = true;
             }
@@ -825,13 +848,21 @@ where
     }
 
     // Sort by singular value, large to small. Reordering the pairs keeps `U`,
-    // `S` and `V` aligned.
+    // `S` and `V` aligned. Only the leading `min(rows, columns)` values are
+    // kept (a wide matrix has more columns than singular values it needs), and
+    // the `U` columns follow — one per kept value.
+    let usable = rows.min(columns);
     let mut order: Vec<usize> = (0..columns).collect();
     let order_keys: Vec<f64> = singular_values.iter().map(|value| value.clone().as_f64()).collect();
     order.sort_by(|&a, &b| order_keys[b].partial_cmp(&order_keys[a]).unwrap_or(std::cmp::Ordering::Equal));
-    let ordered_values: Vec<T> = order.iter().map(|&index| singular_values[index].clone()).collect();
+    let ordered_values: Vec<T> = order
+        .iter()
+        .take(usable)
+        .map(|&index| singular_values[index].clone())
+        .collect();
     let ordered_right_columns: Vec<Vec<T>> = order
         .iter()
+        .take(usable)
         .map(|&index| (0..columns).map(|row| right[row][index].clone()).collect())
         .collect();
     // `left_columns` only holds the non-zero columns, in original order; map
@@ -840,7 +871,7 @@ where
         .filter(|&index| !(singular_values[index] == T::additive_identity()))
         .collect();
     let mut ordered_left: Vec<Vec<T>> = Vec::new();
-    for &index in &order {
+    for &index in order.iter().take(usable) {
         if let Some(position) = nonzero_source.iter().position(|&source| source == index) {
             ordered_left.push(left_columns[position].clone());
         }
@@ -861,6 +892,8 @@ where
         }
     }
 
+    // V stays n x n: the discarded columns are orthonormal directions whose
+    // sigma entry is zero, so keep the square shape other code assumes.
     let mut ordered_right = Matrix::new(columns, columns);
     for (column, entries) in ordered_right_columns.iter().enumerate() {
         for (row, value) in entries.iter().enumerate() {
@@ -893,8 +926,7 @@ pub(crate) fn apply_matrix<T, M>(matrix: &M, vector: &[T]) -> Option<Vec<T>>
 where
     T: Matrixable,
     M: MatrixOps<T>,
-{
-    let (rows, columns) = (matrix.row_count(), matrix.column_count());
+{    let (rows, columns) = (matrix.row_count(), matrix.column_count());
     if vector.len() != columns {
         return None;
     }
@@ -966,5 +998,19 @@ pub(crate) fn dot_values<T: Matrixable>(left: &[T], right: &[T]) -> T {
     left.iter()
         .zip(right)
         .fold(T::additive_identity(), |acc, (a, b)| acc + a.clone() * b.clone())
+}
+
+/// Fold a rotated entry back to its plain numeric reading.
+///
+/// The jacobi path composes each entry from its previous value —
+/// `cos · a − sin · b` — so without this fold an entry over a symbolic
+/// coefficient such as `Expr` carries an accumulation tree that doubles in
+/// size with every rotation, and reading it for the next sweep's angle costs
+/// exponential time. This numeric route has already given up exactness (the
+/// rotation angles are `f64`), so folding each entry to its `f64` reading as
+/// a fresh leaf keeps the computation linear per sweep and changes nothing
+/// materially.
+fn round_numeric<T: Matrixable>(value: T) -> T {
+    T::from_f64(value.as_f64())
 }
 

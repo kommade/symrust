@@ -110,8 +110,9 @@ fn join_with_star(left: &str, right: &str) -> String {
 ///
 /// A step that normalises a column to `[1/5, 2/5, 2/5, 4/5]` reads far better as
 /// `1/5 [1 2 2 4]`. Only a factor that divides *every* entry is taken out, so the
-/// rendering never misrepresents the matrix. Entries that are not exact
-/// rationals (a surd, a symbolic term) leave the matrix printed as it is.
+/// rendering never misrepresents the matrix. Entries that are not neat exact
+/// rationals — a surd, a symbolic term, or an approximate float whose exact
+/// recovery has a big denominator — leave the matrix printed as it stands.
 fn write_matrix_with_factor<T: SymbolicLeaf>(
     matrix: &crate::math::algebra::linear::Matrix<Expr<T>>,
     f: &mut std::fmt::Formatter<'_>,
@@ -187,9 +188,12 @@ fn write_matrix_entries<T: SymbolicLeaf>(
 
 /// A factor that divides every entry of the matrix, if there is a useful one.
 ///
-/// Returns `None` when the matrix is all zeros, when any entry is not an exact
-/// rational, or when the only common factor is a unit (`±1`), since writing
-/// `1 [[1 2], [3 4]]` would help nobody.
+/// Returns `None` when the matrix is all zeros, when any entry is not a
+/// *neat* exact rational — a surd, a symbolic term, or an approximate value
+/// whose fraction recovery has a denominator past the display's neat bound
+/// (`64`), i.e. a float artefact rather than a written fraction — or when
+/// the only common factor is a unit (`±1`), since writing `1 [[1 2], [3 4]]`
+/// would help nobody.
 fn common_factor<T: SymbolicLeaf>(
     matrix: &crate::math::algebra::linear::Matrix<Expr<T>>,
 ) -> Option<Node<T>> {
@@ -203,7 +207,14 @@ fn common_factor<T: SymbolicLeaf>(
                 return None;
             }
             let value = entry.tree().inner.borrow().evaluate()?;
+            // A recovery past the neat bound is the float engine's restated
+            // approximation, not a rational the matrix was built from.
+            // Pulling it out would prefix the matrix with `1 / 126585` and
+            // rewrite every integer entry into its numerator.
             let rational = Rat::from_leaf(&value)?;
+            if rational.parts().1 > 64 {
+                return None;
+            }
             if rational.is_zero() {
                 continue;
             }

@@ -1,3 +1,28 @@
+//! Symbolic differentiation.
+//!
+//! [`Derivative::get_derivative`] returns the derivative as a plain
+//! expression; [`Derivative::get_derivative_solution`] wraps the same answer
+//! in a [`Solution`] whose steps read the way the differentiation was done:
+//!
+//! - Sums differentiate term by term, each recorded term followed by its own
+//!   working as a nested block.
+//! - The rule for a product, quotient or composition states itself first
+//!   (`product rule: … with u = …, v = …`) and applies it below; the child
+//!   derivatives are nested sub-solutions, and the final step assembles the
+//!   composed result. Leaves are silent — no `d/dx x = 1` noise.
+//! - The elementary table covers the standard functions, including
+//!   functions of a linear argument and logarithms in any base.
+//!
+//! Constants are exact: differentiating an expression with rational or
+//! radical coefficients keeps them so.
+//!
+//! ```
+//! use symrust::{create_expr, math::calculus::derivative::Derivative};
+//! let expr = create_expr!("x sin(x)").unwrap();
+//! let derivative = expr.get_derivative();
+//! assert_eq!(derivative.to_string(), "x cos(x) + sin(x)");
+//! ```
+
 use crate::{math::calculus::expr::{
         Shape, add, call, div, float, function, is_constant, mul, negate, number, one, pow, shape,
         split_constant, sqrt_arg, sub, sum_terms, zero,
@@ -13,7 +38,10 @@ use crate::{math::calculus::expr::{
     },
 };
 
+/// Differentiation of an expression, with a recorded-narrative option.
 pub trait Derivative {
+    /// The symbolic derivative of the expression, unwrapped to the plain
+    /// expression.
     fn get_derivative(self) -> Self;
     /// Find the derivative of the expression, recording every step.
     /// # Examples

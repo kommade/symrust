@@ -53,8 +53,10 @@ where
     }
 }
 
-/// How far from a multiple of 2π (24 twelfths) an angle may sit and still be
-/// folded; anything larger is almost certainly not a session-scale constant.
+/// The largest multiple of π/12 still folded: the argument's coefficient in
+/// twelfths may reach `MAX_TWELFTHS` in magnitude, and anything beyond is
+/// almost certainly not a constant a caller would write as an exact π
+/// multiple.
 const MAX_TWELFTHS: i64 = 240;
 
 /// The argument in twelfths of π, when it is written as the π constant

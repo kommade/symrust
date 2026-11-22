@@ -20,10 +20,14 @@ use super::vector::Vector;
 /// only a subspace; use the query methods to find out. Iterating yields the
 /// vectors, and [`VectorSet::iter`] does the same.
 ///
-/// ```ignore
-/// let e1 = Vector::from_vec(vec![Rat::from_i64(1), Rat::from_i64(0)]);
-/// let e2 = Vector::from_vec(vec![Rat::from_i64(0), Rat::from_i64(1)]);
-/// let set = VectorSet::from_vectors(vec![e1, e2]);
+/// ```
+/// use symrust::math::algebra::linear::{Vector, VectorSet};
+/// use symrust::math::algebra::rational::Rat;
+///
+/// let set = VectorSet::from_vectors(vec![
+///     Vector::from_vec(vec![Rat::from_i64(1), Rat::from_i64(0)]),
+///     Vector::from_vec(vec![Rat::from_i64(0), Rat::from_i64(1)]),
+/// ]);
 /// assert_eq!(set.dimension(), 2);
 /// assert!(set.is_basis_for_space(2));
 /// ```

@@ -282,7 +282,13 @@ impl<T: SymbolicLeaf> Display for Token<T> {
             Self::Operator(op) => write!(f, "{op}"),
             Self::Constant(c) => write!(f, "{c}"),
             Self::Number(n) => write!(f, "{n}"),
-            Self::Float(n) => write!(f, "{n}"),
+            // A float leaf is approximate currency: its display rounds to a
+            // trimmed 12-decimal reading instead of dumping the full FP128
+            // expansion (`2.77318797646314330052064178744331`) into whatever
+            // text it appears in. The value itself keeps full precision.
+            Self::Float(n) => {
+                write!(f, "{}", trimmed_decimal(n.to_real().as_f64()))
+            }
             // The tree's own spacing, so a fraction leaf renders exactly like
             // the division tree it replaced. A whole number (possible only for
             // magnitudes beyond `i64`) renders as the bare integer.
@@ -290,8 +296,20 @@ impl<T: SymbolicLeaf> Display for Token<T> {
                 let (numerator, denominator) = value.parts();
                 if denominator == 1 {
                     write!(f, "{numerator}")
-                } else {
+                } else if denominator <= RATIONAL_FRACTION_MAX {
                     write!(f, "{numerator} / {denominator}")
+                } else {
+                    // A denominator this large is an artifact, not a written
+                    // fraction: the value is an approximate float recovered
+                    // exactly, or a very wide decimal literal. The tree keeps
+                    // the exact rational; the text shows a rounded decimal
+                    // with the approximation marker instead of a numerator
+                    // the reader would have to divide themselves.
+                    write!(
+                        f,
+                        "≈ {}",
+                        trimmed_decimal(numerator as f64 / denominator as f64)
+                    )
                 }
             }
             Self::Indp(c) | Self::Var(c) => write!(f, "{c}"),
@@ -328,6 +346,34 @@ impl<T: SymbolicLeaf> Display for Token<T> {
 fn is_narrative_atom(rendered: &str) -> bool {
     !rendered.is_empty()
         && rendered.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+}
+
+/// The largest denominator a [`Token::Rational`] displays as a fraction.
+///
+/// Past this bound a rational is either an approximate float an exact
+/// recovery folded into a fraction, or a very wide decimal literal — either
+/// way the fraction itself is unreadable, and a rounded decimal with the
+/// approximation marker tells the reader what the value actually is. The
+/// bound matches [`Rat::from_leaf_simple`][crate::math::algebra::rational::Rat::from_leaf_simple]'s
+/// notion of a *simple* rational (`x / 64` or better).
+const RATIONAL_FRACTION_MAX: i128 = 64;
+
+/// A fixed-point decimal with trailing zeros and the bare point trimmed:
+/// `0.500000000000` reads `0.5`, `1.000000000000` reads `1`.
+///
+/// Shared with the step narratives, which quote approximate eigenvalues in
+/// their headers and apply the same rounding.
+pub(crate) fn trimmed_decimal(value: f64) -> String {
+    let mut text = format!("{value:.12}");
+    if text.contains('.') {
+        while text.ends_with('0') {
+            text.pop();
+        }
+        if text.ends_with('.') {
+            text.pop();
+        }
+    }
+    text
 }
 
 /// A handful of rules (tree-equality shortcuts) compare tokens. Equality is

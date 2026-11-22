@@ -133,6 +133,21 @@ pub trait ExactField:
     fn is_floating() -> bool {
         true
     }
+
+    /// Whether the numerical SVD fallback may run for this coefficient type.
+    ///
+    /// The fallback rotates with angles worked out in `f64` and rounds the
+    /// sines/cosines back into `Self`, so it is only sound where that rounding
+    /// lands in the type's native representation. Float types say yes (the
+    /// default); exact types say no — rounding `1/3` into a `Rat` overflows
+    /// its bounded arithmetic and silently wrecks exactness. A symbolic
+    /// coefficient that still reads numerically — an [`Expr`] whose constant
+    /// entries evaluate to floats — overrides this to `true`: every real
+    /// matrix has a singular value decomposition, so a numeric answer beats
+    /// none at all.
+    fn svd_numeric_fallback() -> bool {
+        Self::is_floating()
+    }
 }
 
 /// The bridge between the crate's owned float type and a leaf float type.
@@ -181,8 +196,11 @@ pub trait ExpressionScalar: NumCore + FloatBridge {
 
     // --- trigonometric -------------------------------------------------
 
+    /// The sine of `self` (radians).
     fn sin(self) -> Self;
+    /// The cosine of `self` (radians).
     fn cos(self) -> Self;
+    /// The tangent of `self` (radians).
     fn tan(self) -> Self;
 
     /// `sec(self) = 1 / cos(self)`.
@@ -198,12 +216,16 @@ pub trait ExpressionScalar: NumCore + FloatBridge {
         Self::from_i64(1) / self.tan()
     }
 
+    /// The inverse sine, in radians, of a value in `[-1, 1]`.
     fn asin(self) -> Self;
+    /// The inverse cosine, in radians, of a value in `[-1, 1]`.
     fn acos(self) -> Self;
+    /// The inverse tangent, in radians.
     fn atan(self) -> Self;
 
     // --- roots and logarithms ------------------------------------------
 
+    /// The principal square root.
     fn sqrt(self) -> Self;
 
     /// The natural logarithm.
@@ -217,6 +239,7 @@ pub trait ExpressionScalar: NumCore + FloatBridge {
         self.ln() / Self::from_real(base).ln()
     }
 
+    /// The natural exponential `e^self`.
     fn exp(self) -> Self {
         Self::e().pow(self)
     }

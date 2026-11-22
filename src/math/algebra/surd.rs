@@ -98,10 +98,33 @@ impl ExactField for Surd {
 
 impl Display for Surd {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // A purely radical value drops the coefficient when it is ±1:
+        // `sqrt(2)` and `-sqrt(2)`, not `1 sqrt(2)` and `-1 sqrt(2)`.
+        let bare = self.b.is_one() || self.b.is_neg_one();
+        let radical = |f: &mut std::fmt::Formatter<'_>, value: &Rat| {
+            if value.is_neg_one() {
+                write!(f, "-sqrt({})", self.k)
+            } else if bare {
+                write!(f, "sqrt({})", self.k)
+            } else {
+                write!(f, "{value} sqrt({})", self.k)
+            }
+        };
         if self.b.is_zero() {
             write!(f, "{}", self.a)
         } else if self.a.is_zero() {
-            write!(f, "{} sqrt({})", self.b, self.k)
+            radical(f, &self.b)
+        } else if self.b.is_negative() {
+            // `19/2 + -sqrt(181)/2` misreads as two additions; the sum's
+            // negative radical part prints as the subtraction it is.
+            let magnitude = self.b.neg();
+            if magnitude.is_one() {
+                write!(f, "{} - sqrt({})", self.a, self.k)
+            } else {
+                write!(f, "{} - {} sqrt({})", self.a, magnitude, self.k)
+            }
+        } else if self.b.is_one() {
+            write!(f, "{} + sqrt({})", self.a, self.k)
         } else {
             write!(f, "{} + {} sqrt({})", self.a, self.b, self.k)
         }
@@ -109,12 +132,14 @@ impl Display for Surd {
 }
 
 impl Surd {
+    /// The quadratic irrational `sqrt(2)`, an identity value for checks.
     pub const SQRT_TWO: Surd = Surd {
         k: 2,
         a: Rat::ZERO,
         b: Rat::ONE,
     };
 
+    /// The given rational as a member of the extension (zero radicand).
     pub const fn rational(value: Rat) -> Self {
         Self {
             k: 0,
@@ -144,6 +169,7 @@ impl Surd {
         })
     }
 
+    /// `true` when the value is exactly zero (both parts zero).
     pub fn is_zero(&self) -> bool {
         self.a.is_zero() && self.b.is_zero()
     }
@@ -162,14 +188,18 @@ impl Surd {
         self.a
     }
 
+    /// `true` when the value is exactly one.
     pub fn is_one(&self) -> bool {
         self.k == 0 && self.a.is_one()
     }
 
+    /// `true` when the value is negative (decided on the numeric reading).
     pub fn is_negative(&self) -> bool {
         self.to_f64() < 0.0
     }
 
+    /// The numeric reading as `f64`: the rational part plus the radical's
+    /// contribution.
     pub fn to_f64(&self) -> f64 {
         if self.b.is_zero() {
             self.a.to_f64()
@@ -200,17 +230,22 @@ impl Surd {
     }
 
     #[allow(clippy::should_implement_trait)]
+    /// The checked sum, `None` when the operands live in different
+    /// extensions (different radicands) or a coefficient overflows.
     pub fn add(self, other: Self) -> Option<Self> {
         let k = self.common_field(other)?;
         Self::new(k, self.a.add(other.a)?, self.b.add(other.b)?)
     }
 
     #[allow(clippy::should_implement_trait)]
+    /// The checked difference; `None` under the same conditions as `add`.
     pub fn sub(self, other: Self) -> Option<Self> {
         self.add(other.neg())
     }
 
     #[allow(clippy::should_implement_trait)]
+    /// The checked product `(a1 + b1 s)(a2 + b2 s)`, `None` on different
+    /// extensions or overflow.
     pub fn mul(self, other: Self) -> Option<Self> {
         let k = self.common_field(other)?;
         // (a1 + b1 s)(a2 + b2 s) = a1a2 + k b1b2 + (a1b2 + a2b1) s
@@ -224,6 +259,8 @@ impl Surd {
     }
 
     #[allow(clippy::should_implement_trait)]
+    /// The checked quotient via the conjugate: `self · other.conj / |other|²`,
+    /// `None` on a zero divisor, different extensions or overflow.
     pub fn div(self, other: Self) -> Option<Self> {
         let k = self.common_field(other)?;
         // Multiply both sides by the conjugate of the divisor.
@@ -233,6 +270,7 @@ impl Surd {
         numerator.scale(norm.recip()?)
     }
 
+    /// The reciprocal `1/self`, via the conjugate and the squared norm.
     pub fn recip(self) -> Option<Self> {
         let k = self.k;
         let conjugate = self.neg_conjugate();
@@ -252,6 +290,7 @@ impl Surd {
         Self::new(self.k, self.a.mul(factor)?, self.b.mul(factor)?)
     }
 
+    /// The value scaled by a rational factor, `None` on overflow.
     pub fn scale_by(self, factor: Rat) -> Option<Self> {
         self.scale(factor)
     }
@@ -296,6 +335,12 @@ impl Surd {
 
     /// Render this surd as an expression in the caller's leaf type: the exact
     /// radicals stay exact regardless of the tree's coefficient.
+    ///
+    /// A negative `b` in a sum yields a subtraction tree (`a - b sqrt(k)`),
+    /// so the rendering reads `19 / 2 - sqrt(181) / 2` rather than gluing a
+    /// minus into an addition as `+ -sqrt(181) / 2`. A bare radical keeps the
+    /// signed scaling itself: `-3 sqrt(5) / 10` was always how such a value
+    /// printed, and the negation wrapper would only add brackets.
     pub fn to_node<T>(self) -> Node<T>
     where
         T: crate::math::numeric::SymbolicLeaf,
@@ -304,6 +349,10 @@ impl Surd {
             return self.a.to_node();
         }
         let root = Node::sqrt(Node::number(self.k));
+        if self.b.is_negative() && !self.a.is_zero() {
+            let magnitude = Node::multiply_by_rational(root, self.b.neg());
+            return Node::sub(self.a.to_node(), magnitude);
+        }
         let radical = Node::multiply_by_rational(root, self.b);
         if self.a.is_zero() {
             radical
@@ -381,6 +430,8 @@ pub fn sqrt_rational(value: Rat) -> Option<Surd> {
     }
 }
 
+/// Build the expression tree `linear·x + constant` as the polynomial part of
+/// a quadratic `x² + linear·x + constant` under construction.
 pub fn surd_quadratic_node<T>(
     linear: Surd,
     constant: Surd,
@@ -394,6 +445,8 @@ where
     Node::add(Node::add(square, linear_term), constant.to_node())
 }
 
+/// The surd's square root as a tree: a `Surd` when the root stays in a
+/// single quadratic extension, the unevaluated `sqrt(…)` node otherwise.
 pub fn surd_sqrt_node<T>(value: Surd) -> Node<T>
 where
     T: crate::math::numeric::SymbolicLeaf,

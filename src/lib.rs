@@ -3,6 +3,7 @@
 // The built-in bench harness: `#[bench]` runs through `cargo bench --lib`.
 #![cfg_attr(test, feature(test))]
 #![allow(dead_code)]
+#![warn(missing_docs)]
 
 //! A symbolic math library.
 //!
@@ -34,6 +35,8 @@ macro_rules! calc_step {
 }
 
 pub mod math;
+
+pub mod prelude;
 
 #[cfg(test)]
 extern crate test;
