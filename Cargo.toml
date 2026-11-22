@@ -2,6 +2,17 @@
 name = "symrust"
 version = "0.1.2"
 edition = "2024"
+authors = ["kommade"]
+# The edition floor is 1.85; the nightly-only features are opt-in behind the
+# `generic_const`/`algebraic` feature gates, so stable users are unaffected.
+rust-version = "1.85"
+description = "A symbolic mathematics library: exact calculus, algebra and linear algebra with narrated solutions, plus the symr REPL"
+readme = "README.md"
+license = "GPL-3.0-only"
+repository = "https://github.com/kommade/symrust"
+documentation = "https://docs.rs/symrust"
+keywords = ["symbolic", "calculus", "mathematics", "algebra", "cas"]
+categories = ["mathematics", "science", "algorithms"]
 
 [lib]
 name = "symrust"
