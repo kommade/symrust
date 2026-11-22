@@ -74,6 +74,13 @@ use symrust::prelude::*;
 // Create an expression from a string.
 let expr = create_expr!("x^2 e^x").unwrap();
 
+// Or build one from typed Rust values.
+let x = symbol('x');
+let polynomial = x.pow(2) * 2 + 1;
+assert_eq!(polynomial.to_string(), "2 x ^ 2 + 1");
+// The symbol is Copy — no clones — and the tree underneath shares its nodes
+// through immutable Arcs, so cloning an expression is a pointer bump.
+
 // Differentiate.
 let d = expr.clone().get_derivative();
 

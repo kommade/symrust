@@ -298,13 +298,18 @@ impl<T: ExactField> Matrixable for T {}
 /// This is also what makes [`crate::math::structs::expr::Expr`] a linear-algebra
 /// coefficient: `Expr<T>: ExactField` holds for every `T: SymbolicLeaf`, so
 /// `Matrix<Expr<T>>` needs no per-site justification.
+///
+/// A leaf is a plain value type, never a reference: the `'static` bound lets a
+/// [`Symbol`][crate::math::structs::expr::Symbol] intern one leaf node per
+/// letter and type, so repeated coercions share a single allocation.
 pub trait SymbolicLeaf:
-    FloatType + std::fmt::Display + PartialOrd + Neg<Output = Self> + std::fmt::Debug
+    FloatType + std::fmt::Display + PartialOrd + Neg<Output = Self> + std::fmt::Debug + 'static
 {
 }
 
 impl<T> SymbolicLeaf for T where
-    T: FloatType + std::fmt::Display + PartialOrd + Neg<Output = T> + std::fmt::Debug
+    T:
+        FloatType + std::fmt::Display + PartialOrd + Neg<Output = T> + std::fmt::Debug + 'static
 {
 }
 

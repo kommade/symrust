@@ -1,7 +1,7 @@
 use std::{error::Error, fmt::Display};
 
 use crate::math::algebra::rational::Rat;
-use crate::math::numeric::{FloatType, Real};
+use crate::math::numeric::{FloatType, Real, SymbolicLeaf};
 use crate::math::structs::expr::node::{Node, NodeInner, NodeValue};
 
 use super::lexer::{Op, Token};
@@ -23,7 +23,7 @@ pub enum ParseError {
 /// arrays separated by `,`, and parses each entry with a fresh [`Parser`].
 /// Tokens outside any bracket are passed through unchanged, so ordinary
 /// expressions are unaffected.
-fn collapse_matrix_literals<T: FloatType + Display>(
+fn collapse_matrix_literals<T: SymbolicLeaf>(
     tokens: Vec<Token<T>>,
 ) -> Result<Vec<Token<T>>, ParseError> {
     if !tokens.iter().any(|token| matches!(token, Token::LBracket)) {
@@ -71,7 +71,7 @@ fn collapse_matrix_literals<T: FloatType + Display>(
 }
 
 /// Parse the inside of a `[[...], [...]]` literal into a `Matrix<Expr<T>>`.
-fn parse_matrix_rows<T: FloatType + Display>(
+fn parse_matrix_rows<T: SymbolicLeaf>(
     tokens: &[Token<T>],
 ) -> Result<crate::math::algebra::linear::Matrix<crate::math::structs::expr::Expr<T>>, ParseError> {
     use crate::math::algebra::linear::Matrix;
@@ -133,7 +133,7 @@ fn parse_matrix_rows<T: FloatType + Display>(
 }
 
 /// Parse the inside of a `[a, b, c]` literal into a `Vector<Expr<T>>`.
-fn parse_vector_entries<T: FloatType + Display>(
+fn parse_vector_entries<T: SymbolicLeaf>(
     tokens: &[Token<T>],
 ) -> Result<crate::math::algebra::linear::Vector<crate::math::structs::expr::Expr<T>>, ParseError> {
     use crate::math::algebra::linear::Vector;
@@ -176,7 +176,7 @@ fn split_on_commas<T>(tokens: &[Token<T>]) -> Vec<&[Token<T>]> {
 }
 
 /// Parse one entry as an expression over the tree's own leaf type.
-fn parse_entry<T: FloatType + Display>(
+fn parse_entry<T: SymbolicLeaf>(
     tokens: &[Token<T>],
 ) -> Result<crate::math::structs::expr::Expr<T>, ParseError> {
     let mut parser = Parser::<T>::new(tokens.to_vec());
@@ -250,7 +250,7 @@ fn fold_literal_division<T: FloatType + Display>(
     }
 }
 
-impl<T: FloatType + Display> Parser<T> {
+impl<T: SymbolicLeaf> Parser<T> {
     pub(crate) fn new(tokens: Vec<Token<T>>) -> Self {
         Self { tokens }
     }
@@ -341,14 +341,23 @@ impl<T: FloatType + Display> Parser<T> {
                 | Token::Float(_)
                 | Token::Rational(_)
                 | Token::Constant(_)
-                | Token::Var(_)
                 | Token::RootSum(_)
                 | Token::Integral(..)
                 | Token::DerivativeOf(..)
                 | Token::Matrix(_)
-                | Token::Vector(_)
-                | Token::Indp(_) => {
+                | Token::Vector(_) => {
                     tree.push(NodeInner::operand(token.clone()).wrap());
+                }
+                // Variable leaves come from the intern table: both operands
+                // of `x + x` share one allocation, and a parsed `x` is the
+                // same node every `symbol` coercion produces. Free variables
+                // intern under their own kind, so `Indp('a')` and `Var('a')`
+                // stay distinct tokens.
+                Token::Indp(letter) => {
+                    tree.push(crate::math::structs::expr::shared_leaf::<T>(*letter, true));
+                }
+                Token::Var(letter) => {
+                    tree.push(crate::math::structs::expr::shared_leaf::<T>(*letter, false));
                 }
                 Token::Operator(op) => {
                     if tree.len() < 2 {

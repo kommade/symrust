@@ -15,8 +15,10 @@
 //! - `benchmarks` holds the hot-path benchmarks, compiled only in test builds.
 //!
 //! Start with [`math::structs::expr::Expr`] to build and evaluate an
-//! expression, and with the [`create_expr`] macro for the shortest path from a
-//! string to a parsed expression.
+//! expression, with the [`create_expr`] macro for the shortest path from a
+//! string to a parsed expression, and with the prelude's re-exported
+//! [`symbol`][math::structs::expr::symbol] builder for typed construction
+//! from Rust values.
 
 /// Record a step into any [`Recorder`][crate::math::structs::solution::Recorder].
 ///
