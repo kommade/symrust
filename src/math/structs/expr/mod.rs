@@ -31,6 +31,7 @@ mod matrix;
 use node::{MulType, Node, NodeInner, NodeFunctions, NodeOperations, NodeValue};
 pub use error::ExprError;
 pub use evaluate::{Evaluable, Evaluated};
+pub use matrix::Orthogonality;
 pub use limit::Limit;
 pub use build::{
     e, float, float_as, function, number, number_as, one, pi, symbol, symbol_as, x, zero, Symbol,
@@ -527,10 +528,19 @@ where
         // Gram-Schmidt elimination produces — with one readable surd, and the
         // field arithmetic of `Surd` is exact. The `contains_function` flag
         // skips the walk for trees with no function at all.
-        if simplified.tree.inner.borrow().has_func
-            && let Some(surd) = simplified.as_surd()
-        {
-            return Self::from_node(surd.to_node());
+        if simplified.tree.inner.borrow().has_func {
+            if let Some(surd) = simplified.as_surd() {
+                return Self::from_node(surd.to_node());
+            }
+            // One quadratic field misses the mixed-radical trees — `1 / sqrt(5)`
+            // summed beside `1 / sqrt(3)` — that a Gauss-Jordan inverse of a
+            // radical matrix produces. The multiquadratic fold reads the whole
+            // family of independent radicands at once, so those entries fold
+            // to one readable element too. Same exactness, wider field.
+            #[cfg(feature = "algebraic")]
+            if let Some(nodes) = simplified.as_radical_fold_node() {
+                return Self::from_node(nodes);
+            }
         }
         let Some(value) = simplified.tree().inner.borrow().evaluate() else {
             return simplified;
@@ -605,6 +615,30 @@ where
             },
             _ => None,
         }
+    }
+    /// The expression as an exact element of a multiquadratic field
+    /// `Q(sqrt(k1), …, sqrt(k8))`, when it is purely rational arithmetic over
+    /// square roots of rationals — rendered back as expression nodes.
+    ///
+    /// The multi-radicand generalisation of [`Expr::as_surd`]: where that
+    /// reads one quadratic field, this collects every independent radicand
+    /// the expression pairs up, so a quotient chain over `sqrt(5)` *and*
+    /// `sqrt(3)` — the kind a Gauss-Jordan inverse of a radical matrix
+    /// produces — folds to one readable element instead of staying a tree.
+    /// The arithmetic is exact. `None` when the expression leaves the field:
+    /// another function (`ln`, `sin`), a fractional power, more radicands
+    /// than the fold may carry, or any variable (checked by the caller).
+    #[cfg(feature = "algebraic")]
+    fn as_radical_fold_node(&self) -> Option<Node<T>> {
+        crate::math::algebra::field::FieldElement::from_tree(&self.tree).map(|value| value.to_node())
+    }
+
+    /// The numeric value of [`as_radical_fold_node`](Self::as_radical_fold_node)'s
+    /// fold, when the expression has one. Cheaper than rendering: the read
+    /// skips building the expression tree.
+    #[cfg(feature = "algebraic")]
+    pub(crate) fn radical_fold_value(&self) -> Option<f64> {
+        crate::math::algebra::field::FieldElement::from_tree(&self.tree).map(|value| value.to_f64())
     }
 }
 

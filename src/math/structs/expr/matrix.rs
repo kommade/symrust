@@ -18,7 +18,7 @@
 //! coefficient, and results can be fed straight back into another operation.
 
 use crate::math::algebra::linear::{Matrix, MatrixMul, SquareMatrixFns, Vector};
-use crate::math::numeric::{Real, SymbolicLeaf};
+use crate::math::numeric::{ExactField, Real, SymbolicLeaf};
 use crate::math::parse::lexer::{Op, Token};
 use crate::math::structs::expr::node::{Node, NodeValue};
 use crate::math::structs::expr::{Expr, ExprError};
@@ -612,6 +612,34 @@ where
     }
 }
 
+/// The outcome of checking a square matrix for orthogonality, `Qᵀ Q = I`,
+/// read entry by entry from the folded product.
+#[derive(Debug, Clone)]
+pub enum Orthogonality<T> {
+    /// Every entry of `Qᵀ Q` matches the identity's value there.
+    Orthogonal,
+    /// The entry of `Qᵀ Q` at `(row, column)` is this closed value, which is
+    /// not the identity's `1` / `0` there.
+    NotOrthogonal {
+        /// The row of the identity-breaking `Qᵀ Q` entry, from zero.
+        row: usize,
+        /// The column of that entry, from zero.
+        column: usize,
+        /// The folded value sitting in the entry.
+        entry: Expr<T>,
+    },
+    /// The entry at `(row, column)` stays symbolic — a variable or a function
+    /// the exact folds cannot read — so the check cannot decide.
+    Undecided {
+        /// The row of the unreadable `Qᵀ Q` entry, from zero.
+        row: usize,
+        /// The column of that entry, from zero.
+        column: usize,
+        /// The entry as the fold left it.
+        entry: Expr<T>,
+    },
+}
+
 /// The step-tracked operations. They record entries whose readability comes
 /// from the simplifier, so the leaf type must drive the symbolic engine too.
 impl<T> Expr<T>
@@ -655,6 +683,95 @@ where
         self.square_or_error()?
             .inverse_solution()
             .ok_or(ExprError::Undefined("the matrix is singular, so it has no inverse"))
+    }
+
+    /// How far a folded `Qᵀ Q` entry may sit from the identity's value and
+    /// still read as it. The exact folds carry far more precision than this
+    /// guards, so only genuine deviations trip it.
+    const ORTHOGONALITY_TOLERANCE: f64 = 1e-9;
+
+    /// The orthogonality check, `Qᵀ Q = I`.
+    ///
+    /// The product is computed exactly and each entry tidied — which folds
+    /// closed radical arithmetic to a single field element — then compared
+    /// against the identity's `1` / `0` to a small tolerance. The first entry
+    /// that misses is reported with the value it carries, so a failed check
+    /// explains itself rather than just returning a boolean.
+    ///
+    /// An entry that cannot be pinned to a value at all (it holds a variable,
+    /// or a function the exact folds cannot read) stops the check as
+    /// [`Orthogonality::Undecided`] rather than pretending to have compared it.
+    ///
+    /// # Errors
+    ///
+    /// [`ExprError::NotAMatrix`] when the expression is not a matrix, or
+    /// [`ExprError::NotSquare`] when it is not square.
+    pub fn orthogonality_check(&self) -> Result<Orthogonality<T>, ExprError> {
+        let matrix = self.square_or_error()?;
+        let product = matrix.transpose().mul_matrix(&matrix);
+        let size = matrix.rows();
+        for row in 0..size {
+            for column in 0..size {
+                let entry = product[row][column].clone().tidy();
+                let target = if row == column { 1.0 } else { 0.0 };
+                match Self::entry_value(&entry) {
+                    Some(value)
+                        if (value - target).abs() <= Self::ORTHOGONALITY_TOLERANCE => {}
+                    Some(_) => {
+                        return Ok(Orthogonality::NotOrthogonal {
+                            row,
+                            column,
+                            entry,
+                        });
+                    }
+                    None => {
+                        return Ok(Orthogonality::Undecided {
+                            row,
+                            column,
+                            entry,
+                        });
+                    }
+                }
+            }
+        }
+        Ok(Orthogonality::Orthogonal)
+    }
+
+    /// Whether this square matrix is orthogonal, the boolean form of
+    /// [`Expr::orthogonality_check`].
+    ///
+    /// # Errors
+    ///
+    /// [`ExprError::NotAMatrix`] when the expression is not a matrix, or
+    /// [`ExprError::NotSquare`] when it is not square.
+    pub fn is_orthogonal(&self) -> Result<bool, ExprError> {
+        Ok(matches!(
+            self.orthogonality_check()?,
+            Orthogonality::Orthogonal
+        ))
+    }
+
+    /// A closed entry's value: the ordinary fold when it evaluates, and the
+    /// multiquadratic field fold when a square root blocks the evaluator.
+    /// Without the `algebraic` feature only the ordinary fold exists.
+    #[cfg(feature = "algebraic")]
+    fn entry_value(entry: &Expr<T>) -> Option<f64> {
+        let ordinary = entry.as_f64();
+        if !ordinary.is_nan() {
+            return Some(ordinary);
+        }
+        entry.radical_fold_value()
+    }
+
+    /// A closed entry's value: the ordinary fold only.
+    #[cfg(not(feature = "algebraic"))]
+    fn entry_value(entry: &Expr<T>) -> Option<f64> {
+        let ordinary = entry.as_f64();
+        if ordinary.is_nan() {
+            None
+        } else {
+            Some(ordinary)
+        }
     }
 
     /// The QR decomposition, recording the orthogonalisation steps.

@@ -15,7 +15,7 @@ use symrust::math::calculus::antiderivative::Antiderivative;
 use symrust::math::calculus::derivative::Derivative;
 use symrust::math::numeric::Real;
 use symrust::math::structs::expr::node::Node;
-use symrust::math::structs::expr::{Evaluated, Expr};
+use symrust::math::structs::expr::{Evaluated, Expr, Orthogonality};
 use symrust::math::structs::solution::Solution;
 
 use super::command::{self, Command, RESERVED};
@@ -314,6 +314,7 @@ impl App {
             }
             Command::InverseSteps(argument) => self
                 .transform_steps(argument, |expr| expr.inverse_solution().map_err(sym_err)),
+            Command::OrthogonalMatrix(argument) => self.orthogonal_matrix(argument),
             Command::Rank(argument) => {
                 let expr = self.argument(argument)?;
                 let rank = expr.rank().map_err(sym_err)?;
@@ -501,6 +502,47 @@ impl App {
         let output = format!("{solution}");
         self.current = Some(solution.result().clone());
         Ok(Outcome::Remark(output))
+    }
+
+    /// The orthogonality check `:orthq` runs.
+    ///
+    /// An orthogonal matrix carries its own inverse — the transpose — so a
+    /// pass prints `Qᵀ` and makes it current. A refusal names the `Qᵀ Q`
+    /// entry that broke the identity, or says the check could not decide.
+    fn orthogonal_matrix(&mut self, argument: Option<String>) -> Result<Outcome, String> {
+        let expr = self.argument(argument)?;
+        match expr.orthogonality_check().map_err(sym_err)? {
+            Orthogonality::Orthogonal => {
+                let transposed = readable(expr.transpose().map_err(sym_err)?);
+                let mut output =
+                    String::from("orthogonal: Q^T Q = I, so the inverse is the transpose");
+                output.push('\n');
+                output.push_str(&labelled_value("Q^T", &transposed));
+                self.current = Some(transposed);
+                Ok(Outcome::Remark(output))
+            }
+            Orthogonality::NotOrthogonal {
+                row,
+                column,
+                entry,
+            } => Ok(Outcome::Remark(format!(
+                "not orthogonal: entry ({}, {}) of Q^T Q is {}, not the {} the identity has there",
+                row + 1,
+                column + 1,
+                readable(entry),
+                if row == column { "1" } else { "0" }
+            ))),
+            Orthogonality::Undecided {
+                row,
+                column,
+                entry,
+            } => Ok(Outcome::Remark(format!(
+                "cannot confirm orthogonality: entry ({}, {}) of Q^T Q, {}, stays symbolic",
+                row + 1,
+                column + 1,
+                readable(entry),
+            ))),
+        }
     }
 
     /// The general left or right inverse: a minimum-norm particular inverse
@@ -972,6 +1014,7 @@ answer:
   :ref / :rref / :rrefs      echelon form / reduced echelon form (steps)
   :det / :dets [<M>]         determinant (steps)
   :inv / :invs [<M>]         inverse (steps)
+  :orthq [<M>]               if Q is orthogonal (Q^T Q = I), its inverse Q^T
   :rank / :nullity [<M>]     rank and nullity (do not change current)
   :eigen / :eigens [<M>]     eigenvalues and eigenvectors, a basis per
                              eigenspace (steps). A non-diagonalisable

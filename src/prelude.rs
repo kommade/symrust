@@ -38,7 +38,7 @@ pub use crate::math::structs::expr::{
 };
 
 // The expression tree and its accessors.
-pub use crate::math::structs::expr::{Evaluated, Expr, ExprError};
+pub use crate::math::structs::expr::{Evaluated, Expr, ExprError, Orthogonality};
 pub use crate::math::structs::expr::node::Node;
 pub use crate::math::parse::lexer::{Const, Func};
 

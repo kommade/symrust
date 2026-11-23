@@ -77,6 +77,9 @@ pub enum Command {
     Inverse(Option<String>),
     /// The inverse, printing the Gauss-Jordan steps.
     InverseSteps(Option<String>),
+    /// The orthogonality check `Qᵀ Q = I`: for an orthogonal matrix, the
+    /// inverse is the transpose, which is printed and made current.
+    OrthogonalMatrix(Option<String>),
     /// The rank of a matrix (prints a number, keeps the current matrix).
     Rank(Option<String>),
     /// The nullity of a matrix (prints a number, keeps the current matrix).
@@ -220,6 +223,7 @@ fn parse_command(name: &str, args: &str) -> Result<Command, String> {
         "dets" => Ok(Command::DeterminantSteps(optional(args))),
         "inv" => Ok(Command::Inverse(optional(args))),
         "invs" => Ok(Command::InverseSteps(optional(args))),
+        "orthq" => Ok(Command::OrthogonalMatrix(optional(args))),
         "rank" => Ok(Command::Rank(optional(args))),
         "nullity" => Ok(Command::Nullity(optional(args))),
         "eigen" | "eig" => Ok(Command::Eigen(optional(args))),
@@ -578,6 +582,11 @@ mod tests {
         assert_eq!(parse_line(":rref"), Ok(Some(Command::RowReduce(None))));
         assert_eq!(parse_line(":rrefs"), Ok(Some(Command::RowReduceSteps(None))));
         assert_eq!(parse_line(":invs"), Ok(Some(Command::InverseSteps(None))));
+        assert_eq!(parse_line(":orthq"), Ok(Some(Command::OrthogonalMatrix(None))));
+        assert_eq!(
+            parse_line(":orthq m"),
+            Ok(Some(Command::OrthogonalMatrix(Some("m".into()))))
+        );
         assert_eq!(parse_line(":tp"), Ok(Some(Command::Transpose(None))));
         assert_eq!(parse_line(":ref"), Ok(Some(Command::RowEchelon(None))));
         assert_eq!(parse_line(":eigens"), Ok(Some(Command::EigenSteps(None))));

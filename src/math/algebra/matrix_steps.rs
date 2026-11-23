@@ -1892,11 +1892,14 @@ where
 
     // Read the right-hand half out as the inverse, recording the read-off so
     // the solution's last working is the answer itself rather than the last
-    // row operation on the augmented matrix.
+    // row operation on the augmented matrix. Each entry goes through `tidy`,
+    // the pass the other step recordings give their entries: an elimination
+    // quotient chain over several square roots — which the elimination rows
+    // otherwise would print raw — folds to its readable element form.
     let mut inverse = Matrix::<Expr<T>>::new(size, size);
     for row in 0..size {
         for column in 0..size {
-            inverse[row][column] = augmented[row][size + column].clone();
+            inverse[row][column] = augmented[row][size + column].clone().tidy();
         }
     }
     let described = matrix_expr(&inverse);

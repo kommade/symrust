@@ -4,6 +4,8 @@ mod test_complex;
 mod test_derivative;
 mod test_diagonalization_svd;
 mod test_dynamic_matrix;
+#[cfg(feature = "algebraic")]
+mod test_field_fold;
 mod test_expr;
 mod test_evaluate;
 mod test_generic_tree;
@@ -19,6 +21,7 @@ mod test_expr_matrix;
 mod test_expr_vector;
 mod test_symbolic_linear;
 mod test_eigen;
+mod test_orthogonality;
 mod test_vector;
 mod test_real;
 mod test_dyadic;

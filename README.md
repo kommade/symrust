@@ -167,6 +167,7 @@ Command reference (`:help` prints the full reference from inside the REPL):
 | `:simp`, `:expand`, `:tidy`, `:lat[ex]` | simplify / expand / structural tidy / LaTeX export |
 | `:tp`, `:ref`, `:rref` | transpose, echelon and reduced echelon forms |
 | `:det`, `:inv`, `:rank`, `:nullity` | determinant, inverse, rank and nullity |
+| `:orthq` | if the square matrix is orthogonal (`QᵀQ = I`), its inverse — the transpose |
 | `:eigen`, `:diag`, `:svd` | eigen-decomposition, diagonalisation `P·D·P⁻¹`, singular value decomposition `U·Σ·Vᵀ` |
 | `:lu`, `:qr` | LU and QR factorisations, printed as products |
 | `:linv`, `:rinv` | general left/right inverses with the free-parameter basis |
