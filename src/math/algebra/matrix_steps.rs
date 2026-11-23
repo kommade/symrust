@@ -40,7 +40,7 @@ use std::fmt::Display;
 use crate::math::algebra::linear::{Matrix, SquareMatrixFns};
 use crate::math::algebra::linear::traits::MatrixIndex;
 use crate::math::numeric::{ExactField, Matrixable, SymbolicLeaf};
-use crate::math::structs::expr::Expr;
+use crate::math::structs::expr::{Expr, Orthogonality};
 use crate::math::structs::expr::node::Node;
 use crate::math::structs::solution::{Recorder, Solution, StepRecorder};
 
@@ -1832,6 +1832,43 @@ where
         return None;
     }
     let size = matrix.rows();
+
+    // An orthogonal matrix carries its own answer: Q^T Q = I reads the
+    // inverse straight off as Q^T, no elimination needed. The check itself
+    // (the folded exact product against the identity) decides; a check that
+    // stays symbolic falls through to the elimination below, which needs no
+    // such closed forms.
+    if matches!(
+        matrix_expr(matrix).orthogonality_check(),
+        Ok(Orthogonality::Orthogonal)
+    ) {
+        let mut recorder = StepRecorder::new(
+            matrix_expr(matrix),
+            "inverse of an orthogonal matrix",
+        );
+        recorder.record_decision(
+            "orthogonality check",
+            || {
+                String::from(
+                    "Q^T Q = I holds entrywise, so the matrix is orthogonal: \
+                     its inverse is its transpose, read off without elimination",
+                )
+            },
+        );
+        let transposed = matrix.transpose();
+        let described = matrix_expr(&transposed);
+        recorder.record(
+            "read the transpose",
+            || {
+                String::from(
+                    "the inverse of an orthogonal matrix is its transpose: \
+                     swap the matrix across its diagonal",
+                )
+            },
+            || described.clone(),
+        );
+        return Some(recorder.finish(described));
+    }
 
     // Build `[A | I]`.
     let mut augmented = Matrix::<Expr<T>>::new(size, size * 2);

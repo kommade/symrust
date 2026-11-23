@@ -191,6 +191,14 @@ decimal reading (`0.5` is `1/2`), and `pi`/`e` are the exact constants.
 | `generic_const` | no | enables `generic_const_exprs` (nightly-only; off by default to keep stable compatibility) |
 | `repl` | no | the `symr` REPL binary (optional `rustyline` line editor, kept invisible to dependents); implies `algebraic` and `complex` |
 
+One portability note: the const-generic `Multiquadratic` behind
+`generic_const` needs the unstable `generic_const_exprs`, and on current
+rustc it only compiles *inside* this crate — any target outside it (your
+binary or crate naming the type) fails with `E0284` until that feature
+stabilises. For exact radical arithmetic that compiles everywhere, use
+[`FieldElement`](crate::math::algebra::field::FieldElement), which expresses
+the same numbers on a sparse basis and is not feature-gated.
+
 The `repl` feature is deliberately wired through `dep:` + `required-features`,
 so a crate depending on `symrust` never compiles the line editor or the
 binary — `cargo publish` and downstream builds see only the library targets.

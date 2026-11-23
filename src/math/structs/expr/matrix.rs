@@ -674,6 +674,12 @@ where
 
     /// The inverse, recording the steps.
     ///
+    /// An orthogonal matrix (`Qᵀ Q = I`, per
+    /// [`orthogonality_check`](Self::orthogonality_check)) takes a shortcut:
+    /// its inverse *is* its transpose, so the solution reads it off in one
+    /// recorded step instead of eliminating. Everything else goes through
+    /// Gauss-Jordan.
+    ///
     /// # Errors
     ///
     /// [`ExprError::NotAMatrix`] when the expression is not a matrix,

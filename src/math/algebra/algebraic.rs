@@ -32,9 +32,23 @@ use crate::math::structs::expr::node::Node;
 /// It is `Copy` (fixed capacity) so it can be a
 /// [`Matrixable`](crate::math::numeric::Matrixable) coefficient type
 /// with no changes to the linear-algebra code.
-/// 
+///
 /// Requires a const generic `N` for the maximum number of radicands, which is
 /// the maximum number of nested square roots that can appear in the singular values.
+///
+/// # Portability
+///
+/// The generic const arithmetic in the signature (`[Rat; 1 << N]`) is behind
+/// `generic_const_exprs`, an *unstable* language feature: on the current
+/// stable trait solver, any target outside this crate that names the type
+/// fails to compile (`E0284`, see rust-lang/rust#160895). Inside this crate
+/// it compiles and behaves exactly. Prefer [`FieldElement`] until
+/// `generic_const_exprs` stabilises — it stores the same field element over
+/// the same radicand basis, allocates only the monomials it carries, and
+/// compiles everywhere. This type exists for the day that feature lands and
+/// a fixed-capacity `Copy` coefficient is worth having again.
+///
+/// [`FieldElement`]: crate::math::algebra::field::FieldElement
 #[derive(Clone, Copy, Debug)]
 pub struct Multiquadratic<const N: usize> where [(); 1 << N]: Sized {
     /// The distinct squarefree radicands; only the first `count` are used.

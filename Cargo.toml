@@ -45,7 +45,10 @@ algebraic = ["generic_const"]
 # off by default to maintain compatibility with stable Rust. Enabling it (or
 # `algebraic`) on a non-nightly toolchain is refused by the crate's build
 # script with targeted instructions, ahead of rustc's bare `#![feature]`
-# error.
+# error. The const-generic `Multiquadratic` it unlocks currently compiles
+# only inside this crate on every rustc (stable-solver limitation,
+# rust-lang/rust#160895); for portable exact radical arithmetic use
+# `FieldElement`, which no feature gate constrains.
 generic_const = []
 # Dependency feature for the `symr` REPL binary (src/bin/repl). Declared with
 # `dep:` so enabling it never exposes `rustyline` through the library itself:
