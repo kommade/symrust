@@ -9,11 +9,12 @@
 //! ([`crate::math::structs::expr::node`]) and the shared integer helpers.
 
 pub(crate) mod factorization;
-/// Exact folding of closed radical arithmetic into one readable field
-/// element. Compiled only with the `algebraic` feature, which the radicand
-/// helpers it leans on come from.
+/// Exact elements of a multiquadratic field: the public radical-arithmetic
+/// type and the fold the expression tree uses on closed radical trees.
+/// Compiled only with the `algebraic` feature, which the radicand helpers it
+/// leans on come from.
 #[cfg(feature = "algebraic")]
-pub(crate) mod field;
+pub mod field;
 pub mod linear;
 pub(crate) mod matrix_steps;
 /// Polynomials over the rationals: the `Poly` coefficient container.

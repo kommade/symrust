@@ -50,6 +50,8 @@ pub use crate::math::parse::lexer::{Const, Func};
 // nightly-only).
 pub use crate::math::algebra::rational::Rat;
 pub use crate::math::algebra::surd::Surd;
+#[cfg(feature = "algebraic")]
+pub use crate::math::algebra::field::FieldElement;
 pub use crate::math::numeric::{Evaluable, Real};
 #[cfg(feature = "complex")]
 pub use crate::math::numeric::Complex;

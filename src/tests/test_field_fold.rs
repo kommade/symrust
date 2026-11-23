@@ -6,6 +6,7 @@
 //! renderings and the round-trips.
 
 use crate::create_expr;
+use crate::prelude::Real;
 
 /// `tidy` output for closed radical arithmetic over several radicands.
 #[test]
@@ -54,6 +55,9 @@ fn fold_inverses_round_trip() {
         "2/sqrt(5) - 1/sqrt(3)",
         "1 + 2/sqrt(3)",
         "(2/sqrt(3)) * (1/sqrt(5)) + 1",
+        // The exact element the documented example folds: two radicands,
+        // whose inverse needs the full conjugate tower.
+        "1/sqrt(5) + 1/sqrt(3)",
     ];
     for input in cases {
         let expr = create_expr!(input).unwrap();
@@ -65,6 +69,30 @@ fn fold_inverses_round_trip() {
             "{input} and its reciprocal do not multiply back to one"
         );
     }
+}
+
+/// The public field type inverts and multiplies back to one directly, the
+/// way a downstream user would drive it.
+#[test]
+fn field_element_recip_round_trips() {
+    use crate::math::algebra::field::FieldElement;
+
+    let expr = create_expr!("1/sqrt(5) + 1/sqrt(3)").unwrap();
+    let element = FieldElement::from_tree(expr.tree()).unwrap();
+    let reciprocal = element.recip().unwrap();
+    let product = element.mul(&reciprocal).unwrap();
+    assert!(!product.is_zero());
+    assert_eq!(
+        product.to_node::<Real>().to_string(),
+        "1",
+        "element times its inverse must be one"
+    );
+    // Inverting the inverse recovers the element, value for value.
+    let recovered = reciprocal.recip().unwrap();
+    assert_eq!(
+        recovered.to_node::<Real>().to_string(),
+        element.to_node::<Real>().to_string(),
+    );
 }
 
 /// Values leaving the field stay symbolic: another function, a fractional
