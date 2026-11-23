@@ -202,6 +202,9 @@ fn non_diagonalisable_matrix_still_has_eigenvectors() {
     assert_eq!(spaces[0].1.len(), 1);
 }
 
+// The irrational roots travel through the Sturm-isolated eigenvalue
+// fallback, which only exists with the `algebraic` feature.
+#[cfg(feature = "algebraic")]
 #[test]
 fn irrational_eigenvalues_still_yield_their_eigenvectors() {
     // The characteristic polynomial factors as (λ - 1)(λ² - 5λ - 2), so two

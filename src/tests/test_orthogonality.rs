@@ -15,7 +15,6 @@ fn orthogonal_rational_matrix_passes() {
 
 /// A radical rotation's `Q^T Q` folds exactly to the identity, so the check
 /// reads it as orthogonal.
-#[cfg(feature = "algebraic")]
 #[test]
 fn orthogonal_radical_rotation_passes() {
     let rotation = create_expr!("[[1/sqrt(2), -1/sqrt(2)], [1/sqrt(2), 1/sqrt(2)]]").unwrap();

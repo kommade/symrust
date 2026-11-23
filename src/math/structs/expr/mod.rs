@@ -537,7 +537,6 @@ where
             // radical matrix produces. The multiquadratic fold reads the whole
             // family of independent radicands at once, so those entries fold
             // to one readable element too. Same exactness, wider field.
-            #[cfg(feature = "algebraic")]
             if let Some(nodes) = simplified.as_radical_fold_node() {
                 return Self::from_node(nodes);
             }
@@ -626,9 +625,8 @@ where
     /// `sqrt(3)` — the kind a Gauss-Jordan inverse of a radical matrix
     /// produces — folds to one readable element instead of staying a tree.
     /// The arithmetic is exact. `None` when the expression leaves the field:
-    /// another function (`ln`, `sin`), a fractional power, more radicands
-    /// than the fold may carry, or any variable (checked by the caller).
-    #[cfg(feature = "algebraic")]
+    /// another function (`ln`, `sin`), a fractional power, a basis grown past
+    /// the monomial mask's word size, or any variable (checked by the caller).
     fn as_radical_fold_node(&self) -> Option<Node<T>> {
         crate::math::algebra::field::FieldElement::from_tree(&self.tree).map(|value| value.to_node())
     }
@@ -636,7 +634,6 @@ where
     /// The numeric value of [`as_radical_fold_node`](Self::as_radical_fold_node)'s
     /// fold, when the expression has one. Cheaper than rendering: the read
     /// skips building the expression tree.
-    #[cfg(feature = "algebraic")]
     pub(crate) fn radical_fold_value(&self) -> Option<f64> {
         crate::math::algebra::field::FieldElement::from_tree(&self.tree).map(|value| value.to_f64())
     }

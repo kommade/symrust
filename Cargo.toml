@@ -66,10 +66,3 @@ path = "src/bin/repl/main.rs"
 # `cargo run --features repl --bin symr`.
 required-features = ["repl"]
 
-# The radical-field example needs the algebraic machinery its type lives in;
-# without the feature the example is dropped from the target set like the
-# binary above.
-[[example]]
-name = "radical_field"
-required-features = ["algebraic"]
-

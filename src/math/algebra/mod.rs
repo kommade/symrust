@@ -11,9 +11,6 @@
 pub(crate) mod factorization;
 /// Exact elements of a multiquadratic field: the public radical-arithmetic
 /// type and the fold the expression tree uses on closed radical trees.
-/// Compiled only with the `algebraic` feature, which the radicand helpers it
-/// leans on come from.
-#[cfg(feature = "algebraic")]
 pub mod field;
 pub mod linear;
 pub(crate) mod matrix_steps;

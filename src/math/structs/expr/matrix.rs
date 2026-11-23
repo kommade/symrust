@@ -753,25 +753,12 @@ where
 
     /// A closed entry's value: the ordinary fold when it evaluates, and the
     /// multiquadratic field fold when a square root blocks the evaluator.
-    /// Without the `algebraic` feature only the ordinary fold exists.
-    #[cfg(feature = "algebraic")]
     fn entry_value(entry: &Expr<T>) -> Option<f64> {
         let ordinary = entry.as_f64();
         if !ordinary.is_nan() {
             return Some(ordinary);
         }
         entry.radical_fold_value()
-    }
-
-    /// A closed entry's value: the ordinary fold only.
-    #[cfg(not(feature = "algebraic"))]
-    fn entry_value(entry: &Expr<T>) -> Option<f64> {
-        let ordinary = entry.as_f64();
-        if ordinary.is_nan() {
-            None
-        } else {
-            Some(ordinary)
-        }
     }
 
     /// The QR decomposition, recording the orthogonalisation steps.
