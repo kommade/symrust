@@ -311,6 +311,7 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                 Token::Constant(constant) => match constant {
                     Const::Pi => Ok(String::from(r"\pi")),
                     Const::E => Ok(String::from(r"e")),
+                    Const::I => Ok(String::from(r"i")),
                 },
                 Token::Var(var) => Ok(format!("{var}")),
                 Token::Indp(indp) => Ok(format!("{indp}")),

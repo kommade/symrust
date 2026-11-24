@@ -204,14 +204,28 @@ pub enum Const {
     Pi,
     /// Euler's number.
     E,
+    /// The imaginary unit, the square root of negative one.
+    I,
 }
 
 impl Const {
     /// Convert this named constant to the requested float leaf type.
+    ///
+    /// `i` is available on every leaf type, not only [`Complex`]: the tree is
+    /// leaf-type-agnostic, and a symbolic `i` over a real leaf is exactly as
+    /// representable as a symbolic `pi` — a name with a numeric meaning the
+    /// evaluator supplies. A real leaf evaluates it through
+    /// [`FloatType::imaginary_unit`], whose default is `NaN` — a real value
+    /// squared is never negative — while a [`Complex`] leaf returns the true
+    /// imaginary unit.
+    ///
+    /// [`Complex`]: crate::math::numeric::Complex
+    /// [`FloatType::imaginary_unit`]: crate::math::numeric::FloatType::imaginary_unit
     pub fn get_value<T: FloatType>(&self) -> T {
         match self {
             Self::Pi => T::pi(),
             Self::E => T::e(),
+            Self::I => T::imaginary_unit(),
         }
     }
 }
@@ -221,6 +235,7 @@ impl Display for Const {
         match self {
             Self::Pi => write!(f, "pi"),
             Self::E => write!(f, "e"),
+            Self::I => write!(f, "i"),
         }
     }
 }
@@ -593,6 +608,11 @@ impl<T: FloatType + Display> Lexer<T> {
                 // run starts with a keyword (`erf(x)`, `ei(y)` — the constant
                 // check used to fire first and made them unlexable: `e` won
                 // the letter and the rest of the name turned into variables).
+                // A lone `i` names the imaginary unit, the same rule `e`
+                // follows: only when the run continues into a longer name
+                // (there is no `i`-prefixed keyword today, but a run such as
+                // `idx` would otherwise lose its letters — hence the same
+                // keyword-prefix guard) does the rest stay a variable.
                 if c == 'π' {
                     self.pos = run_start + 1;
                     return Ok(Token::from_const(Const::Pi));
@@ -600,6 +620,10 @@ impl<T: FloatType + Display> Lexer<T> {
                 if c == 'e' && Self::keyword_prefix(&value).is_none() {
                     self.pos = run_start + 1;
                     return Ok(Token::from_const(Const::E));
+                }
+                if c == 'i' && value == "i" {
+                    self.pos = run_start + 1;
+                    return Ok(Token::from_const(Const::I));
                 }
                 match Self::keyword_prefix(&value) {
                     None => {

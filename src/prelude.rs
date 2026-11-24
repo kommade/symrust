@@ -34,7 +34,7 @@
 
 pub use crate::create_expr;
 pub use crate::math::structs::expr::{
-    e, number, number_as, one, pi, symbol, symbol_as, x, zero, Symbol,
+    e, i, number, number_as, one, pi, symbol, symbol_as, x, zero, Symbol,
 };
 
 // The expression tree and its accessors.

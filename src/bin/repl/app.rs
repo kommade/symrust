@@ -646,9 +646,12 @@ impl App {
             .fold_value_operators()
             .map_err(sym_err)
             // Numeric input reads as its value: `2 + 2` is `4`, and a
-            // definition stores the folded tree. A tree mentioning `pi` or
-            // `e` keeps the constant symbolic — the exactness the constants
-            // promise — while a purely numeric tree folds through `tidy`.
+            // definition stores the folded tree. A tree mentioning a named
+            // constant (`pi`, `e`, or now `i`) keeps the constant symbolic —
+            // that is the exactness the constants promise; over the real
+            // default leaf a stray `i` would otherwise evaluate to NaN and
+            // poison the whole fold — while a purely numeric tree folds
+            // through `tidy`.
             .map(|expr| if expr.has_named_constant() { expr } else { expr.tidy() })
     }
 

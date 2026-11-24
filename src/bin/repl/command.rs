@@ -168,10 +168,10 @@ pub fn parse_line(line: &str) -> Result<Option<Command>, String> {
 /// Words the lexer owns, plus the session's automatic `ans` binding: a stored
 /// name must differ from all of these, or substitution would rewrite `sin(x)`'s
 /// `sin` into an expression or shadow the previous-answer register.
-pub const RESERVED: [&str; 22] = [
+pub const RESERVED: [&str; 23] = [
     "arcsin", "arccos", "arctan", "asin", "acos", "atan", "sqrt", "root",
     "sin", "si", "cos", "tan", "sec", "csc", "cot", "log", "ln", "erf",
-    "ei", "pi", "e", "ans",
+    "ei", "pi", "e", "i", "ans",
 ];
 
 /// Parse a command given *without* the leading colon — the shape a

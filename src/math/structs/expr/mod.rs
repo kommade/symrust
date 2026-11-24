@@ -34,7 +34,8 @@ pub use evaluate::{Evaluable, Evaluated};
 pub use matrix::Orthogonality;
 pub use limit::Limit;
 pub use build::{
-    e, float, float_as, function, number, number_as, one, pi, symbol, symbol_as, x, zero, Symbol,
+    e, float, float_as, function, i, number, number_as, one, pi, symbol,
+    symbol_as, x, zero, Symbol,
 };
 
 mod closed_form;
@@ -373,6 +374,16 @@ impl<T: FloatType + Display> Expr<T> {
     #[must_use]
     pub fn e() -> Self {
         Self::constant(Const::E)
+    }
+
+    /// Create the expression `i`, the imaginary unit.
+    ///
+    /// Over a complex leaf this is ℂ's `i`; over the real default leaf it is
+    /// a symbolic constant whose evaluation is undefined there (see
+    /// [`ExpressionScalar::imaginary_unit`]).
+    #[must_use]
+    pub fn i() -> Self {
+        Self::constant(Const::I)
     }
 
     /// Create a function application.

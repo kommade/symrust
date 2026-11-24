@@ -147,10 +147,27 @@ where
         // A named constant stays symbolic in the exact mode: the point of
         // `evaluate_exact` is an answer in terms of `pi` and `e`, not their
         // float values.
-        Token::Constant(constant) if !keep_irrationals => Step {
-            value: Some(constant_value(constant)),
-            node: node_for_token(token),
-        },
+        Token::Constant(constant) if !keep_irrationals => {
+            // `i` folds only when the evaluation TARGET carries an honest
+            // imaginary unit — the tree's leaf is just the token carrier, and
+            // an `Expr<Real>` evaluated into `Complex` has a perfectly real
+            // meaning for `i`. Over a real target (f64) the unit is NaN, and
+            // reading it as a number would poison every fold built on top;
+            // there the constant stays symbolic, like an unsubstituted
+            // variable.
+            if let Const::I = constant
+                && !T::has_imaginary_unit()
+            {
+                return Step {
+                    value: None,
+                    node: node_for_token(token),
+                };
+            }
+            Step {
+                value: Some(constant_value::<T>(constant)),
+                node: node_for_token(token),
+            }
+        }
         Token::Constant(_) => Step {
             value: None,
             node: node_for_token(token),
@@ -188,6 +205,10 @@ fn constant_value<T: Evaluable>(constant: &Const) -> T {
     match constant {
         Const::Pi => T::pi(),
         Const::E => T::e(),
+        // `i` reaches here only when the tree's leaf type carries an honest
+        // imaginary unit (the caller gates on `L::has_imaginary_unit`); the
+        // value then comes from the evaluation target's own override.
+        Const::I => T::imaginary_unit(),
     }
 }
 

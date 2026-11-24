@@ -180,7 +180,9 @@ Matrices and vectors are written with comma-separated entries
 (`[[1, 2], [3, 4]]`, `[1, 2, 3]`), and a brace-set of vectors
 (`{[1, 2], [3, 4]}`) parses as the matrix whose rows are its elements — handy
 for storing and probing a basis. Integers are exact, decimals remember their
-decimal reading (`0.5` is `1/2`), and `pi`/`e` are the exact constants.
+decimal reading (`0.5` is `1/2`), and `pi`/`e`/`i` are the exact constants
+(`i` is the imaginary unit: symbolic over the real number types, and equal
+to `√(−1)` where complex values are carried).
 
 ## Features
 

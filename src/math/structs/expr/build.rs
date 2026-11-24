@@ -337,6 +337,12 @@ pub fn zero() -> Expr<Real> {
     Expr::<Real>::zero()
 }
 
+/// The imaginary unit `i`, as an [`Expr`] over the default leaf.
+#[must_use]
+pub fn i() -> Expr<Real> {
+    Expr::<Real>::i()
+}
+
 /// Create the one expression.
 #[must_use]
 pub fn one() -> Expr<Real> {

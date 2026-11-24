@@ -4,7 +4,7 @@ use std::fmt::Display;
 
 use crate::{
     math::numeric::{FloatType, SymbolicLeaf},
-    math::parse::lexer::{Func, Op, Token},
+    math::parse::lexer::{Const, Func, Op, Token},
 };
 
 use super::{Node, NodeInner, NodeValue};
@@ -399,6 +399,15 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                 Token::Number(num) => Some(T::from_i64(*num)),
                 Token::Float(num) => Some(num.clone()),
                 Token::Rational(value) => Some(value.to_leaf()),
+                // `i` folds only where the leaf type carries an honest
+                // imaginary unit: over a real leaf its `imaginary_unit` is
+                // NaN, and folding that through would poison every whole-tree
+                // fold built on top of it, turning closed trees into displays
+                // like `sqrt(NaN) / 2`. There it stays a symbolic name.
+                Token::Constant(Const::I) if T::has_imaginary_unit() => {
+                    Some(T::imaginary_unit())
+                }
+                Token::Constant(Const::I) => None,
                 Token::Constant(k) => Some(k.get_value()),
                 // Narrative tokens (`∫ f dx`, `d f/dx`) never evaluate, and
                 // neither do matrix or vector values: `evaluate` reads a

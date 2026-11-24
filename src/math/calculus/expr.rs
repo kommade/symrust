@@ -9,7 +9,8 @@
 use std::fmt::Display;
 
 use crate::math::numeric::{ExpressionScalar, FloatType, Real, SymbolicLeaf};
-use crate::{math::parse::lexer::{Func, Op, Token},
+use crate::{
+    math::parse::lexer::{Const, Func, Op, Token},
     math::structs::expr::node::{Node, NodeFunctions, NodeInner, NodeValue},
 };
 
@@ -257,7 +258,15 @@ fn numeric_evaluate_inner<T: SymbolicLeaf>(node: &Node<T>, depth: usize) -> Opti
             Token::Number(value) => T::from_i64(value),
             Token::Float(value) => value,
             Token::Rational(value) => value.to_leaf(),
-            Token::Constant(constant) => constant.get_value(),
+            Token::Constant(constant) => {
+                // The imaginary unit folds only where the leaf carries an
+                // honest `i`; over a real leaf it is undefined (NaN), and the
+                // verification arithmetic would read a NaN as a value.
+                if matches!(constant, Const::I) && !T::has_imaginary_unit() {
+                    return None;
+                }
+                constant.get_value()
+            }
             _ => return None,
         },
         Shape::Operator(token, left, right) => match token {
@@ -354,6 +363,11 @@ fn evaluate_two_point_inner<T: SymbolicLeaf>(
                 (Some(value.clone()), Some(value))
             }
             Token::Constant(constant) => {
+                // Same gate as `numeric_evaluate`: an undefined `i` is not a
+                // value to bind at a sample point.
+                if matches!(constant, Const::I) && !T::has_imaginary_unit() {
+                    return (None, None);
+                }
                 let value: T = constant.get_value();
                 (Some(value.clone()), Some(value))
             }
