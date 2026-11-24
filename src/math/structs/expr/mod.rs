@@ -525,8 +525,11 @@ where
     /// ```
     /// use symrust::{create_expr, math::structs::expr::Expr};
     /// let expr = create_expr!("(x + 1) (x + 2)").unwrap();
-    /// // x × x merges into the square; the rest is left as written.
-    /// assert_eq!(expr.expand().to_string(), "x ^ 2 + 2 x + x + 2");
+    /// // Products repeat as written: no x × x → x² merge, no reordering.
+    /// assert_eq!(expr.expand().to_string(), "x x + x 2 + x + 2");
+    /// // `simplify` continues where expand stops: it collects the squares.
+    /// let expr = create_expr!("(x + 1) (x + 2)").unwrap();
+    /// assert_eq!(expr.expand().simplify(true).to_string(), "x ^ 2 + 3 x + 2");
     /// ```
     #[must_use]
     pub fn expand(self) -> Self {
