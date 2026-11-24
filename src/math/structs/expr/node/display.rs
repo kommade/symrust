@@ -440,7 +440,26 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                                 right_str
                             } else if right_is_one {
                                 left_str
-                            } else if *op == Op::Mul {
+                                } else if right_str.starts_with('-') {
+                                    // Same buried-coefficient pull, in LaTeX: the
+                                    // sign moves in front of the whole product so
+                                    // the text cannot read as a subtraction.
+                                    let positive = right_str[1..].to_string();
+                                    if left_str.starts_with('-') {
+                                        let positive_left = left_str[1..].to_string();
+                                        if positive_left.contains(' ')
+                                            || positive.contains(' ')
+                                        {
+                                            format!("{positive_left} {positive}")
+                                        } else {
+                                            format!(r"{positive_left} \times {positive}")
+                                        }
+                                    } else if positive.contains(' ') {
+                                        format!("-{left_str} {positive}")
+                                    } else {
+                                        format!("{positive} {left_str}")
+                                    }
+                                } else if *op == Op::Mul {
                                 format!(r"{left_str} \times {right_str}")
                             } else {
                                 format!("{left_str} {right_str}")
@@ -676,6 +695,31 @@ impl<T: SymbolicLeaf> Display for NodeInner<T> {
                                         format!("-{left_str} {positive}")
                                     } else {
                                         format!("-({left_str} {positive})")
+                                    }
+                                } else if right_str.starts_with('-') {
+                                    // A negative coefficient buried at the
+                                    // right renders as a minus between
+                                    // factors: `e ^ (-(x ^ 2)) -2 x` would
+                                    // re-parse as a subtraction with a
+                                    // different value. Pull the sign to the
+                                    // product's front — cancel it when the
+                                    // left carries one too — and move a bare
+                                    // negative coefficient to the front, the
+                                    // way a product is read.
+                                    let positive = right_str[1..].to_string();
+                                    if left_str.starts_with('-') {
+                                        let positive_left = left_str[1..].to_string();
+                                        if positive_left.contains(' ')
+                                            || positive.contains(' ')
+                                        {
+                                            format!("{positive_left} {positive}")
+                                        } else {
+                                            format!("{positive_left} * {positive}")
+                                        }
+                                    } else if positive.contains(' ') {
+                                        format!("-{left_str} {positive}")
+                                    } else {
+                                        format!("{positive} {left_str}")
                                     }
                                 } else if left_is_one && right_is_one {
                                     String::from("1")

@@ -1,6 +1,6 @@
 //! Tests for the [`Complex`](crate::math::numeric::Complex) numeric type.
 
-use crate::math::numeric::{Complex, FloatType, Real};
+use crate::math::numeric::{Complex, Real};
 
 fn approx(value: &Complex, re: f64, im: f64) -> bool {
     (value.re().to_f64() - re).abs() < 1e-9 && (value.im().to_f64() - im).abs() < 1e-9
