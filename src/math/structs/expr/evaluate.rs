@@ -764,7 +764,7 @@ fn surd_int_pow(base: crate::math::algebra::surd::Surd, exponent: i64) -> crate:
 
 /// The evaluator's surface for [`Multiquadratic`], one `cfg` for the whole
 /// group: the scalar value impls and the `f64` helpers they share.
-#[cfg(feature = "algebraic")]
+#[cfg(all(feature = "algebraic", feature = "generic_const"))]
 mod multiquadratic_value {
     use super::*;
 

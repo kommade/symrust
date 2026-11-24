@@ -52,9 +52,9 @@ As a library dependency:
 cargo add symrust
 ```
 
-The default feature set compiles on stable Rust (edition 2024, Rust ≥ 1.85).
-The `algebraic` and `repl` features enable nightly-required machinery; see
-[Features](#features).
+The default feature set compiles on stable Rust (edition 2024, Rust ≥ 1.85) —
+as do the `algebraic` and `repl` features. Only `generic_const` needs a
+nightly compiler; see [Features](#features).
 
 As the `symr` REPL binary:
 
@@ -187,8 +187,8 @@ decimal reading (`0.5` is `1/2`), and `pi`/`e` are the exact constants.
 | Feature | Default | Effect |
 | --- | --- | --- |
 | `complex` | no | enables the exact `Complex` type; combined with `algebraic`, cyclotomic denominators factor over ℂ using roots of unity |
-| `algebraic` | no | exact real algebraic numbers: Sturm-sequence isolation of the real roots of any rational polynomial, so the integrator factors irreducible factors of any degree; implies `generic_const` |
-| `generic_const` | no | enables `generic_const_exprs` (nightly-only; off by default to keep stable compatibility) |
+| `algebraic` | no | exact real algebraic numbers: Sturm-sequence isolation of the real roots of any rational polynomial, so the integrator factors irreducible factors of any degree; compiles on stable Rust |
+| `generic_const` | no | enables `generic_const_exprs` (nightly-only) and with it the const-generic `Multiquadratic` field type |
 | `repl` | no | the `symr` REPL binary (optional `rustyline` line editor, kept invisible to dependents); implies `algebraic` and `complex` |
 
 One portability note: the const-generic `Multiquadratic` behind
@@ -197,7 +197,8 @@ rustc it only compiles *inside* this crate — any target outside it (your
 binary or crate naming the type) fails with `E0284` until that feature
 stabilises. For exact radical arithmetic that compiles everywhere, use
 [`FieldElement`](crate::math::algebra::field::FieldElement), which expresses
-the same numbers on a sparse basis and is not feature-gated.
+the same numbers on a sparse basis, is not feature-gated, and does not even
+require `algebraic`.
 
 The `repl` feature is deliberately wired through `dep:` + `required-features`,
 so a crate depending on `symrust` never compiles the line editor or the

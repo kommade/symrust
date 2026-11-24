@@ -1,8 +1,8 @@
-//! Build-time toolchain guard for this crate's nightly-gated features.
+//! Build-time toolchain guard for this crate's nightly-gated feature.
 //!
-//! The `generic_const` feature — and `algebraic`, whose definition implies it
-//! — turns on `#![feature(generic_const_exprs)]` at the crate root, which the
-//! stable and beta compilers reject with the bare
+//! The `generic_const` feature turns on `#![feature(generic_const_exprs)]`
+//! at the crate root, which the stable and beta compilers reject with the
+//! bare
 //! `error[E0554]: `#![feature]` may not be used on the stable release channel`.
 //! That error says nothing about *which* feature of *which* crate needs a
 //! nightly compiler. A build script runs before rustc ever sees the crate
@@ -15,9 +15,7 @@ use std::process::Command;
 fn main() {
     // Cargo mirrors the enabled features into `CARGO_FEATURE_<NAME>`
     // environment variables (upper-cased, `-` becomes `_`), so the active
-    // feature set is read without parsing the manifest. `algebraic` needs no
-    // probe of its own: its definition implies `generic_const`, so the same
-    // variable is set whenever it is on.
+    // feature set is read without parsing the manifest.
     let generic_const = std::env::var_os("CARGO_FEATURE_GENERIC_CONST").is_some();
     if !generic_const {
         return;
@@ -50,7 +48,7 @@ fn main() {
     eprintln!(
         "symrust cannot be built on this toolchain:\n\n\
   - the enabled feature `generic_const` turns on rust-lang's nightly \
-`generic_const_exprs` (the `algebraic` feature implies it)\n\n\
+`generic_const_exprs`\n\n\
 found:   {release}\n\
 \n\
 Re-run cargo through the nightly toolchain, for example:\n\

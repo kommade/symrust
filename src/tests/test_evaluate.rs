@@ -114,7 +114,7 @@ fn evaluate_surd_exact_sqrt() {
     assert_eq!(value.to_f64(), 2.0);
 }
 
-#[cfg(feature = "algebraic")]
+#[cfg(all(feature = "algebraic", feature = "generic_const"))]
 #[test]
 fn evaluate_multiquadratic_exact() {
     use crate::math::algebra::algebraic::Multiquadratic;

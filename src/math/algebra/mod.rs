@@ -27,16 +27,16 @@ pub mod symbolic_linear;
 /// Arithmetic in a quadratic extension `Q(sqrt(k))`: the `Surd` coefficient type.
 pub mod surd;
 
-/// Exact real algebraic numbers. Compiled only with the `algebraic` feature,
-/// so the default build carries none of it.
+/// Exact real algebraic numbers: Sturm isolation of the real roots of a
+/// rational polynomial, the exact `RealAlgebraic` they are carried by, and
+/// the real-root surface on `Poly`. Compiled only with the `algebraic`
+/// feature, and on stable Rust: none of it needs an unstable language
+/// feature.
 ///
-/// [`Multiquadratic`] here is the const-generic field element: on current
-/// rustc it only compiles inside this crate, because its fixed-size
-/// `[Rat; 1 << N]` storage needs the unstable `generic_const_exprs`. For
-/// portable exact radical arithmetic use [`FieldElement`], which expresses
-/// the same numbers sparsely and compiles everywhere.
-///
-/// [`Multiquadratic`]: algebraic::Multiquadratic
-/// [`FieldElement`]: field::FieldElement
+/// The module also hosts `Multiquadratic`, the const-generic field element,
+/// compiled only when `generic_const` joins `algebraic` — its fixed-size
+/// `[Rat; 1 << N]` storage is itself a generic const expression. For
+/// portable exact radical arithmetic use `FieldElement`, which expresses
+/// the same numbers sparsely and carries no feature requirement.
 #[cfg(feature = "algebraic")]
 pub mod algebraic;

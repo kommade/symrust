@@ -61,13 +61,17 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      # The REPL feature pulls in the `symr` binary and turns on every library
-      # feature (algebraic, complex), so this single invocation covers the
-      # whole surface: lib, doc tests, integration tests and the binary's
-      # grammar tests all run. `--all-targets` additionally compiles the
-      # benchmarks.
+      # The REPL feature pulls in the `symr` binary and turns on the
+      # `algebraic` and `complex` features, so this invocation covers the lib,
+      # doc tests, integration tests and the binary's grammar tests all at
+      # once. `--all-targets` additionally compiles the benchmarks.
+      # Since `algebraic` stopped implying `generic_const`, the static-matrix
+      # and `Multiquadratic` code paths no longer ride along here; the second
+      # invocation keeps them compiled and tested on nightly.
       - name: Run cargo tests (all targets, every feature)
-        run: cargo test --all-targets --features repl
+        run: |
+          cargo test --all-targets --features repl
+          cargo test --all-targets --features repl,generic_const
 
       - name: Run doc tests
         run: cargo test --all-features --doc
@@ -77,19 +81,20 @@ jobs:
         with:
           toolchain: stable
 
-      # `repl` implies every library feature, so a compile break on the
-      # default feature set (an ungated re-export of a feature-gated type,
-      # for example) is invisible to the steps above. Check the paths a
-      # library user actually builds — plain, and with `complex` on its own —
-      # under stable Rust, which is also the honest MSRV probe. The step
-      # env pins the toolchain for these invocations only; the job env keeps
-      # nightly for everything else.
+      # Without `generic_const` the user-facing feature sets compile on
+      # stable Rust — the default, `complex`, and now also the algebraic
+      # engine (Sturm isolation, real algebraic numbers, the exact fold),
+      # whose gate used to drag in the nightly-only feature. Compile breaks
+      # there would be invisible to the nightly steps above; these checks
+      # keep the stable promise honest.
       - name: Check stable builds of the user-facing feature sets
         env:
           RUSTUP_TOOLCHAIN: stable
         run: |
           cargo check --lib
           cargo check --lib --features complex
+          cargo check --lib --features algebraic
+          cargo check --lib --features algebraic,complex
 
   publish:
     name: Publish symrust to crates.io

@@ -1,12 +1,17 @@
 //! Tests for the algebraic-number machinery behind the `algebraic` feature:
-//! real-root isolation (Sturm sequences) and the multiquadratic field type
-//! `Q(sqrt k_1, ..., sqrt k_n)`.
+//! real-root isolation (Sturm sequences) and, under `generic_const` as well,
+//! the multiquadratic field type `Q(sqrt k_1, ..., sqrt k_n)`.
 
 #![cfg(feature = "algebraic")]
 
+// The field type's fixed-size storage is itself a generic const expression,
+// so its tests only exist when the `generic_const` feature is on.
+#[cfg(feature = "generic_const")]
 use crate::math::algebra::{
     algebraic::Multiquadratic,
     linear::Matrix,
+};
+use crate::math::algebra::{
     polynomial::Poly,
     rational::Rat,
 };
@@ -51,6 +56,8 @@ fn complex_roots_are_not_reported() {
     assert!(poly(&[1, 0, 1]).real_roots().is_empty());
 }
 
+// The multiquadratic field tests; the engine tests above are feature-free.
+#[cfg(feature = "generic_const")]
 #[test]
 fn multiquadratic_multiplies_square_roots() {
     // sqrt(2) * sqrt(3) = sqrt(6), and sqrt(2)^2 = 2.
@@ -63,6 +70,7 @@ fn multiquadratic_multiplies_square_roots() {
     assert!((six.to_f64() - 6.0_f64.sqrt()).abs() < 1e-12);
 }
 
+#[cfg(feature = "generic_const")]
 #[test]
 fn multiquadratic_division_round_trips() {
     // 1/sqrt(3) = sqrt(3)/3, and (1/sqrt(3)) * sqrt(3) = 1.
@@ -72,6 +80,7 @@ fn multiquadratic_division_round_trips() {
     assert!((inverse.to_f64() - 1.0 / 3.0_f64.sqrt()).abs() < 1e-12);
 }
 
+#[cfg(feature = "generic_const")]
 #[test]
 fn multiquadratic_elaborate_inverse() {
     // 1/(sqrt2 + sqrt3) stays in the field: it equals sqrt3 - sqrt2
@@ -85,6 +94,7 @@ fn multiquadratic_elaborate_inverse() {
     assert_eq!(sum * inverse, Multiquadratic::from_rat(Rat::ONE));
 }
 
+#[cfg(feature = "generic_const")]
 #[test]
 fn multiquadratic_exact_square_roots() {
     use crate::math::numeric::ExactField;
@@ -105,6 +115,7 @@ fn multiquadratic_exact_square_roots() {
     );
 }
 
+#[cfg(feature = "generic_const")]
 #[test]
 fn multiquadratic_diagonalizes_a_rational_symmetric_matrix() {
     let q = |value| Multiquadratic::<3>::from_rat(Rat::from_i64(value));

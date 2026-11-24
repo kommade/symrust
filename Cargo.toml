@@ -36,19 +36,21 @@ complex = []
 # can factor irreducible factors of any degree. This is independent of `complex`:
 # on its own it factors over R (real surds), not over C. Enable `complex` as well
 # to factor over C and write cyclotomic integrals in terms of roots of unity.
-# Implies `generic_const`: the `Multiquadratic` field it is built on stores its
-# `2^N` coefficients in a `[Rat; 1 << N]`, which needs `generic_const_exprs`.
-algebraic = ["generic_const"]
+# The engine carries no unstable-language requirement: this feature compiles on
+# stable Rust. The `Multiquadratic` field type also hosted in the module needs
+# the `generic_const` feature on top (its fixed-size storage is itself a generic
+# const expression); without that, the feature ships the engine alone.
+algebraic = []
 # Enables the use of generic const expressions, which allows for more
 # compile-time optimizations and more expressive type-level programming. This
 # is an unstable feature and may not be available on all Rust versions. It is
-# off by default to maintain compatibility with stable Rust. Enabling it (or
-# `algebraic`) on a non-nightly toolchain is refused by the crate's build
-# script with targeted instructions, ahead of rustc's bare `#![feature]`
-# error. The const-generic `Multiquadratic` it unlocks currently compiles
-# only inside this crate on every rustc (stable-solver limitation,
-# rust-lang/rust#160895); for portable exact radical arithmetic use
-# `FieldElement`, which no feature gate constrains.
+# off by default to maintain compatibility with stable Rust. Enabling it on a
+# non-nightly toolchain is refused by the crate's build script with targeted
+# instructions, ahead of rustc's bare `#![feature]` error. The const-generic
+# `Multiquadratic` it unlocks currently compiles only inside this crate on
+# every rustc (stable-solver limitation, rust-lang/rust#160895); for portable
+# exact radical arithmetic use `FieldElement`, which no feature gate
+# constrains.
 generic_const = []
 # Dependency feature for the `symr` REPL binary (src/bin/repl). Declared with
 # `dep:` so enabling it never exposes `rustyline` through the library itself:

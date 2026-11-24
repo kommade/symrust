@@ -243,7 +243,7 @@ fn custom() {
 }
 
 #[test]
-#[cfg(feature = "algebraic")]
+#[cfg(all(feature = "algebraic", feature = "generic_const"))]
 fn custom2() {
     // The matrix is built from sqrt(2), but its singular values are sqrt(6),
     // sqrt(3) and 0. All of them live in the multiquadratic field

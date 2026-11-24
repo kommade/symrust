@@ -19,10 +19,8 @@
 //! building is the caller's judgment, bounded only by one basis radicand
 //! per addressable monomial-mask bit.
 //!
-//! Unlike [`Multiquadratic`] nothing here is const-generic, so types linking
+//! Unlike `Multiquadratic` nothing here is const-generic, so types linking
 //! this crate from another crate or binary monomorphize it freely.
-//!
-//! [`Multiquadratic`]: crate::math::algebra::algebraic::Multiquadratic
 
 use super::rational::Rat;
 use super::surd::{self};
