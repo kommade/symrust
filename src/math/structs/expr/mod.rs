@@ -448,6 +448,17 @@ impl<T: FloatType + Display> Expr<T> {
 }
 
 impl<T: SymbolicLeaf> Expr<T> {
+    /// Whether the tree mentions a named constant such as `π` or `e`.
+    ///
+    /// The counterpart of [`has_independent`](Self::has_independent) for
+    /// exactness: a constant is no variable, so numeric folds are defined on
+    /// it — but they would replace `pi / 2` with a decimal, so a fold that
+    /// promises exactness looks for this first.
+    #[must_use]
+    pub fn has_named_constant(&self) -> bool {
+        self.tree.has_named_constant()
+    }
+
     /// Whether the expression contains a formal root sum (`Σ_{Z: p(Z)=0} …`).
     ///
     /// A root sum is the exact antiderivative form used when an irreducible

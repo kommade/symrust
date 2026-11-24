@@ -198,7 +198,12 @@ fn split_name(rest: &str) -> (&str, &str) {
 
 fn parse_command(name: &str, args: &str) -> Result<Command, String> {
     match name {
-        "h" | "help" => Ok(Command::Help),
+        "h" | "help" => {
+            if !args.is_empty() {
+                return Err(":help takes no arguments (a definition is spelled without the colon: h = ...)".to_string());
+            }
+            Ok(Command::Help)
+        }
         "q" | "quit" | "exit" => Ok(Command::Quit),
         "d" => Ok(Command::Derivative(optional(args))),
         "ds" => Ok(Command::DerivativeSolution(optional(args))),

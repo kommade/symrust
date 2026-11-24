@@ -251,7 +251,21 @@ where
             .matrix_or_error()?
             .null_space()
             .iter()
-            .map(|vector| Self::from_matrix(vector.to_matrix()))
+            .map(|vector| {
+                // Same one-column shape, entries folded: the linear layer's
+                // back-substitution can leave forms such as `0 / x` that only
+                // the readability fold reduces.
+                let entries = vector
+                    .as_slice()
+                    .iter()
+                    .cloned()
+                    .map(Expr::tidy)
+                    .collect::<Vec<_>>();
+                Self::from_matrix(
+                    Matrix::from_vec(vector.len(), 1, entries)
+                        .unwrap_or_else(|| Matrix::from_rows(Vec::new())),
+                )
+            })
             .collect())
     }
 
@@ -1676,7 +1690,11 @@ fn tolerant_rref<T: SymbolicLeaf>(matrix: &Matrix<Expr<T>>) -> Matrix<Expr<T>> {
     let (rows, columns) = (work.rows(), work.columns());
     let zero = || Expr::from_node(Node::zero());
     let is_zero = |entry: &Expr<T>| {
-        numeric_entry_value(entry).is_none_or(|value| value.abs() < NULL_SPACE_TOLERANCE)
+        // A *numeric* value under the tolerance counts as zero; a symbolic
+        // entry (it evaluates to nothing) does not — treating it as zero let
+        // a symbolic matrix's whole reduction collapse, mis-reporting its
+        // eigenvectors.
+        numeric_entry_value(entry).is_some_and(|value| value.abs() < NULL_SPACE_TOLERANCE)
     };
     let mut row = 0;
     let mut lead = 0;
@@ -1730,7 +1748,9 @@ fn tolerant_rref<T: SymbolicLeaf>(matrix: &Matrix<Expr<T>>) -> Matrix<Expr<T>> {
 fn null_space_of_rref<T: SymbolicLeaf>(reduced: &Matrix<Expr<T>>) -> Vec<Vector<Expr<T>>> {
     let (rows, columns) = (reduced.rows(), reduced.columns());
     let is_zero = |entry: &Expr<T>| {
-        numeric_entry_value(entry).is_none_or(|value| value.abs() < NULL_SPACE_TOLERANCE)
+        // Mirrors `tolerant_rref`: only a numeric value under the tolerance
+        // is zero; a symbolic entry is a pivot candidate, not a hole.
+        numeric_entry_value(entry).is_some_and(|value| value.abs() < NULL_SPACE_TOLERANCE)
     };
     let pivots: Vec<Option<usize>> = (0..rows)
         .map(|row| (0..columns).find(|&column| !is_zero(&reduced[row][column])))

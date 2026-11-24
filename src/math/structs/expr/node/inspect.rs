@@ -291,6 +291,18 @@ impl<T: SymbolicLeaf> NodeInner<T> {
     }
 }
 
+impl<T: SymbolicLeaf> Node<T> {
+    /// `true` when the tree mentions a named constant such as `π` or `e`.
+    ///
+    /// A caller about to evaluate or numerically fold the tree can use this
+    /// to keep the constant symbolic: `pi / 8` is exact where its decimal
+    /// reading is only an approximation.
+    #[must_use]
+    pub fn has_named_constant(&self) -> bool {
+        NodeInner::contains_named_constant(self)
+    }
+}
+
 /// The sign and unit predicates. Only the leaf's own numeric reading is
 /// involved, so the plain [`FloatType`] bound suffices here; callers that run
 /// under the stronger [`SymbolicLeaf`] bound satisfy it automatically.

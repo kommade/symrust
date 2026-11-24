@@ -312,8 +312,11 @@ impl App {
             Command::Inverse(argument) => {
                 self.transform(argument, |expr| expr.inv().map_err(sym_err))
             }
-            Command::InverseSteps(argument) => self
-                .transform_steps(argument, |expr| expr.inverse_solution().map_err(sym_err)),
+            Command::InverseSteps(argument) => self.transform_steps(argument, |expr| {
+                expr.inverse_solution()
+                    .map_err(sym_err)
+                    .map(|solution| solution.map_result(readable))
+            }),
             Command::OrthogonalMatrix(argument) => self.orthogonal_matrix(argument),
             Command::Rank(argument) => {
                 let expr = self.argument(argument)?;
@@ -639,7 +642,14 @@ impl App {
                     .graft_number_leaves(PLACEHOLDER_BASE, &replacements),
             )
         };
-        spliced.fold_value_operators().map_err(sym_err)
+        spliced
+            .fold_value_operators()
+            .map_err(sym_err)
+            // Numeric input reads as its value: `2 + 2` is `4`, and a
+            // definition stores the folded tree. A tree mentioning `pi` or
+            // `e` keeps the constant symbolic — the exactness the constants
+            // promise — while a purely numeric tree folds through `tidy`.
+            .map(|expr| if expr.has_named_constant() { expr } else { expr.tidy() })
     }
 
     /// Execute a command spelled inline — an argument like `:d :simp 2x^2`,

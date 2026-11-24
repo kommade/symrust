@@ -793,7 +793,16 @@ impl<T: SymbolicLeaf> Node<T> {
                                             }
                                 return NodeInner::<T>::from_operation(Op::Div, left, right);
                             } else if op == Op::Pow {
-                                if right_borrow.is_zero() {
+                                // A zero exponent reduces the whole power to
+                                // one: a literal `0`, or any closed exponent
+                                // that *evaluates* to zero (`1 - 1`, a
+                                // difference two factors' combination left
+                                // unfolded at a lower level).
+                                if right_borrow.is_zero()
+                                    || right_borrow
+                                        .evaluate()
+                                        .is_some_and(|value| value.is_zero())
+                                {
                                     return NodeInner::<T>::one();
                                 } else if right_borrow.is_one() {
                                     return left;

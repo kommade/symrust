@@ -286,18 +286,26 @@ where
                     op,
                 );
                 let exponent_op = if *op == Op::Div { Op::Sub } else { Op::Add };
+                // Fold the exponent difference before building the power: the
+                // combined form of `a * (1/a)` is `a ^ (1 - 1)`, and a power
+                // over a difference that iszero must collapse now, not wait
+                // for a caller that may never re-simplify.
                 let new_exponent = Self::from_operation(
                     exponent_op,
                     left_comp.exponent.clone(),
                     right_comp.exponent.clone(),
-                );
+                )
+                .simplify(false, combine_fns);
+                let new_zero = new_exponent.inner.borrow().evaluate().is_some_and(|v| v.is_zero());
+                if new_zero {
+                    return Some(new_coeff);
+                }
                 let new_pow =
                     Self::from_operation(Op::Pow, left_comp.base.clone(), new_exponent);
-                return Some(Self::from_operation(
-                    Op::ImplicitMul,
-                    new_coeff,
-                    new_pow,
-                ));
+                return Some(
+                    Self::from_operation(Op::ImplicitMul, new_coeff, new_pow)
+                        .simplify(false, combine_fns),
+                );
             }
 
             if Self::nodes_equal(&left_comp.exponent, &right_comp.exponent) {
