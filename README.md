@@ -52,7 +52,7 @@ As a library dependency:
 cargo add symrust
 ```
 
-The default feature set compiles on stable Rust (edition 2024, Rust ≥ 1.85) —
+The default feature set compiles on stable Rust (edition 2024, Rust ≥ 1.88) —
 as do the `algebraic` and `repl` features. Only `generic_const` needs a
 nightly compiler; see [Features](#features).
 

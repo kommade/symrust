@@ -1,11 +1,12 @@
 [package]
 name = "symrust"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 authors = ["kommade"]
-# The edition floor is 1.85; the nightly-only features are opt-in behind the
-# `generic_const`/`algebraic` feature gates, so stable users are unaffected.
-rust-version = "1.85"
+# The floor is 1.88 because let chains (stabilized in 1.88) are used throughout;
+# the nightly-only features are opt-in behind the `generic_const`/`algebraic`
+# feature gates, so stable users are unaffected.
+rust-version = "1.88"
 description = "A symbolic mathematics library: exact calculus, algebra and linear algebra with narrated solutions, plus the symr REPL"
 readme = "README.md"
 license = "GPL-3.0-only"
