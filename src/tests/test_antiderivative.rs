@@ -488,10 +488,11 @@ fn binomial_cubic_uses_exact_radicals() {
             !rendered.contains('Σ'),
             "{input} should not use a root sum, got {rendered}"
         );
-        // The cube root appears as the root form `rt_3(2)` (the `c`-th root of
+        // The cube root appears as the root form `root_3(2)` (the `c`-th root
+        // of
         // `a^b`), and the long decimal forms must be gone.
         assert!(
-            rendered.contains("rt_3(2)"),
+            rendered.contains("root_3(2)"),
             "{input}: expected the symbolic cube root of 2, got {rendered}"
         );
         assert!(

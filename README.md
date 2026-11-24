@@ -164,7 +164,7 @@ Command reference (`:help` prints the full reference from inside the REPL):
 | `:lim x=a` | limit toward a number, `pi`, or `inf`/`-inf` |
 | `:roots` | real roots of a polynomial in `x`: rational exactly, irrational Sturm-isolated |
 | `:eval x=v y=w` | substitute values and evaluate |
-| `:simp`, `:expand`, `:tidy`, `:lat[ex]` | simplify / expand / structural tidy / LaTeX export |
+| `:simp`, `:expand`, `:tidy`, `:lat[ex]` | simplify (expands and collects) / distribute only, no collecting / structural tidy / LaTeX export |
 | `:tp`, `:ref`, `:rref` | transpose, echelon and reduced echelon forms |
 | `:det`, `:inv`, `:rank`, `:nullity` | determinant, inverse, rank and nullity |
 | `:orthq` | if the square matrix is orthogonal (`QᵀQ = I`), its inverse — the transpose |

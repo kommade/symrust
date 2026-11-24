@@ -241,6 +241,57 @@ fn surd_powers_collapse() {
     assert!(odd.contains("sqrt"), "odd surd power should stay a surd: {odd}");
 }
 
+/// A closed base to a non-negative integer exponent folds to its value, and
+/// a closed exponent subtree folds from below (the `2 ^ 2` inside
+/// `2 ^ (1 / 2 ^ 2)` reads `1 / 4` by the time the power rule looks at it).
+/// The rendered fractional-exponent root form must also lex back.
+#[test]
+fn closed_integer_powers_fold_and_roots_round_trip() {
+    assert_eq!(create_expr!("2^3").unwrap().simplify(true).to_string(), "8");
+    assert_eq!(
+        create_expr!("(1 + 1)^2").unwrap().simplify(true).to_string(),
+        "4"
+    );
+    // The exponent side folds first; the power itself stays a symbolic
+    // radical (2^(1/4) displayed as the fourth root).
+    let radical = create_expr!("2 ^ (0.5 ^ 2)").unwrap().simplify(true);
+    assert_eq!(radical.to_string(), "root_4(2)");
+    // Round trip: the displayed form lexes back to the same value.
+    let reparsed = create_expr!("root_4(2)").unwrap();
+    assert_eq!(reparsed.to_string(), radical.to_string());
+    // A written decimal exponent folds into one rational leaf: tidy alone
+    // (no simplify) must still display a root, not `2 ^ 1 / 2`, which
+    // lexes back as `(2 ^ 1) / 2` — a different value.
+    let half = create_expr!("2 ^ 0.5").unwrap().to_string();
+    assert_eq!(half, "root_2(2)");
+    assert_eq!(create_expr!("root_2(2)").unwrap().to_string(), half);
+}
+
+/// Pure distribution: products of sums multiply out and integer powers of
+/// sums repeat, and nothing is collected afterwards.
+#[test]
+fn expand_distributes_without_collecting() {
+    assert_eq!(
+        create_expr!("(x + 1)^2").unwrap().expand().to_string(),
+        "x x + x + x + 1"
+    );
+    assert_eq!(
+        create_expr!("(x + 1) (x + 2)").unwrap().expand().to_string(),
+        "x x + x 2 + x + 2"
+    );
+    // A product under a power splits over the factors. The uncollected
+    // shape is honest: no fold, no reordering.
+    assert_eq!(
+        create_expr!("(x + 2)^2").unwrap().expand().to_string(),
+        "x x + x 2 + 2 x + 2 2"
+    );
+    // Sums inside functions expand too.
+    assert_eq!(
+        create_expr!("sin((x + 1)^2)").unwrap().expand().to_string(),
+        "sin(x x + x + x + 1)"
+    );
+}
+
 #[test]
 fn expr_linearise() {
     let expr = create_expr!("-2 * sin(x) / cos(x)").unwrap();

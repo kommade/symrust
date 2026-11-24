@@ -512,6 +512,29 @@ where
         Self { tree }
     }
 
+    /// Expand the expression: every product of sums is distributed and every
+    /// small integer power of a sum (or product) is multiplied out, and
+    /// nothing else happens.
+    ///
+    /// This is the raw distribution half of [`simplify`](Self::simplify)'s
+    /// expanding form — no like-term collection, no reordering, no
+    /// refactorising afterwards — for when the untouched term shapes are
+    /// wanted.
+    ///
+    /// # Examples
+    /// ```
+    /// use symrust::{create_expr, math::structs::expr::Expr};
+    /// let expr = create_expr!("(x + 1) (x + 2)").unwrap();
+    /// // x × x merges into the square; the rest is left as written.
+    /// assert_eq!(expr.expand().to_string(), "x ^ 2 + 2 x + x + 2");
+    /// ```
+    #[must_use]
+    pub fn expand(self) -> Self {
+        Self {
+            tree: self.tree.expand(),
+        }
+    }
+
     /// Simplify, then fold a fully numeric result to its most readable exact
     /// form.
     ///

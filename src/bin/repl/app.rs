@@ -273,8 +273,8 @@ impl App {
                     "lim_({var} -> {toward}) = {limit}"
                 )))
             }
-            Command::Simplify(argument) => self.rewrite(argument, false),
-            Command::Expand(argument) => self.rewrite(argument, true),
+            Command::Simplify(argument) => self.rewrite(argument, true),
+            Command::Expand(argument) => self.expand_only(argument),
             Command::Tidy(argument) => {
                 let expr = self.argument(argument)?;
                 let tidied = expr.tidy();
@@ -580,12 +580,23 @@ impl App {
         Ok(Outcome::Remark(output))
     }
 
-    /// Apply [`Expr::simplify`] with the given expand flag.
+    /// Expand and simplify: [`Expr::simplify`] with expansion on, so like
+    /// terms are collected and the factored form is kept when it reads well.
     fn rewrite(&mut self, argument: Option<String>, expand: bool) -> Result<Outcome, String> {
         let expr = self.argument(argument)?;
         let rewritten = expr.simplify(expand);
         let output = format!("{rewritten}");
         self.current = Some(rewritten);
+        Ok(Outcome::Value(output))
+    }
+
+    /// Pure distribution, [`Expr::expand`]: products of sums and integer
+    /// powers multiply out; nothing is collected afterwards.
+    fn expand_only(&mut self, argument: Option<String>) -> Result<Outcome, String> {
+        let expr = self.argument(argument)?;
+        let expanded = expr.expand();
+        let output = format!("{expanded}");
+        self.current = Some(expanded);
         Ok(Outcome::Value(output))
     }
 
@@ -645,14 +656,21 @@ impl App {
         spliced
             .fold_value_operators()
             .map_err(sym_err)
-            // Numeric input reads as its value: `2 + 2` is `4`, and a
-            // definition stores the folded tree. A tree mentioning a named
-            // constant (`pi`, `e`, or now `i`) keeps the constant symbolic —
-            // that is the exactness the constants promise; over the real
-            // default leaf a stray `i` would otherwise evaluate to NaN and
-            // poison the whole fold — while a purely numeric tree folds
-            // through `tidy`.
-            .map(|expr| if expr.has_named_constant() { expr } else { expr.tidy() })
+            .map(|expr| {
+                // Numeric input reads as its value: `2 + 2` is `4`, and a
+                // definition stores the folded tree. A tree mentioning a
+                // named constant (`pi`, `e`, or now `i`) is *not* skipped
+                // wholesale — the exact evaluation folds the numeric
+                // neighbourhoods around the constant and keeps the constant
+                // symbolic — so `2 + 2 + pi` is `4 + pi`, not an unfree tree.
+                if !expr.has_named_constant() {
+                    return expr.tidy();
+                }
+                match expr.evaluate_exact_with::<Real>(&HashMap::new()) {
+                    Evaluated::Expression(folded) => folded,
+                    Evaluated::Value(value) => Expr::from_node(Node::float(value)),
+                }
+            })
     }
 
     /// Execute a command spelled inline — an argument like `:d :simp 2x^2`,
@@ -998,8 +1016,8 @@ itself be a command (`:det :simp m`), nested up to 8 deep.
                              expression     e.g. :eval x=pi/2 cos(x)
   :lim x=a [<expr>]          limit toward a number, pi, or inf/-inf
                              (also `:lim x a`, `:lim x->a`)
-  :simp [<expr>]             simplify without expanding
-  :expand [<expr>]           expand, then simplify
+  :simp [<expr>]             expand, collect and simplify
+  :expand [<expr>]           distribute products and powers, no collecting
   :tidy [<expr>]             light structural cleanup
   :lat[ex] [<expr>]          render as LaTeX
   :roots [<expr>]            real roots of a polynomial in x: rational roots

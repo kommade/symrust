@@ -533,9 +533,10 @@ impl<T: SymbolicLeaf> Display for NodeInner<T> {
                         match op {
                             Op::Pow => {
                                 // `a ^ (b / c)` is displayed as the `c`-th root
-                                // `rt_c(a ^ b)` (and `rt_c(a)` when `b = 1`),
+                                // `root_c(a ^ b)` (and `root_c(a)` when `b = 1`),
                                 // which reads as an exact radical rather than a
-                                // fractional exponent.
+                                // fractional exponent. The keyword is the
+                                // lexer's own: the rendering must lex back.
                                 if let Some((base, index, power)) =
                                     NodeInner::<T>::root_power_parts(&op_node.left, &op_node.right)
                                 {
@@ -556,12 +557,21 @@ impl<T: SymbolicLeaf> Display for NodeInner<T> {
                                         }
                                         None => base_str,
                                     };
-                                    return write!(f, "rt_{index}({radicand})");
+                                    return write!(f, "root_{index}({radicand})");
                                 }
                                 if left.is_operator() {
                                     left_str = format!("({left_str})");
                                 }
-                                if right.is_operator() {
+                                // A rendered exponent carrying a binary operator
+                                // of its own — the spaces of a fraction leaf
+                                // (`1 / 2`), the slash of a `d/dx` derivative,
+                                // or any tree the operand check misses — needs
+                                // fencing, or `2 ^ 1 / 2` re-lexes as
+                                // `(2 ^ 1) / 2`: a different value.
+                                if right.is_operator()
+                                    || right_str.contains(' ')
+                                    || right_str.contains('/')
+                                {
                                     right_str = format!("({right_str})");
                                 }
                                 format!("{left_str} ^ {right_str}")

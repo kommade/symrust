@@ -23,6 +23,22 @@ fn try_custom() {
     assert_eq!(derivative.to_latex().unwrap(), "{x}^{{x}^{x} + x} {\\ln(x)}^{2} + \\ln(x) {x}^{{x}^{x} + x} + {x}^{{x}^{x} + x - 1}");
 }
 
+/// Numeric constants riding on the constant-factor rule collect into one
+/// factor, so `d(2 (2 x))` reads `4 x` rather than two numerals side by
+/// side. Named constants and constant atoms that evaluate to nothing over
+/// the leaf (the imaginary unit) ride along exactly.
+#[test]
+fn constant_factors_collect() {
+    let derived = create_expr!("2 x^2").unwrap().get_derivative();
+    assert_eq!(derived.to_string(), "4 x");
+
+    let radical = create_expr!("2 i x^2").unwrap().get_derivative();
+    assert_eq!(radical.to_string(), "4 i x");
+
+    let pi_case = create_expr!("2 pi x^2").unwrap().get_derivative();
+    assert_eq!(pi_case.to_string(), "4 pi x");
+}
+
 /// The step-tracking entry point returns the same answer as the plain one and
 /// records the rules it applied.
 #[test]

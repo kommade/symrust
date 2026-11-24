@@ -55,7 +55,7 @@ pub enum Command {
     },
     /// Simplify without expanding.
     Simplify(Option<String>),
-    /// Expand, then simplify.
+    /// Distribute products and powers without collecting.
     Expand(Option<String>),
     /// Light structural cleanup.
     Tidy(Option<String>),

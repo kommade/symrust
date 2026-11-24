@@ -3,6 +3,7 @@
 use std::fmt::Display;
 
 use crate::{
+    math::algebra::rational::Rat,
     math::numeric::{FloatType, SymbolicLeaf},
     math::parse::lexer::{Const, Func, Op, Token},
 };
@@ -222,12 +223,39 @@ impl<T: SymbolicLeaf> NodeInner<T> {
 
     /// If `exponent` is a fraction `b / c` with `c` a positive integer, return
     /// `(base, "c", Some(b))` (or `None` for `b` when `b == 1`) so that
-    /// `base ^ (b/c)` can be displayed as the root `rt_c(base ^ b)`.
+    /// `base ^ (b/c)` can be displayed as the root `root_c(base ^ b)`.
+    ///
+    /// The exponent reaches here in two shapes: a `b / c` division tree, what
+    /// expression builders and the simplifier generate, and a single
+    /// [`Token::Rational`] leaf, what the parser folds written `1 / 2` or
+    /// `0.5` literals into. The leaf display omits brackets (`1 / 2` carries
+    /// spaces), so without this branch `2 ^ 0.5` prints `2 ^ 1 / 2` — which
+    /// lexes back as `(2 ^ 1) / 2`. The stored value is unaffected, but the
+    /// round trip through the text is not.
     pub(crate) fn root_power_parts(
         base: &Node<T>,
         exponent: &Node<T>,
     ) -> Option<(Node<T>, String, Option<Node<T>>)> {
         let borrow = exponent.inner.borrow();
+        // A canonical rational is in lowest terms with a positive
+        // denominator, so the leaf needs only the guards the tree branch
+        // gets from its `evaluate` calls: skip whole numbers (denominator
+        // `1`), whose display is the plain power, and the zero numerator
+        // (always stored `/ 1`).
+        if let NodeValue::Operand(Token::Rational(value)) = &borrow.value {
+            let (num, den) = value.parts();
+            if den <= 1 || num == 0 {
+                return None;
+            }
+            // `root_c(base)` when the numerator is `1`, else a power leaf an
+            // exact integer node so the rendering reads like the tree form.
+            let power = if num == 1 {
+                None
+            } else {
+                Some(Rat::integer_node(num))
+            };
+            return Some((base.clone(), den.to_string(), power));
+        }
         let NodeValue::Operator(op_node) = &borrow.value else {
             return None;
         };
