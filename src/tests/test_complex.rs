@@ -17,6 +17,62 @@ fn imaginary_unit_squares_to_minus_one() {
     assert!(approx(&square, -1.0, 0.0), "i^2 = {square}");
 }
 
+/// `i` as a parsed *constant*: the tree carries `Const::I`, evaluation into a
+/// complex leaf yields the true unit, and an `i`-built expression evaluates
+/// exactly over ℂ (`i² = −1`, `1 + 2i` round-trips).
+#[test]
+fn imaginary_constant_lexes_and_evaluates_over_complex() {
+    use crate::create_expr;
+
+    // Lexing: `i` alone, inside sums, inside products — each tree mentions
+    // the constant rather than an `i` variable.
+    let as_const = |text: &str| create_expr!(text).unwrap().has_named_constant();
+    assert!(as_const("i"), "bare i lexes as the constant");
+    assert!(as_const("2i"), "2i lexes as the constant");
+    assert!(as_const("1 + 2i"), "1 + 2i lexes as the constant");
+
+    // Evaluation: the constant carries the unit's value.
+    let i_expr = create_expr!("i").unwrap();
+    let value = i_expr
+        .evaluate(Complex::from_real(Real::zero()))
+        .value()
+        .unwrap();
+    assert!(approx(&value, 0.0, 1.0), "i evaluates to the unit");
+
+    // The payoff: i^2 folds to exactly -1 over a complex interpretation.
+    let squared = create_expr!("i^2").unwrap();
+    let square = squared
+        .evaluate(Complex::from_real(Real::zero()))
+        .value()
+        .unwrap();
+    assert!(approx(&square, -1.0, 0.0), "i^2 = {square}");
+
+    // And a mixed closed tree: 1 + 2i stays exact.
+    let mixed = create_expr!("1 + 2i").unwrap();
+    let value = mixed
+        .evaluate(Complex::from_real(Real::zero()))
+        .value()
+        .unwrap();
+    assert!(approx(&value, 1.0, 2.0), "1 + 2i = {value}");
+}
+
+/// Over the real default leaf `i` has no value: it stays symbolic, and folds
+/// never produce NaN-poisoned results.
+#[test]
+fn imaginary_constant_stays_symbolic_over_real() {
+    use crate::create_expr;
+
+    let expr = create_expr!("i^2").unwrap();
+    // Symbolic: no fold to a (never-existing) real value, and no NaN leaf.
+    assert_eq!(expr.tidy().to_string(), "i ^ 2");
+
+    let sum = create_expr!("2i + 1").unwrap();
+    assert_eq!(sum.tidy().to_string(), "2 i + 1");
+
+    // A real-leaf evaluation of `i` yields no value rather than NaN.
+    assert_eq!(create_expr!("i").unwrap().evaluate(0.0_f64).value(), None);
+}
+
 #[test]
 fn arithmetic() {
     let a = c(1.0, 2.0);

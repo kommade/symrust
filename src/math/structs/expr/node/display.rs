@@ -311,6 +311,7 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                 Token::Constant(constant) => match constant {
                     Const::Pi => Ok(String::from(r"\pi")),
                     Const::E => Ok(String::from(r"e")),
+                    Const::I => Ok(String::from(r"i")),
                 },
                 Token::Var(var) => Ok(format!("{var}")),
                 Token::Indp(indp) => Ok(format!("{indp}")),
@@ -439,7 +440,26 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                                 right_str
                             } else if right_is_one {
                                 left_str
-                            } else if *op == Op::Mul {
+                                } else if right_str.starts_with('-') {
+                                    // Same buried-coefficient pull, in LaTeX: the
+                                    // sign moves in front of the whole product so
+                                    // the text cannot read as a subtraction.
+                                    let positive = right_str[1..].to_string();
+                                    if left_str.starts_with('-') {
+                                        let positive_left = left_str[1..].to_string();
+                                        if positive_left.contains(' ')
+                                            || positive.contains(' ')
+                                        {
+                                            format!("{positive_left} {positive}")
+                                        } else {
+                                            format!(r"{positive_left} \times {positive}")
+                                        }
+                                    } else if positive.contains(' ') {
+                                        format!("-{left_str} {positive}")
+                                    } else {
+                                        format!("{positive} {left_str}")
+                                    }
+                                } else if *op == Op::Mul {
                                 format!(r"{left_str} \times {right_str}")
                             } else {
                                 format!("{left_str} {right_str}")
@@ -513,9 +533,10 @@ impl<T: SymbolicLeaf> Display for NodeInner<T> {
                         match op {
                             Op::Pow => {
                                 // `a ^ (b / c)` is displayed as the `c`-th root
-                                // `rt_c(a ^ b)` (and `rt_c(a)` when `b = 1`),
+                                // `root_c(a ^ b)` (and `root_c(a)` when `b = 1`),
                                 // which reads as an exact radical rather than a
-                                // fractional exponent.
+                                // fractional exponent. The keyword is the
+                                // lexer's own: the rendering must lex back.
                                 if let Some((base, index, power)) =
                                     NodeInner::<T>::root_power_parts(&op_node.left, &op_node.right)
                                 {
@@ -536,12 +557,21 @@ impl<T: SymbolicLeaf> Display for NodeInner<T> {
                                         }
                                         None => base_str,
                                     };
-                                    return write!(f, "rt_{index}({radicand})");
+                                    return write!(f, "root_{index}({radicand})");
                                 }
                                 if left.is_operator() {
                                     left_str = format!("({left_str})");
                                 }
-                                if right.is_operator() {
+                                // A rendered exponent carrying a binary operator
+                                // of its own — the spaces of a fraction leaf
+                                // (`1 / 2`), the slash of a `d/dx` derivative,
+                                // or any tree the operand check misses — needs
+                                // fencing, or `2 ^ 1 / 2` re-lexes as
+                                // `(2 ^ 1) / 2`: a different value.
+                                if right.is_operator()
+                                    || right_str.contains(' ')
+                                    || right_str.contains('/')
+                                {
                                     right_str = format!("({right_str})");
                                 }
                                 format!("{left_str} ^ {right_str}")
@@ -675,6 +705,31 @@ impl<T: SymbolicLeaf> Display for NodeInner<T> {
                                         format!("-{left_str} {positive}")
                                     } else {
                                         format!("-({left_str} {positive})")
+                                    }
+                                } else if right_str.starts_with('-') {
+                                    // A negative coefficient buried at the
+                                    // right renders as a minus between
+                                    // factors: `e ^ (-(x ^ 2)) -2 x` would
+                                    // re-parse as a subtraction with a
+                                    // different value. Pull the sign to the
+                                    // product's front — cancel it when the
+                                    // left carries one too — and move a bare
+                                    // negative coefficient to the front, the
+                                    // way a product is read.
+                                    let positive = right_str[1..].to_string();
+                                    if left_str.starts_with('-') {
+                                        let positive_left = left_str[1..].to_string();
+                                        if positive_left.contains(' ')
+                                            || positive.contains(' ')
+                                        {
+                                            format!("{positive_left} {positive}")
+                                        } else {
+                                            format!("{positive_left} * {positive}")
+                                        }
+                                    } else if positive.contains(' ') {
+                                        format!("-{left_str} {positive}")
+                                    } else {
+                                        format!("{positive} {left_str}")
                                     }
                                 } else if left_is_one && right_is_one {
                                     String::from("1")

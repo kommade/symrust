@@ -52,9 +52,9 @@ As a library dependency:
 cargo add symrust
 ```
 
-The default feature set compiles on stable Rust (edition 2024, Rust ≥ 1.85).
-The `algebraic` and `repl` features enable nightly-required machinery; see
-[Features](#features).
+The default feature set compiles on stable Rust (edition 2024, Rust ≥ 1.85) —
+as do the `algebraic` and `repl` features. Only `generic_const` needs a
+nightly compiler; see [Features](#features).
 
 As the `symr` REPL binary:
 
@@ -164,9 +164,10 @@ Command reference (`:help` prints the full reference from inside the REPL):
 | `:lim x=a` | limit toward a number, `pi`, or `inf`/`-inf` |
 | `:roots` | real roots of a polynomial in `x`: rational exactly, irrational Sturm-isolated |
 | `:eval x=v y=w` | substitute values and evaluate |
-| `:simp`, `:expand`, `:tidy`, `:lat[ex]` | simplify / expand / structural tidy / LaTeX export |
+| `:simp`, `:expand`, `:tidy`, `:lat[ex]` | simplify (expands and collects) / distribute only, no collecting / structural tidy / LaTeX export |
 | `:tp`, `:ref`, `:rref` | transpose, echelon and reduced echelon forms |
 | `:det`, `:inv`, `:rank`, `:nullity` | determinant, inverse, rank and nullity |
+| `:orthq` | if the square matrix is orthogonal (`QᵀQ = I`), its inverse — the transpose |
 | `:eigen`, `:diag`, `:svd` | eigen-decomposition, diagonalisation `P·D·P⁻¹`, singular value decomposition `U·Σ·Vᵀ` |
 | `:lu`, `:qr` | LU and QR factorisations, printed as products |
 | `:linv`, `:rinv` | general left/right inverses with the free-parameter basis |
@@ -179,16 +180,27 @@ Matrices and vectors are written with comma-separated entries
 (`[[1, 2], [3, 4]]`, `[1, 2, 3]`), and a brace-set of vectors
 (`{[1, 2], [3, 4]}`) parses as the matrix whose rows are its elements — handy
 for storing and probing a basis. Integers are exact, decimals remember their
-decimal reading (`0.5` is `1/2`), and `pi`/`e` are the exact constants.
+decimal reading (`0.5` is `1/2`), and `pi`/`e`/`i` are the exact constants
+(`i` is the imaginary unit: symbolic over the real number types, and equal
+to `√(−1)` where complex values are carried).
 
 ## Features
 
 | Feature | Default | Effect |
 | --- | --- | --- |
 | `complex` | no | enables the exact `Complex` type; combined with `algebraic`, cyclotomic denominators factor over ℂ using roots of unity |
-| `algebraic` | no | exact real algebraic numbers: Sturm-sequence isolation of the real roots of any rational polynomial, so the integrator factors irreducible factors of any degree; implies `generic_const` |
-| `generic_const` | no | enables `generic_const_exprs` (nightly-only; off by default to keep stable compatibility) |
+| `algebraic` | no | exact real algebraic numbers: Sturm-sequence isolation of the real roots of any rational polynomial, so the integrator factors irreducible factors of any degree; compiles on stable Rust |
+| `generic_const` | no | enables `generic_const_exprs` (nightly-only) and with it the const-generic `Multiquadratic` field type |
 | `repl` | no | the `symr` REPL binary (optional `rustyline` line editor, kept invisible to dependents); implies `algebraic` and `complex` |
+
+One portability note: the const-generic `Multiquadratic` behind
+`generic_const` needs the unstable `generic_const_exprs`, and on current
+rustc it only compiles *inside* this crate — any target outside it (your
+binary or crate naming the type) fails with `E0284` until that feature
+stabilises. For exact radical arithmetic that compiles everywhere, use
+[`FieldElement`](crate::math::algebra::field::FieldElement), which expresses
+the same numbers on a sparse basis, is not feature-gated, and does not even
+require `algebraic`.
 
 The `repl` feature is deliberately wired through `dep:` + `required-features`,
 so a crate depending on `symrust` never compiles the line editor or the

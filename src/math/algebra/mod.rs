@@ -9,6 +9,9 @@
 //! ([`crate::math::structs::expr::node`]) and the shared integer helpers.
 
 pub(crate) mod factorization;
+/// Exact elements of a multiquadratic field: the public radical-arithmetic
+/// type and the fold the expression tree uses on closed radical trees.
+pub mod field;
 pub mod linear;
 pub(crate) mod matrix_steps;
 /// Polynomials over the rationals: the `Poly` coefficient container.
@@ -24,8 +27,16 @@ pub mod symbolic_linear;
 /// Arithmetic in a quadratic extension `Q(sqrt(k))`: the `Surd` coefficient type.
 pub mod surd;
 
-/// Exact real algebraic numbers and the general factoring fallback that uses
-/// them. Compiled only with the `algebraic` feature, so the default build
-/// carries none of it.
+/// Exact real algebraic numbers: Sturm isolation of the real roots of a
+/// rational polynomial, the exact `RealAlgebraic` they are carried by, and
+/// the real-root surface on `Poly`. Compiled only with the `algebraic`
+/// feature, and on stable Rust: none of it needs an unstable language
+/// feature.
+///
+/// The module also hosts `Multiquadratic`, the const-generic field element,
+/// compiled only when `generic_const` joins `algebraic` — its fixed-size
+/// `[Rat; 1 << N]` storage is itself a generic const expression. For
+/// portable exact radical arithmetic use `FieldElement`, which expresses
+/// the same numbers sparsely and carries no feature requirement.
 #[cfg(feature = "algebraic")]
 pub mod algebraic;

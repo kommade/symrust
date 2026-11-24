@@ -277,6 +277,31 @@ pub trait ExpressionScalar: NumCore + FloatBridge {
     fn e() -> Self {
         Self::from_real(Real::e())
     }
+
+    /// The imaginary unit `i`, with `i² = −1`.
+    ///
+    /// A *real* leaf type has no such value: no real number squares to a
+    /// negative, so the default is a quiet NaN — the leaf's honest "undefined
+    /// here" reading, the same signal a division by zero carries. A complex
+    /// leaf type overrides this with its true imaginary unit, which is what
+    /// makes `i` usable in [`Expr`](crate::math::structs::expr::Expr) trees
+    /// over ℂ: the token is a constant like any other, and the leaf decides
+    /// what it evaluates to.
+    fn imaginary_unit() -> Self {
+        Self::from_real(Real::nan())
+    }
+
+    /// Whether this type carries an honest imaginary unit.
+    ///
+    /// The gate for numeric folding: an `i` in a tree may only take its
+    /// value where the type answers yes (see
+    /// [`imaginary_unit`](Self::imaginary_unit) — a NaN is not a value, and
+    /// reading it as one would poison every fold built on top). A type whose
+    /// `imaginary_unit` is a real number overrides this to true; everything
+    /// real defaults to false, so `i` stays a symbolic name there.
+    fn has_imaginary_unit() -> bool {
+        false
+    }
 }
 
 /// A coefficient type for the exact linear algebra in

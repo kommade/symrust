@@ -159,6 +159,78 @@ fn singular_matrix_has_no_inverse_solution() {
     assert!(source.inverse_solution().is_none());
 }
 
+/// An orthogonal matrix's step-tracked inverse skips elimination entirely:
+/// the check reports `Q^T Q = I` and the answer is the transpose, entry for
+/// entry, in a two-step narrative.
+#[test]
+fn orthogonal_matrix_inverse_solution_is_its_transpose() {
+    let rotation = matrix(&[
+        &["1/sqrt(2)", "-1/sqrt(2)"],
+        &["1/sqrt(2)", "1/sqrt(2)"],
+    ]);
+    let solution = rotation
+        .inverse_solution()
+        .expect("orthogonal matrices are invertible");
+    assert_eq!(solution.problem_type(), "inverse of an orthogonal matrix");
+    let text = solution.to_string();
+    assert!(
+        text.contains("orthogonal") && text.contains("transpose"),
+        "the narrative should say why elimination was skipped: {text}"
+    );
+
+    // The recorded result is the transpose, exactly.
+    let recorded = matrix_of_result(&solution);
+    let expected = rotation.transpose();
+    for row in 0..2 {
+        for column in 0..2 {
+            assert_eq!(
+                recorded[row][column].to_string(),
+                expected[row][column].to_string(),
+                "entry {row},{column}: the shortcut's answer is not the transpose"
+            );
+        }
+    }
+
+    // A non-orthogonal matrix keeps the elimination narrative.
+    let ordinary = matrix(&[&["1", "2"], &["3", "4"]]);
+    let elimination = ordinary.inverse_solution().expect("invertible");
+    assert_eq!(
+        elimination.problem_type(),
+        "inverse by Gauss-Jordan elimination"
+    );
+}
+
+/// A Gauss-Jordan inverse over two independent radicals: with the fold in
+/// the picture, the step-tracked answer must equal the cofactor one entry
+/// for entry — a folding slip mid-elimination would show up here.
+#[test]
+fn inverse_steps_match_the_cofactor_inverse_over_radicals() {
+    let radical_matrix = |rows: &[&[&str]]| {
+        Expr::from_node(crate::math::structs::expr::node::Node::matrix(matrix(rows)))
+    };
+    let source = radical_matrix(&[
+        &["2/sqrt(5)", "0", "-1/sqrt(3)"],
+        &["1/sqrt(5)", "0", "2/sqrt(3)"],
+        &["0", "-1", "0"],
+    ]);
+    let solution = source.inverse_solution().expect("invertible");
+    let recorded = matrix_of_result(&solution);
+    let expected = source
+        .inv()
+        .expect("the cofactor path also has an inverse")
+        .as_matrix()
+        .expect("an inverse is a matrix");
+    for row in 0..3 {
+        for column in 0..3 {
+            assert_eq!(
+                recorded[row][column].to_string(),
+                expected[row][column].to_string(),
+                "entry {row},{column}: the steps and the direct inverse disagree"
+            );
+        }
+    }
+}
+
 #[test]
 fn non_square_matrices_are_rejected() {
     let source = matrix(&[&["1", "2", "3"], &["4", "5", "6"]]);

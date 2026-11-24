@@ -34,11 +34,11 @@
 
 pub use crate::create_expr;
 pub use crate::math::structs::expr::{
-    e, number, number_as, one, pi, symbol, symbol_as, x, zero, Symbol,
+    e, i, number, number_as, one, pi, symbol, symbol_as, x, zero, Symbol,
 };
 
 // The expression tree and its accessors.
-pub use crate::math::structs::expr::{Evaluated, Expr, ExprError};
+pub use crate::math::structs::expr::{Evaluated, Expr, ExprError, Orthogonality};
 pub use crate::math::structs::expr::node::Node;
 pub use crate::math::parse::lexer::{Const, Func};
 
@@ -50,6 +50,7 @@ pub use crate::math::parse::lexer::{Const, Func};
 // nightly-only).
 pub use crate::math::algebra::rational::Rat;
 pub use crate::math::algebra::surd::Surd;
+pub use crate::math::algebra::field::FieldElement;
 pub use crate::math::numeric::{Evaluable, Real};
 #[cfg(feature = "complex")]
 pub use crate::math::numeric::Complex;

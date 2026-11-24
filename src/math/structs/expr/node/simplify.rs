@@ -10,6 +10,7 @@
 use std::{cmp::Ordering, fmt::Display};
 
 use crate::{
+    math::algebra::rational::Rat,
     math::numeric::{FloatType, SymbolicLeaf},
     math::parse::lexer::{Op, Token},
 };
@@ -244,6 +245,68 @@ where
         if factors.len() < 2 {
             return None;
         }
+        // The numeric constants among the factors fold into one leaf before
+        // the power-component pairing runs: the constant-factor rule builds
+        // products like `k (m x)` whose constants are plain leaves (plus
+        // coefficients that refuse to evaluate, such as the imaginary unit
+        // over a real leaf, which keep their chain position). Without this,
+        // `d/dx (2 i x^2)` reads `2 i 2 x` — two leading numerals that every
+        // later pass leaves sitting beside each other.
+        //
+        // The fold multiplies in Rat and only over *neat* factors (an exact
+        // small rational): going through the float leaf would turn
+        // `1/2 · 1/3` into the dyadic artefact of 1/6, whose recovered
+        // fraction has a nine-digit denominator. Factors that are not neat
+        // keep their chain position and stay exact.
+        let mut first_neat: Option<usize> = None;
+        let mut neat_acc = Rat::ONE;
+        let mut folded_any = false;
+        let mut dropped = vec![false; factors.len()];
+        for index in 0..factors.len() {
+            // A factor mentioning a named constant stays out of the numeric
+            // fold: pi reads its float value here, and folding `2 pi` into
+            // 6.28… trades an exact tree for a decimal. The constant rides
+            // along in the chain instead.
+            if !Self::is_constant_node(&factors[index])
+                || factors[index].has_named_constant()
+            {
+                continue;
+            }
+            let Some(value) = factors[index].inner.borrow().evaluate() else {
+                continue;
+            };
+            // `from_leaf_simple` recovers only readable fractions (denominator
+            // ≤ 64): a Token::Rational(1/3) evaluates through a rounded dyadic
+            // whose exact recovery is a nine-digit artefact, and folding
+            // through it would bake that artefact into every neighbour.
+            let Some(rational) = Rat::from_leaf_simple(&value) else {
+                continue;
+            };
+            match first_neat {
+                None => {
+                    first_neat = Some(index);
+                    neat_acc = rational;
+                }
+                Some(_) => match neat_acc.mul(rational) {
+                    Some(product) => {
+                        neat_acc = product;
+                        dropped[index] = true;
+                        folded_any = true;
+                    }
+                    None => continue,
+                },
+            }
+        }
+        if folded_any {
+            factors[first_neat.expect("folded_any implies a first factor")] =
+                neat_acc.to_node();
+            factors = factors
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| !dropped[*index])
+                .map(|(_, node)| node.clone())
+                .collect();
+        }
         for i in 0..factors.len() {
             let left_factor = factors[i].clone();
             let left_comp = match Self::extract_pow_components(&left_factor, combine_fns) {
@@ -267,6 +330,9 @@ where
                 }
             }
         }
+        if folded_any {
+            return Some(Self::rebuild_product_from_factors(factors));
+        }
         None
     }
 
@@ -286,18 +352,26 @@ where
                     op,
                 );
                 let exponent_op = if *op == Op::Div { Op::Sub } else { Op::Add };
+                // Fold the exponent difference before building the power: the
+                // combined form of `a * (1/a)` is `a ^ (1 - 1)`, and a power
+                // over a difference that iszero must collapse now, not wait
+                // for a caller that may never re-simplify.
                 let new_exponent = Self::from_operation(
                     exponent_op,
                     left_comp.exponent.clone(),
                     right_comp.exponent.clone(),
-                );
+                )
+                .simplify(false, combine_fns);
+                let new_zero = new_exponent.inner.borrow().evaluate().is_some_and(|v| v.is_zero());
+                if new_zero {
+                    return Some(new_coeff);
+                }
                 let new_pow =
                     Self::from_operation(Op::Pow, left_comp.base.clone(), new_exponent);
-                return Some(Self::from_operation(
-                    Op::ImplicitMul,
-                    new_coeff,
-                    new_pow,
-                ));
+                return Some(
+                    Self::from_operation(Op::ImplicitMul, new_coeff, new_pow)
+                        .simplify(false, combine_fns),
+                );
             }
 
             if Self::nodes_equal(&left_comp.exponent, &right_comp.exponent) {

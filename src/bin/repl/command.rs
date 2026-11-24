@@ -55,7 +55,7 @@ pub enum Command {
     },
     /// Simplify without expanding.
     Simplify(Option<String>),
-    /// Expand, then simplify.
+    /// Distribute products and powers without collecting.
     Expand(Option<String>),
     /// Light structural cleanup.
     Tidy(Option<String>),
@@ -77,6 +77,9 @@ pub enum Command {
     Inverse(Option<String>),
     /// The inverse, printing the Gauss-Jordan steps.
     InverseSteps(Option<String>),
+    /// The orthogonality check `Qᵀ Q = I`: for an orthogonal matrix, the
+    /// inverse is the transpose, which is printed and made current.
+    OrthogonalMatrix(Option<String>),
     /// The rank of a matrix (prints a number, keeps the current matrix).
     Rank(Option<String>),
     /// The nullity of a matrix (prints a number, keeps the current matrix).
@@ -165,10 +168,10 @@ pub fn parse_line(line: &str) -> Result<Option<Command>, String> {
 /// Words the lexer owns, plus the session's automatic `ans` binding: a stored
 /// name must differ from all of these, or substitution would rewrite `sin(x)`'s
 /// `sin` into an expression or shadow the previous-answer register.
-pub const RESERVED: [&str; 22] = [
+pub const RESERVED: [&str; 23] = [
     "arcsin", "arccos", "arctan", "asin", "acos", "atan", "sqrt", "root",
     "sin", "si", "cos", "tan", "sec", "csc", "cot", "log", "ln", "erf",
-    "ei", "pi", "e", "ans",
+    "ei", "pi", "e", "i", "ans",
 ];
 
 /// Parse a command given *without* the leading colon — the shape a
@@ -195,7 +198,12 @@ fn split_name(rest: &str) -> (&str, &str) {
 
 fn parse_command(name: &str, args: &str) -> Result<Command, String> {
     match name {
-        "h" | "help" => Ok(Command::Help),
+        "h" | "help" => {
+            if !args.is_empty() {
+                return Err(":help takes no arguments (a definition is spelled without the colon: h = ...)".to_string());
+            }
+            Ok(Command::Help)
+        }
         "q" | "quit" | "exit" => Ok(Command::Quit),
         "d" => Ok(Command::Derivative(optional(args))),
         "ds" => Ok(Command::DerivativeSolution(optional(args))),
@@ -220,6 +228,7 @@ fn parse_command(name: &str, args: &str) -> Result<Command, String> {
         "dets" => Ok(Command::DeterminantSteps(optional(args))),
         "inv" => Ok(Command::Inverse(optional(args))),
         "invs" => Ok(Command::InverseSteps(optional(args))),
+        "orthq" => Ok(Command::OrthogonalMatrix(optional(args))),
         "rank" => Ok(Command::Rank(optional(args))),
         "nullity" => Ok(Command::Nullity(optional(args))),
         "eigen" | "eig" => Ok(Command::Eigen(optional(args))),
@@ -578,6 +587,11 @@ mod tests {
         assert_eq!(parse_line(":rref"), Ok(Some(Command::RowReduce(None))));
         assert_eq!(parse_line(":rrefs"), Ok(Some(Command::RowReduceSteps(None))));
         assert_eq!(parse_line(":invs"), Ok(Some(Command::InverseSteps(None))));
+        assert_eq!(parse_line(":orthq"), Ok(Some(Command::OrthogonalMatrix(None))));
+        assert_eq!(
+            parse_line(":orthq m"),
+            Ok(Some(Command::OrthogonalMatrix(Some("m".into()))))
+        );
         assert_eq!(parse_line(":tp"), Ok(Some(Command::Transpose(None))));
         assert_eq!(parse_line(":ref"), Ok(Some(Command::RowEchelon(None))));
         assert_eq!(parse_line(":eigens"), Ok(Some(Command::EigenSteps(None))));

@@ -114,7 +114,33 @@ fn evaluate_surd_exact_sqrt() {
     assert_eq!(value.to_f64(), 2.0);
 }
 
-#[cfg(feature = "algebraic")]
+/// The exact evaluation folds the numeric neighbourhoods around a named
+/// constant instead of refusing the whole tree: `2 + 2 + pi` is `4 + pi`,
+/// with the constant symbolic.
+#[test]
+fn evaluate_exact_folds_around_constants() {
+    let expr = create_expr!("2 + 2 + pi").unwrap();
+    match expr.evaluate_exact_with::<crate::math::numeric::Real>(&std::collections::HashMap::new())
+    {
+        crate::math::structs::expr::Evaluated::Expression(folded) => {
+            assert_eq!(folded.to_string(), "4 + pi");
+        }
+        other => panic!("expected a symbolic remainder, got {other:?}"),
+    }
+    // A fully closed surrounding folds to a value whose display carries the
+    // constant: `2 pi` stays exact.
+    let product = create_expr!("2 pi").unwrap();
+    match product
+        .evaluate_exact_with::<crate::math::numeric::Real>(&std::collections::HashMap::new())
+    {
+        crate::math::structs::expr::Evaluated::Expression(folded) => {
+            assert_eq!(folded.to_string(), "2 pi");
+        }
+        other => panic!("expected a symbolic remainder, got {other:?}"),
+    }
+}
+
+#[cfg(all(feature = "algebraic", feature = "generic_const"))]
 #[test]
 fn evaluate_multiquadratic_exact() {
     use crate::math::algebra::algebraic::Multiquadratic;

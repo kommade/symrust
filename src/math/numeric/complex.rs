@@ -202,6 +202,16 @@ impl ExpressionScalar for Complex {
         Self::from_real(Real::from_i64(value))
     }
 
+    /// The true imaginary unit: `Complex` is the leaf type `i` exists for.
+    fn imaginary_unit() -> Self {
+        Self::i()
+    }
+
+    /// ℂ carries a genuine `i`.
+    fn has_imaginary_unit() -> bool {
+        true
+    }
+
     fn pow(self, exponent: Self) -> Self {
         // z^w = exp(w · ln z)
         (self.ln() * exponent).exp()

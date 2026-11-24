@@ -68,6 +68,10 @@ where
     fn simplify(self, expand: bool, combine_fns: bool) -> Self;
     /// Pull out a product form where one reads better.
     fn factorise(self) -> Self;
+    /// Distribute every product of sums and every integer power of a sum
+    /// (or product), changing nothing else — no like-term collecting, no
+    /// reordering, no refactorising. The pure expansion pass.
+    fn expand(self) -> Self;
 }
 
 impl<T: FloatType + Display> NodeOperations<Self> for Node<T> {
@@ -561,6 +565,9 @@ impl<T: SymbolicLeaf> NodeFunctions<T> for Node<T> {
     fn factorise(self) -> Self {
         self.rewrite_factorise()
     }
+    fn expand(self) -> Self {
+        self.rewrite_expand()
+    }
 }
 
 /// The symbolic rewrite rules, as inherent methods of [`Node`].
@@ -793,7 +800,16 @@ impl<T: SymbolicLeaf> Node<T> {
                                             }
                                 return NodeInner::<T>::from_operation(Op::Div, left, right);
                             } else if op == Op::Pow {
-                                if right_borrow.is_zero() {
+                                // A zero exponent reduces the whole power to
+                                // one: a literal `0`, or any closed exponent
+                                // that *evaluates* to zero (`1 - 1`, a
+                                // difference two factors' combination left
+                                // unfolded at a lower level).
+                                if right_borrow.is_zero()
+                                    || right_borrow
+                                        .evaluate()
+                                        .is_some_and(|value| value.is_zero())
+                                {
                                     return NodeInner::<T>::one();
                                 } else if right_borrow.is_one() {
                                     return left;
@@ -830,6 +846,35 @@ impl<T: SymbolicLeaf> Node<T> {
                                         )
                                         .simplify(expand, combine_fns);
                                     }
+                                }
+                                // A closed base to a non-negative integer
+                                // exponent IS its value: `2 ^ 3` is `8`, and
+                                // the exponent subtree of a power chain (the
+                                // `2 ^ 2` inside `2 ^ (1 / 2 ^ 2)`) folds from
+                                // below first, so every closed tree reads by
+                                // its values rather than its construction.
+                                // Negative exponents stay written (`2 ^ -2`),
+                                // matching the reciprocal display.
+                                // A closed base to a non-negative integer
+                                // exponent IS its value: `2 ^ 3` is `8`, and
+                                // the exponent subtree of a power chain (the
+                                // `2 ^ 2` inside `2 ^ (1 / 2 ^ 2)`) folds from
+                                // below first, so every closed tree reads by
+                                // its values rather than its construction.
+                                // Negative exponents stay written (`2 ^ -2`),
+                                // matching the reciprocal display.
+                                if !left_borrow.has_indp
+                                    && !right_borrow.has_indp
+                                    && let Some(exponent) = right_borrow.evaluate()
+                                    && exponent.is_integer()
+                                    && !exponent.is_negative()
+                                    && let Some(base) = left_borrow.evaluate()
+                                {
+                                    return exact_constant_leaf(
+                                        <T as crate::math::numeric::ExpressionScalar>::pow(
+                                            base, exponent,
+                                        ),
+                                    );
                                 }
                             } else if op == Op::Add {
                                 if left_borrow.is_zero() {
@@ -1092,5 +1137,120 @@ impl<T: SymbolicLeaf> Node<T> {
         let ordered_terms: Vec<Node<T>> = new_terms.into_iter().map(|(_, term)| term).collect();
         let grouped = rebuild_sum(ordered_terms).simplify(false, true);
         NodeInner::<T>::from_operation(Op::ImplicitMul, factor, grouped).simplify(false, true)
+    }
+
+    /// Distribution without collection — the raw pass behind
+    /// [`Expr::expand`][crate::math::structs::expr::Expr::expand].
+    ///
+    /// Children expand first, so a sum nested inside one factor or one power
+    /// is visible to the parent: every product with a sum factor is
+    /// distributed, and a sum (or plain product) raised to a small
+    /// non-negative integer power is multiplied out. Nothing is collected,
+    /// reordered or refactorised afterwards — this is expansion only; the
+    /// one-flag simplify is the pass that then collects the terms.
+    fn rewrite_expand(self) -> Self {
+        // Expand the subtrees first: nested sums must be visible here.
+        let prepared = match &self.inner.borrow().value {
+            NodeValue::Operator(op_node) => match &op_node.token {
+                Token::Operator(op) => NodeInner::<T>::from_operation(
+                    op.clone(),
+                    op_node.left.clone().rewrite_expand(),
+                    op_node.right.clone().rewrite_expand(),
+                ),
+                // A function expands inside its argument.
+                Token::Function(func) => NodeInner::<T>::from_function(
+                    func.clone(),
+                    op_node.right.clone().rewrite_expand(),
+                ),
+                _ => return self,
+            },
+            _ => return self,
+        };
+        let (token, left, right) = {
+            let borrow = prepared.inner.borrow();
+            let NodeValue::Operator(op_node) = &borrow.value else {
+                return prepared;
+            };
+            (op_node.token.clone(), op_node.left.clone(), op_node.right.clone())
+        };
+        let Token::Operator(op) = &token else {
+            // A function whose argument expanded: keep the call shape.
+            return prepared;
+        };
+        match op {
+            Op::Pow => {
+                // A sum (or plain product) to a small non-negative integer
+                // exponent multiplies out; anything else keeps its power.
+                let Some(exponent) = right.inner.borrow().evaluate() else {
+                    return prepared;
+                };
+                let Some(n) = exponent.to_i64() else {
+                    return prepared;
+                };
+                if !(0..=8).contains(&n) {
+                    return prepared;
+                }
+                if n == 0 {
+                    return NodeInner::<T>::one();
+                }
+                let is_sum = matches!(
+                    &left.inner.borrow().value,
+                    NodeValue::Operator(op_node)
+                        if matches!(op_node.token, Token::Operator(Op::Add | Op::Sub))
+                );
+                let is_product = matches!(
+                    &left.inner.borrow().value,
+                    NodeValue::Operator(op_node)
+                        if matches!(op_node.token, Token::Operator(Op::Mul | Op::ImplicitMul))
+                );
+                if is_sum {
+                    let mut acc = left.clone();
+                    for _ in 1..n {
+                        acc = NodeInner::<T>::from_operation(Op::ImplicitMul, acc, left.clone());
+                    }
+                    acc.rewrite_expand()
+                } else if is_product {
+                    // `(a b) ^ n` is `a^n b^n` for integer exponents; each
+                    // factor's power recurses so a nested sum expands too.
+                    let (factor_a, factor_b) = {
+                        let borrow = left.inner.borrow();
+                        (borrow.get_left().unwrap(), borrow.get_right().unwrap())
+                    };
+                    let expanded_a = NodeInner::<T>::from_operation(
+                        Op::Pow,
+                        factor_a,
+                        right.clone(),
+                    )
+                    .rewrite_expand();
+                    let expanded_b = NodeInner::<T>::from_operation(
+                        Op::Pow,
+                        factor_b,
+                        right.clone(),
+                    )
+                    .rewrite_expand();
+                    NodeInner::<T>::from_operation(Op::ImplicitMul, expanded_a, expanded_b)
+                } else {
+                    prepared
+                }
+            }
+            Op::Mul | Op::ImplicitMul => {
+                let sum_on_left = matches!(
+                    &left.inner.borrow().value,
+                    NodeValue::Operator(op_node)
+                        if matches!(op_node.token, Token::Operator(Op::Add | Op::Sub))
+                );
+                let sum_on_right = matches!(
+                    &right.inner.borrow().value,
+                    NodeValue::Operator(op_node)
+                        if matches!(op_node.token, Token::Operator(Op::Add | Op::Sub))
+                );
+                if sum_on_left || sum_on_right {
+                    left.distribute_expr(right, MulType::OpMul).rewrite_expand()
+                } else {
+                    prepared
+                }
+            }
+            _ => prepared,
+        }
     }
 }

@@ -3,8 +3,9 @@
 use std::fmt::Display;
 
 use crate::{
+    math::algebra::rational::Rat,
     math::numeric::{FloatType, SymbolicLeaf},
-    math::parse::lexer::{Func, Op, Token},
+    math::parse::lexer::{Const, Func, Op, Token},
 };
 
 use super::{Node, NodeInner, NodeValue};
@@ -222,12 +223,39 @@ impl<T: SymbolicLeaf> NodeInner<T> {
 
     /// If `exponent` is a fraction `b / c` with `c` a positive integer, return
     /// `(base, "c", Some(b))` (or `None` for `b` when `b == 1`) so that
-    /// `base ^ (b/c)` can be displayed as the root `rt_c(base ^ b)`.
+    /// `base ^ (b/c)` can be displayed as the root `root_c(base ^ b)`.
+    ///
+    /// The exponent reaches here in two shapes: a `b / c` division tree, what
+    /// expression builders and the simplifier generate, and a single
+    /// [`Token::Rational`] leaf, what the parser folds written `1 / 2` or
+    /// `0.5` literals into. The leaf display omits brackets (`1 / 2` carries
+    /// spaces), so without this branch `2 ^ 0.5` prints `2 ^ 1 / 2` — which
+    /// lexes back as `(2 ^ 1) / 2`. The stored value is unaffected, but the
+    /// round trip through the text is not.
     pub(crate) fn root_power_parts(
         base: &Node<T>,
         exponent: &Node<T>,
     ) -> Option<(Node<T>, String, Option<Node<T>>)> {
         let borrow = exponent.inner.borrow();
+        // A canonical rational is in lowest terms with a positive
+        // denominator, so the leaf needs only the guards the tree branch
+        // gets from its `evaluate` calls: skip whole numbers (denominator
+        // `1`), whose display is the plain power, and the zero numerator
+        // (always stored `/ 1`).
+        if let NodeValue::Operand(Token::Rational(value)) = &borrow.value {
+            let (num, den) = value.parts();
+            if den <= 1 || num == 0 {
+                return None;
+            }
+            // `root_c(base)` when the numerator is `1`, else a power leaf an
+            // exact integer node so the rendering reads like the tree form.
+            let power = if num == 1 {
+                None
+            } else {
+                Some(Rat::integer_node(num))
+            };
+            return Some((base.clone(), den.to_string(), power));
+        }
         let NodeValue::Operator(op_node) = &borrow.value else {
             return None;
         };
@@ -288,6 +316,18 @@ impl<T: SymbolicLeaf> NodeInner<T> {
         let left_borrow = left.inner.borrow();
         let right_borrow = right.inner.borrow();
         left_borrow.eq(right_borrow)
+    }
+}
+
+impl<T: SymbolicLeaf> Node<T> {
+    /// `true` when the tree mentions a named constant such as `π` or `e`.
+    ///
+    /// A caller about to evaluate or numerically fold the tree can use this
+    /// to keep the constant symbolic: `pi / 8` is exact where its decimal
+    /// reading is only an approximation.
+    #[must_use]
+    pub fn has_named_constant(&self) -> bool {
+        NodeInner::contains_named_constant(self)
     }
 }
 
@@ -387,6 +427,15 @@ impl<T: SymbolicLeaf> NodeInner<T> {
                 Token::Number(num) => Some(T::from_i64(*num)),
                 Token::Float(num) => Some(num.clone()),
                 Token::Rational(value) => Some(value.to_leaf()),
+                // `i` folds only where the leaf type carries an honest
+                // imaginary unit: over a real leaf its `imaginary_unit` is
+                // NaN, and folding that through would poison every whole-tree
+                // fold built on top of it, turning closed trees into displays
+                // like `sqrt(NaN) / 2`. There it stays a symbolic name.
+                Token::Constant(Const::I) if T::has_imaginary_unit() => {
+                    Some(T::imaginary_unit())
+                }
+                Token::Constant(Const::I) => None,
                 Token::Constant(k) => Some(k.get_value()),
                 // Narrative tokens (`∫ f dx`, `d f/dx`) never evaluate, and
                 // neither do matrix or vector values: `evaluate` reads a

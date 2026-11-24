@@ -35,11 +35,19 @@ pub(super) fn of<L>(func: &Func<L>, argument: &Node<L>) -> Option<Real>
 where
     L: FloatType + Display,
 {
+    // Trigonometric closed forms need a π IN the argument — the coefficient
+    // walk below also returns bare coefficients (that is how `2 pi`
+    // composes), but a coefficient alone is an ordinary real number: folding
+    // `sin(1/2)` into `sin(pi/2)` would silently evaluate
+    // `:eval x=1/2 sin(x)` as 1 instead of the true 0.479…, and every clean
+    // rational point after it.
+    let on_pi = contains_pi(argument);
     match func {
-        // cos(a) = sin(pi/2 - a), i.e. the sine of `6 - twelfths`.
-        Func::Sin => pi_multiple(argument).map(sin_twelfths),
-        Func::Cos => pi_multiple(argument).map(|twelfths| sin_twelfths(6 - twelfths)),
-        Func::Tan => pi_multiple(argument).and_then(|twelfths| {
+        Func::Sin if on_pi => pi_multiple(argument).map(sin_twelfths),
+        Func::Cos if on_pi => {
+            pi_multiple(argument).map(|twelfths| sin_twelfths(6 - twelfths))
+        }
+        Func::Tan if on_pi => pi_multiple(argument).and_then(|twelfths| {
             let cosine = sin_twelfths(6 - twelfths);
             if cosine.is_zero() {
                 // tan has a pole there; leave the fold to the numeric path.
@@ -50,6 +58,40 @@ where
         }),
         Func::Ln => ln_argument(argument),
         _ => None,
+    }
+}
+
+/// Whether the operand tree mentions the π constant at all (through the same
+/// multiplicative/divisive chains the coefficient extraction walks; a sum or
+/// another operator refuses both walks alike).
+///
+/// Structurally self-contained — the leaf-type bound is `FloatType + Display`
+/// (the parser's operand discipline), so no `is_zero` trait helper is reused
+/// here: the negation form's `0` is matched on the leaf directly.
+fn contains_pi<L: FloatType + Display>(node: &Node<L>) -> bool {
+    let borrowed = node.inner.borrow();
+    match &borrowed.value {
+        NodeValue::Operand(token) => matches!(token, Token::Constant(Const::Pi)),
+        NodeValue::Operator(op_node) => match &op_node.token {
+            Token::Operator(crate::math::parse::lexer::Op::Mul)
+            | Token::Operator(crate::math::parse::lexer::Op::ImplicitMul)
+            | Token::Operator(crate::math::parse::lexer::Op::Div) => {
+                contains_pi(&op_node.left) || contains_pi(&op_node.right)
+            }
+            Token::Operator(crate::math::parse::lexer::Op::Sub) => {
+                // The negation form `0 - x`: the `0` is matched on the leaf
+                // (integer zero or a zero float/rational).
+                let is_zero = match &op_node.left.inner.borrow().value {
+                    NodeValue::Operand(Token::Number(num)) => *num == 0,
+                    NodeValue::Operand(Token::Float(value)) => value.is_zero(),
+                    NodeValue::Operand(Token::Rational(value)) => value.is_zero(),
+                    _ => false,
+                };
+                is_zero && contains_pi(&op_node.right)
+            }
+            _ => false,
+        },
+        NodeValue::Empty => false,
     }
 }
 

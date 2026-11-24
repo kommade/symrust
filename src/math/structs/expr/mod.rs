@@ -31,9 +31,11 @@ mod matrix;
 use node::{MulType, Node, NodeInner, NodeFunctions, NodeOperations, NodeValue};
 pub use error::ExprError;
 pub use evaluate::{Evaluable, Evaluated};
+pub use matrix::Orthogonality;
 pub use limit::Limit;
 pub use build::{
-    e, float, float_as, function, number, number_as, one, pi, symbol, symbol_as, x, zero, Symbol,
+    e, float, float_as, function, i, number, number_as, one, pi, symbol,
+    symbol_as, x, zero, Symbol,
 };
 
 mod closed_form;
@@ -374,6 +376,16 @@ impl<T: FloatType + Display> Expr<T> {
         Self::constant(Const::E)
     }
 
+    /// Create the expression `i`, the imaginary unit.
+    ///
+    /// Over a complex leaf this is ℂ's `i`; over the real default leaf it is
+    /// a symbolic constant whose evaluation is undefined there (see
+    /// [`ExpressionScalar::imaginary_unit`]).
+    #[must_use]
+    pub fn i() -> Self {
+        Self::constant(Const::I)
+    }
+
     /// Create a function application.
     #[must_use]
     pub fn function(function: Func<T>, argument: Self) -> Self {
@@ -447,6 +459,17 @@ impl<T: FloatType + Display> Expr<T> {
 }
 
 impl<T: SymbolicLeaf> Expr<T> {
+    /// Whether the tree mentions a named constant such as `π` or `e`.
+    ///
+    /// The counterpart of [`has_independent`](Self::has_independent) for
+    /// exactness: a constant is no variable, so numeric folds are defined on
+    /// it — but they would replace `pi / 2` with a decimal, so a fold that
+    /// promises exactness looks for this first.
+    #[must_use]
+    pub fn has_named_constant(&self) -> bool {
+        self.tree.has_named_constant()
+    }
+
     /// Whether the expression contains a formal root sum (`Σ_{Z: p(Z)=0} …`).
     ///
     /// A root sum is the exact antiderivative form used when an irreducible
@@ -489,6 +512,32 @@ where
         Self { tree }
     }
 
+    /// Expand the expression: every product of sums is distributed and every
+    /// small integer power of a sum (or product) is multiplied out, and
+    /// nothing else happens.
+    ///
+    /// This is the raw distribution half of [`simplify`](Self::simplify)'s
+    /// expanding form — no like-term collection, no reordering, no
+    /// refactorising afterwards — for when the untouched term shapes are
+    /// wanted.
+    ///
+    /// # Examples
+    /// ```
+    /// use symrust::{create_expr, math::structs::expr::Expr};
+    /// let expr = create_expr!("(x + 1) (x + 2)").unwrap();
+    /// // Products repeat as written: no x × x → x² merge, no reordering.
+    /// assert_eq!(expr.expand().to_string(), "x x + x 2 + x + 2");
+    /// // `simplify` continues where expand stops: it collects the squares.
+    /// let expr = create_expr!("(x + 1) (x + 2)").unwrap();
+    /// assert_eq!(expr.expand().simplify(true).to_string(), "x ^ 2 + 3 x + 2");
+    /// ```
+    #[must_use]
+    pub fn expand(self) -> Self {
+        Self {
+            tree: self.tree.expand(),
+        }
+    }
+
     /// Simplify, then fold a fully numeric result to its most readable exact
     /// form.
     ///
@@ -527,10 +576,18 @@ where
         // Gram-Schmidt elimination produces — with one readable surd, and the
         // field arithmetic of `Surd` is exact. The `contains_function` flag
         // skips the walk for trees with no function at all.
-        if simplified.tree.inner.borrow().has_func
-            && let Some(surd) = simplified.as_surd()
-        {
-            return Self::from_node(surd.to_node());
+        if simplified.tree.inner.borrow().has_func {
+            if let Some(surd) = simplified.as_surd() {
+                return Self::from_node(surd.to_node());
+            }
+            // One quadratic field misses the mixed-radical trees — `1 / sqrt(5)`
+            // summed beside `1 / sqrt(3)` — that a Gauss-Jordan inverse of a
+            // radical matrix produces. The multiquadratic fold reads the whole
+            // family of independent radicands at once, so those entries fold
+            // to one readable element too. Same exactness, wider field.
+            if let Some(nodes) = simplified.as_radical_fold_node() {
+                return Self::from_node(nodes);
+            }
         }
         let Some(value) = simplified.tree().inner.borrow().evaluate() else {
             return simplified;
@@ -605,6 +662,28 @@ where
             },
             _ => None,
         }
+    }
+    /// The expression as an exact element of a multiquadratic field
+    /// `Q(sqrt(k1), …, sqrt(k8))`, when it is purely rational arithmetic over
+    /// square roots of rationals — rendered back as expression nodes.
+    ///
+    /// The multi-radicand generalisation of [`Expr::as_surd`]: where that
+    /// reads one quadratic field, this collects every independent radicand
+    /// the expression pairs up, so a quotient chain over `sqrt(5)` *and*
+    /// `sqrt(3)` — the kind a Gauss-Jordan inverse of a radical matrix
+    /// produces — folds to one readable element instead of staying a tree.
+    /// The arithmetic is exact. `None` when the expression leaves the field:
+    /// another function (`ln`, `sin`), a fractional power, a basis grown past
+    /// the monomial mask's word size, or any variable (checked by the caller).
+    fn as_radical_fold_node(&self) -> Option<Node<T>> {
+        crate::math::algebra::field::FieldElement::from_tree(&self.tree).map(|value| value.to_node())
+    }
+
+    /// The numeric value of [`as_radical_fold_node`](Self::as_radical_fold_node)'s
+    /// fold, when the expression has one. Cheaper than rendering: the read
+    /// skips building the expression tree.
+    pub(crate) fn radical_fold_value(&self) -> Option<f64> {
+        crate::math::algebra::field::FieldElement::from_tree(&self.tree).map(|value| value.to_f64())
     }
 }
 

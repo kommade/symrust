@@ -15,7 +15,7 @@ use symrust::math::calculus::antiderivative::Antiderivative;
 use symrust::math::calculus::derivative::Derivative;
 use symrust::math::numeric::Real;
 use symrust::math::structs::expr::node::Node;
-use symrust::math::structs::expr::{Evaluated, Expr};
+use symrust::math::structs::expr::{Evaluated, Expr, Orthogonality};
 use symrust::math::structs::solution::Solution;
 
 use super::command::{self, Command, RESERVED};
@@ -273,8 +273,8 @@ impl App {
                     "lim_({var} -> {toward}) = {limit}"
                 )))
             }
-            Command::Simplify(argument) => self.rewrite(argument, false),
-            Command::Expand(argument) => self.rewrite(argument, true),
+            Command::Simplify(argument) => self.rewrite(argument, true),
+            Command::Expand(argument) => self.expand_only(argument),
             Command::Tidy(argument) => {
                 let expr = self.argument(argument)?;
                 let tidied = expr.tidy();
@@ -312,8 +312,12 @@ impl App {
             Command::Inverse(argument) => {
                 self.transform(argument, |expr| expr.inv().map_err(sym_err))
             }
-            Command::InverseSteps(argument) => self
-                .transform_steps(argument, |expr| expr.inverse_solution().map_err(sym_err)),
+            Command::InverseSteps(argument) => self.transform_steps(argument, |expr| {
+                expr.inverse_solution()
+                    .map_err(sym_err)
+                    .map(|solution| solution.map_result(readable))
+            }),
+            Command::OrthogonalMatrix(argument) => self.orthogonal_matrix(argument),
             Command::Rank(argument) => {
                 let expr = self.argument(argument)?;
                 let rank = expr.rank().map_err(sym_err)?;
@@ -503,6 +507,47 @@ impl App {
         Ok(Outcome::Remark(output))
     }
 
+    /// The orthogonality check `:orthq` runs.
+    ///
+    /// An orthogonal matrix carries its own inverse — the transpose — so a
+    /// pass prints `Qᵀ` and makes it current. A refusal names the `Qᵀ Q`
+    /// entry that broke the identity, or says the check could not decide.
+    fn orthogonal_matrix(&mut self, argument: Option<String>) -> Result<Outcome, String> {
+        let expr = self.argument(argument)?;
+        match expr.orthogonality_check().map_err(sym_err)? {
+            Orthogonality::Orthogonal => {
+                let transposed = readable(expr.transpose().map_err(sym_err)?);
+                let mut output =
+                    String::from("orthogonal: Q^T Q = I, so the inverse is the transpose");
+                output.push('\n');
+                output.push_str(&labelled_value("Q^T", &transposed));
+                self.current = Some(transposed);
+                Ok(Outcome::Remark(output))
+            }
+            Orthogonality::NotOrthogonal {
+                row,
+                column,
+                entry,
+            } => Ok(Outcome::Remark(format!(
+                "not orthogonal: entry ({}, {}) of Q^T Q is {}, not the {} the identity has there",
+                row + 1,
+                column + 1,
+                readable(entry),
+                if row == column { "1" } else { "0" }
+            ))),
+            Orthogonality::Undecided {
+                row,
+                column,
+                entry,
+            } => Ok(Outcome::Remark(format!(
+                "cannot confirm orthogonality: entry ({}, {}) of Q^T Q, {}, stays symbolic",
+                row + 1,
+                column + 1,
+                readable(entry),
+            ))),
+        }
+    }
+
     /// The general left or right inverse: a minimum-norm particular inverse
     /// plus one basis matrix per free parameter, which together span every
     /// inverse there is. The particular inverse becomes current.
@@ -535,12 +580,23 @@ impl App {
         Ok(Outcome::Remark(output))
     }
 
-    /// Apply [`Expr::simplify`] with the given expand flag.
+    /// Expand and simplify: [`Expr::simplify`] with expansion on, so like
+    /// terms are collected and the factored form is kept when it reads well.
     fn rewrite(&mut self, argument: Option<String>, expand: bool) -> Result<Outcome, String> {
         let expr = self.argument(argument)?;
         let rewritten = expr.simplify(expand);
         let output = format!("{rewritten}");
         self.current = Some(rewritten);
+        Ok(Outcome::Value(output))
+    }
+
+    /// Pure distribution, [`Expr::expand`]: products of sums and integer
+    /// powers multiply out; nothing is collected afterwards.
+    fn expand_only(&mut self, argument: Option<String>) -> Result<Outcome, String> {
+        let expr = self.argument(argument)?;
+        let expanded = expr.expand();
+        let output = format!("{expanded}");
+        self.current = Some(expanded);
         Ok(Outcome::Value(output))
     }
 
@@ -597,7 +653,24 @@ impl App {
                     .graft_number_leaves(PLACEHOLDER_BASE, &replacements),
             )
         };
-        spliced.fold_value_operators().map_err(sym_err)
+        spliced
+            .fold_value_operators()
+            .map_err(sym_err)
+            .map(|expr| {
+                // Numeric input reads as its value: `2 + 2` is `4`, and a
+                // definition stores the folded tree. A tree mentioning a
+                // named constant (`pi`, `e`, or now `i`) is *not* skipped
+                // wholesale — the exact evaluation folds the numeric
+                // neighbourhoods around the constant and keeps the constant
+                // symbolic — so `2 + 2 + pi` is `4 + pi`, not an unfree tree.
+                if !expr.has_named_constant() {
+                    return expr.tidy();
+                }
+                match expr.evaluate_exact_with::<Real>(&HashMap::new()) {
+                    Evaluated::Expression(folded) => folded,
+                    Evaluated::Value(value) => Expr::from_node(Node::float(value)),
+                }
+            })
     }
 
     /// Execute a command spelled inline — an argument like `:d :simp 2x^2`,
@@ -943,8 +1016,8 @@ itself be a command (`:det :simp m`), nested up to 8 deep.
                              expression     e.g. :eval x=pi/2 cos(x)
   :lim x=a [<expr>]          limit toward a number, pi, or inf/-inf
                              (also `:lim x a`, `:lim x->a`)
-  :simp [<expr>]             simplify without expanding
-  :expand [<expr>]           expand, then simplify
+  :simp [<expr>]             expand, collect and simplify
+  :expand [<expr>]           distribute products and powers, no collecting
   :tidy [<expr>]             light structural cleanup
   :lat[ex] [<expr>]          render as LaTeX
   :roots [<expr>]            real roots of a polynomial in x: rational roots
@@ -972,6 +1045,7 @@ answer:
   :ref / :rref / :rrefs      echelon form / reduced echelon form (steps)
   :det / :dets [<M>]         determinant (steps)
   :inv / :invs [<M>]         inverse (steps)
+  :orthq [<M>]               if Q is orthogonal (Q^T Q = I), its inverse Q^T
   :rank / :nullity [<M>]     rank and nullity (do not change current)
   :eigen / :eigens [<M>]     eigenvalues and eigenvectors, a basis per
                              eigenspace (steps). A non-diagonalisable
